@@ -1,0 +1,14 @@
+assay,assay_sample_id,primary_sample_id,batch_id,condition
+transcriptomics,rna_m01,m01,batch_1,case
+transcriptomics,rna_m02,m02,batch_1,control
+transcriptomics,rna_m03,m03,batch_2,case
+transcriptomics,rna_m04,m04,batch_2,control
+proteomics,prot_m01,m01,batch_1,case
+proteomics,prot_m02,m02,batch_1,control
+proteomics,prot_m03,m03,batch_2,case
+proteomics,prot_m04,m04,batch_2,control
+metabolomics,met_m01,m01,batch_1,case
+metabolomics,met_m02,m02,batch_1,control
+metabolomics,met_m03,m03,batch_2,case
+metabolomics,met_m04,m04,batch_2,control
+

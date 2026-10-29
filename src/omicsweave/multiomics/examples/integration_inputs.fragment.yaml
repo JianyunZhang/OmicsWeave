@@ -1,0 +1,46 @@
+# 将本片段合并到单实验 multiomics config.yaml 顶层。
+# MFA/转录组先由各自上游 integration 生成 protocol 级结果；
+# 蛋白质组/代谢组可直接给出各批次独立差异结果目录。
+estimand:
+  id: mouse_liver_case_vs_control_14w
+  species: Mus musculus
+  case: case
+  control: control
+  intervention_time: 14 weeks
+  tracer: U-13C glucose
+  mfa_network: central_carbon_v1
+  primary_endpoint: liver metabolic response
+  platforms:
+    mfa: LC-MS MID + INCA
+    transcriptomics: bulk RNA-seq
+    proteomics: DIA-MS library-v1
+    metabolomics: LC-MS platform-v1
+
+integration:
+  inputs:
+    mfa:
+      mode: integrated
+      protocol_id: u-13c_glucose
+    transcriptomics:
+      mode: integrated
+      protocol_id: no_isotope_labeled
+    proteomics:
+      mode: integrated
+      protocol_id: dia_v1
+      min_batches: 2
+      batches:
+        - batch_id: protein_batch_1
+          results_dir: analysis_results/example_experiment/proteomics_batch_1
+        - batch_id: protein_batch_2
+          results_dir: analysis_results/example_experiment/proteomics_batch_2
+    metabolomics:
+      mode: integrated
+      protocol_id: lc_ms_v1
+      min_batches: 2
+      feature_column: compound
+      batches:
+        - batch_id: metabolite_batch_1
+          results_dir: analysis_results/example_experiment/metabolomics_batch_1
+        - batch_id: metabolite_batch_2
+          results_dir: analysis_results/example_experiment/metabolomics_batch_2
+

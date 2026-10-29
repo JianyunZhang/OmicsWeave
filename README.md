@@ -1,2 +1,107 @@
-# omicsweave
+# OmicsWeave
 OmicsWeave — A Modular Python Toolkit for Multi-Omics Data Analysis and Integration
+
+> 状态：**0.1.0.dev0，开发中**。接口尚未稳定，暂未发布到 PyPI。
+
+OmicsWeave 提供 MFA（13C 代谢通量分析）、Bulk RNA-seq、代谢组学、蛋白质组学的下游统计与可视化，
+以及以 MFA 通量为核心的多组学证据整合。各模块说明见 [src/omicsweave/README.md](src/omicsweave/README.md)，
+架构规划见 [docs/omicsweave_arch_design.md](docs/omicsweave_arch_design.md)。
+
+| 模块 | 包路径 | extras |
+|---|---|---|
+| MFA | `omicsweave.mfa` | `mfa` |
+| 转录组学 | `omicsweave.transcriptomics` | `transcriptomics` |
+| 代谢组学 | `omicsweave.metabolomics` | `metabolomics` |
+| 蛋白质组学 | `omicsweave.proteomics` | `proteomics` |
+| 多组学整合 | `omicsweave.multiomics` | `integration` |
+| 公共工具（ID 映射、统计、项目目录） | `omicsweave.common` | — |
+
+## 安装
+
+需要 Python ≥ 3.10。在本仓库根目录执行（`-e` 为可编辑安装，修改代码后无需重装）：
+
+```bash
+pip install -e ".[all]"
+```
+
+只需要部分模块时，按需选择 extras，例如：
+
+```bash
+pip install -e ".[mfa,integration]"
+```
+
+FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外部程序不随包分发，
+需自行安装，并在实验配置中填写其路径。
+
+## 项目目录
+
+工具包与实验数据分开存放。实验配置、原始数据和分析结果放在**实验项目目录**中：
+
+```text
+<项目目录>/
+├── experiments/<experiment_id>/...        # 各组学配置与输入数据
+└── analysis_results/<experiment_id>/...   # 分析输出
+```
+
+配置里的相对路径都相对于项目目录解析。项目目录按以下顺序确定：
+
+1. 命令行 `omicsweave --project-dir <目录> ...`
+2. 环境变量 `OMICSWEAVE_PROJECT_DIR`
+3. 从当前工作目录向上查找第一个包含 `experiments/` 的目录
+4. 当前工作目录
+
+## 使用
+
+```bash
+omicsweave --help
+omicsweave mfa run --experiment <experiment_id>
+omicsweave --project-dir D:/lab_project integration run --experiment <experiment_id>
+omicsweave mfa run --help
+```
+
+命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
+可用的模块与动作：
+
+| 模块 | 动作 |
+|---|---|
+| `mfa` | `run`、`plot`、`report` |
+| `transcriptomics` | `run`、`plot`、`report` |
+| `metabolomics` | `run` |
+| `proteomics` | `run`、`plot`、`report` |
+| `integration` | `run`、`harmonize`、`project`、`cross-tissue` |
+
+未列入命令行的脚本可用 `python -m` 运行，例如 `python -m omicsweave.transcriptomics.run_gsea --experiment <id>`。
+
+在 Python 中直接调用：
+
+```python
+from omicsweave.mfa.mfa_experiment_config import load_mfa_config
+from omicsweave.mfa.run_mfa_analysis import run_from_mfa_config
+
+run_from_mfa_config(load_mfa_config(experiment_id="<experiment_id>"))
+```
+
+## 开发
+
+```bash
+pip install -e ".[all,dev]"
+python -m pytest
+```
+
+少数测试需要真实实验数据，未找到时自动跳过。把课题数据副本放到本地工作区 `local/projects/<课题名>/`（不提交，见 [local/README.md](local/README.md)），
+再运行 `python -m pytest --project-dir local/projects/<课题名>` 即可运行它们；也可以设置环境变量 `OMICSWEAVE_PROJECT_DIR`。
+CI（`.github/workflows/ci.yml`）在 Linux 与 Windows、Python 3.10 与 3.12 上运行全部测试，并检查仅安装基础依赖时的导入。
+
+```text
+OmicsWeave/
+├── pyproject.toml          # 包配置、依赖与 extras
+├── src/omicsweave/         # 源代码
+├── tests/<模块>/           # 测试
+├── docs/                   # 架构与方法文档
+├── local/                  # 本地课题工作区：课题数据副本与课题专用脚本（不提交）
+└── .github/workflows/      # CI
+```
+
+## 许可证
+
+[BSD 3-Clause License](LICENSE)，Copyright (c) 2026, The OmicsWeave Developers。

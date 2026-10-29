@@ -1,0 +1,49 @@
+project_id: comparable_mouse_diet_replication
+output_dir: ../../../analysis_results/project_multiomics/comparable_mouse_diet_replication
+
+meta_analysis:
+  min_experiments: 2
+  fdr_threshold: 0.05
+  max_i_squared: 75
+  require_direction_consistency: true
+  missing_uncertainty_policy: exclude
+
+experiments:
+  - experiment_id: experiment_a
+    results_dir: ../../../analysis_results/experiment_a/multiomics_results
+    comparison_map:
+      case_vs_control: case_vs_control
+    estimand:
+      id: mouse_liver_case_vs_control_14w
+      species: Mus musculus
+      case: case
+      control: control
+      intervention_time: 14 weeks
+      tracer: U-13C glucose
+      mfa_network: central_carbon_v1
+      primary_endpoint: liver metabolic response
+      platforms:
+        mfa: LC-MS MID + INCA
+        transcriptomics: bulk RNA-seq
+        proteomics: DIA-MS library-v1
+        metabolomics: LC-MS platform-v1
+
+  - experiment_id: experiment_b
+    results_dir: ../../../analysis_results/experiment_b/multiomics_results
+    comparison_map:
+      treated_vs_vehicle: case_vs_control
+    estimand:
+      id: mouse_liver_case_vs_control_14w
+      species: Mus musculus
+      case: case
+      control: control
+      intervention_time: 14 weeks
+      tracer: U-13C glucose
+      mfa_network: central_carbon_v1
+      primary_endpoint: liver metabolic response
+      platforms:
+        mfa: LC-MS MID + INCA
+        transcriptomics: bulk RNA-seq
+        proteomics: DIA-MS library-v1
+        metabolomics: LC-MS platform-v1
+

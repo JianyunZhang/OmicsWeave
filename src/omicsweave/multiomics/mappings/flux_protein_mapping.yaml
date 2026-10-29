@@ -1,0 +1,1088 @@
+HEX_c:
+  direct_enzymes:
+  - Gck
+  - Hk1
+  - Hk2
+  - Hk3
+  - Hkdc1
+  upstream_regulators:
+  - Gckr
+  - Slc2a2
+  - Slc2a4
+  downstream_enzymes:
+  - Gpi
+  - Gpi1
+  transporters:
+  - Slc2a1
+  - Slc2a2
+  - Slc2a3
+  - Slc2a4
+  - Slc2a8
+  cofactors: []
+  description: Hexokinase / Glucokinase - 葡萄糖磷酸化
+PGI_c:
+  direct_enzymes:
+  - Gpi
+  - Gpi1
+  upstream_regulators: []
+  downstream_enzymes:
+  - Pfkp
+  - Pfkl
+  - Pfkm
+  transporters: []
+  cofactors: []
+  description: Phosphoglucose Isomerase - 葡萄糖-6-磷酸异构酶
+PFK_c:
+  direct_enzymes:
+  - Pfkp
+  - Pfkl
+  - Pfkm
+  upstream_regulators:
+  - Pfkfb1
+  - Pfkfb2
+  - Pfkfb3
+  - Pfkfb4
+  downstream_enzymes:
+  - Aldoa
+  - Aldob
+  - Aldoc
+  transporters: []
+  cofactors: []
+  description: Phosphofructokinase - 磷酸果糖激酶 (糖酵解关键调控点)
+FBA_c:
+  direct_enzymes:
+  - Aldoa
+  - Aldob
+  - Aldoc
+  upstream_regulators: []
+  downstream_enzymes:
+  - Tpi1
+  transporters: []
+  cofactors: []
+  description: Fructose Bisphosphate Aldolase - 醛缩酶
+TPI_c:
+  direct_enzymes:
+  - Tpi1
+  upstream_regulators: []
+  downstream_enzymes:
+  - Gapdh
+  - Gapdhs
+  transporters: []
+  cofactors: []
+  description: Triose Phosphate Isomerase - 磷酸丙糖异构酶
+GAPD_c:
+  direct_enzymes:
+  - Gapdh
+  - Gapdhs
+  upstream_regulators: []
+  downstream_enzymes:
+  - Pgk1
+  - Pgk2
+  transporters: []
+  cofactors:
+  - Ndufs1
+  - Ndufv1
+  description: Glyceraldehyde-3-Phosphate Dehydrogenase - 甘油醛-3-磷酸脱氢酶
+PGK_c:
+  direct_enzymes:
+  - Pgk1
+  - Pgk2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Pgam1
+  - Pgam2
+  transporters: []
+  cofactors: []
+  description: Phosphoglycerate Kinase - 磷酸甘油酸激酶
+PGM_c:
+  direct_enzymes:
+  - Pgam1
+  - Pgam2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Eno1
+  - Eno2
+  - Eno3
+  transporters: []
+  cofactors: []
+  description: Phosphoglycerate Mutase - 磷酸甘油酸变位酶
+ENO_c:
+  direct_enzymes:
+  - Eno1
+  - Eno2
+  - Eno3
+  upstream_regulators: []
+  downstream_enzymes:
+  - Pkm
+  - Pklr
+  transporters: []
+  cofactors: []
+  description: Enolase - 烯醇化酶
+PYK_c:
+  direct_enzymes:
+  - Pkm
+  - Pklr
+  upstream_regulators: []
+  downstream_enzymes:
+  - Ldha
+  - Ldhb
+  transporters: []
+  cofactors: []
+  description: Pyruvate Kinase - 丙酮酸激酶 (糖酵解关键调控点)
+LDH_c:
+  direct_enzymes:
+  - Ldha
+  - Ldhb
+  - Ldhc
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Lactate Dehydrogenase - 乳酸脱氢酶
+PGMT_c:
+  direct_enzymes:
+  - Pgm1
+  - Pgm2
+  - Pgm3
+  upstream_regulators: []
+  downstream_enzymes:
+  - Ugp2
+  - Gys1
+  - Gys2
+  transporters: []
+  cofactors: []
+  description: Phosphoglucomutase - 磷酸葡萄糖变位酶 (糖原代谢)
+G6Pase_c:
+  direct_enzymes:
+  - G6pc
+  - G6pc2
+  - G6pc3
+  upstream_regulators:
+  - Pck1
+  - Pck2
+  - Fbp1
+  - Fbp2
+  downstream_enzymes: []
+  transporters:
+  - Slc37a1
+  - Slc37a2
+  - Slc37a4
+  cofactors: []
+  description: Glucose-6-Phosphatase - 葡萄糖-6-磷酸酶 (糖异生终步)
+FBPase_c:
+  direct_enzymes:
+  - Fbp1
+  - Fbp2
+  upstream_regulators:
+  - Pck1
+  - Pck2
+  downstream_enzymes:
+  - G6pc
+  - G6pc2
+  - G6pc3
+  transporters: []
+  cofactors: []
+  description: Fructose-1,6-Bisphosphatase - 果糖-1,6-二磷酸酶 (糖异生关键酶)
+PEPCK_c:
+  direct_enzymes:
+  - Pck1
+  - Pck2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Fbp1
+  - Fbp2
+  transporters: []
+  cofactors: []
+  description: Phosphoenolpyruvate Carboxykinase - 磷酸烯醇式丙酮酸羧激酶 (糖异生)
+GPS_c:
+  direct_enzymes:
+  - Gpd1
+  - Gpd2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Glycerol-3-phosphate shuttle - 甘油-3-磷酸穿梭
+GLYCOGENOLYSIS_c:
+  direct_enzymes:
+  - Pygb
+  - Pygm
+  - Pygl
+  - Agl
+  upstream_regulators:
+  - Phka1
+  - Phka2
+  - Phkb
+  - Phkg1
+  - Phkg2
+  downstream_enzymes:
+  - Pgm1
+  - Pgm2
+  transporters: []
+  cofactors: []
+  description: Glycogenolysis - 糖原分解
+CS_m:
+  direct_enzymes:
+  - Cs
+  upstream_regulators: []
+  downstream_enzymes:
+  - Aco1
+  - Aco2
+  transporters:
+  - Slc25a1
+  cofactors: []
+  description: Citrate Synthase - 柠檬酸合酶 (TCA循环入口)
+ACONT_m:
+  direct_enzymes:
+  - Aco1
+  - Aco2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Idh1
+  - Idh2
+  - Idh3a
+  - Idh3b
+  - Idh3g
+  transporters: []
+  cofactors: []
+  description: Aconitase - 顺乌头酸酶
+ICDH_m:
+  direct_enzymes:
+  - Idh1
+  - Idh2
+  - Idh3a
+  - Idh3b
+  - Idh3g
+  upstream_regulators: []
+  downstream_enzymes:
+  - Ogdh
+  - Ogdhl
+  - Dlst
+  - Dld
+  transporters: []
+  cofactors: []
+  description: Isocitrate Dehydrogenase - 异柠檬酸脱氢酶 (TCA循环限速酶)
+AKGD_m:
+  direct_enzymes:
+  - Ogdh
+  - Ogdhl
+  - Dlst
+  - Dld
+  upstream_regulators: []
+  downstream_enzymes:
+  - Suclg1
+  - Suclg2
+  - Sucla2
+  transporters: []
+  cofactors: []
+  description: α-Ketoglutarate Dehydrogenase - α-酮戊二酸脱氢酶复合物
+SUCOAS_m:
+  direct_enzymes:
+  - Suclg1
+  - Suclg2
+  - Sucla2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Sdha
+  - Sdhb
+  - Sdhc
+  - Sdhd
+  transporters: []
+  cofactors: []
+  description: Succinyl-CoA Synthetase - 琥珀酰辅酶A合成酶
+SUCD_m:
+  direct_enzymes:
+  - Sdha
+  - Sdhb
+  - Sdhc
+  - Sdhd
+  upstream_regulators: []
+  downstream_enzymes:
+  - Fh1
+  transporters: []
+  cofactors:
+  - Sdhaf1
+  - Sdhaf2
+  description: Succinate Dehydrogenase - 琥珀酸脱氢酶 (复合物II)
+FUMH_m:
+  direct_enzymes:
+  - Fh1
+  upstream_regulators: []
+  downstream_enzymes:
+  - Mdh1
+  - Mdh2
+  transporters: []
+  cofactors: []
+  description: Fumarate Hydratase - 延胡索酸酶
+MDH_m:
+  direct_enzymes:
+  - Mdh1
+  - Mdh2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Cs
+  transporters:
+  - Slc25a10
+  - Slc25a11
+  cofactors: []
+  description: Malate Dehydrogenase - 苹果酸脱氢酶
+MDH_c:
+  direct_enzymes:
+  - Mdh1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Cytosolic Malate Dehydrogenase - 胞质苹果酸脱氢酶
+ASPTA_c:
+  direct_enzymes:
+  - Got1
+  - Got2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc25a12
+  - Slc25a13
+  cofactors: []
+  description: Aspartate Transaminase (AST) - 天冬氨酸转氨酶 (胞质)
+ASPTA_m:
+  direct_enzymes:
+  - Got1
+  - Got2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc25a12
+  - Slc25a13
+  cofactors: []
+  description: Aspartate Transaminase (AST) - 天冬氨酸转氨酶 (线粒体)
+GPT_c:
+  direct_enzymes:
+  - Gpt
+  - Gpt2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Alanine Transaminase (ALT) - 丙氨酸转氨酶
+GLUD_m:
+  direct_enzymes:
+  - Glud1
+  - Glud2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Glutamate Dehydrogenase - 谷氨酸脱氢酶
+GLNS_c:
+  direct_enzymes:
+  - Glul
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc1a5
+  - Slc38a1
+  cofactors: []
+  description: Glutamine Synthetase - 谷氨酰胺合成酶
+GLND_m:
+  direct_enzymes:
+  - Gls
+  - Gls2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Glud1
+  - Glud2
+  transporters: []
+  cofactors: []
+  description: Glutaminase - 谷氨酰胺酶
+FA_exchange:
+  direct_enzymes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt1c
+  - Cpt2
+  upstream_regulators:
+  - Acadm
+  - Acadvl
+  - Hadha
+  - Hadhb
+  downstream_enzymes: []
+  transporters:
+  - Cd36
+  - Slc27a1
+  - Slc27a2
+  - Slc27a3
+  - Slc27a4
+  - Slc27a5
+  - Slc27a6
+  cofactors:
+  - Acsl1
+  - Acsl3
+  - Acsl4
+  description: Fatty Acid β-Oxidation - 脂肪酸β氧化 (CPT系统)
+BHB_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Bdh1
+  - Bdh2
+  downstream_enzymes: []
+  transporters:
+  - Slc16a1
+  - Slc16a7
+  - Slc5a6
+  - Slc5a8
+  cofactors: []
+  description: β-Hydroxybutyrate Transport - β-羟基丁酸转运
+BHBDH_m:
+  direct_enzymes:
+  - Bdh1
+  - Bdh2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Oxct1
+  - Oxct2
+  transporters: []
+  cofactors: []
+  description: β-Hydroxybutyrate Dehydrogenase - β-羟基丁酸脱氢酶
+G6PDH2R_PGL_GND_c:
+  direct_enzymes:
+  - G6pd
+  - Pgl
+  - Rgn
+  upstream_regulators: []
+  downstream_enzymes:
+  - Pgd
+  transporters: []
+  cofactors: []
+  description: Pentose Phosphate Pathway - 戊糖磷酸途径 (氧化分支)
+TKT1_c:
+  direct_enzymes:
+  - Tkt
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Transketolase - 转酮醇酶
+TKT2_c:
+  direct_enzymes:
+  - Tkt
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Transketolase - 转酮醇酶
+TALA_c:
+  direct_enzymes:
+  - Taldo1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Transaldolase - 转醛醇酶
+RPI_c:
+  direct_enzymes:
+  - Rpia
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Ribose-5-Phosphate Isomerase - 核糖-5-磷酸异构酶
+RPE_c:
+  direct_enzymes:
+  - Rpe
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Ribulose-5-Phosphate Epimerase - 核酮糖-5-磷酸差向异构酶
+CIT_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Cs
+  - Aco2
+  downstream_enzymes:
+  - Acly
+  transporters:
+  - Slc25a1
+  cofactors: []
+  description: Citrate Transport - 柠檬酸转运 (线粒体-胞质)
+MAL_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Mdh1
+  - Mdh2
+  downstream_enzymes: []
+  transporters:
+  - Slc25a10
+  - Slc25a11
+  cofactors: []
+  description: Malate Transport - 苹果酸转运
+GLC_exchange:
+  direct_enzymes: []
+  upstream_regulators:
+  - Gck
+  - Hk1
+  - Hk2
+  downstream_enzymes: []
+  transporters:
+  - Slc2a1
+  - Slc2a2
+  - Slc2a3
+  - Slc2a4
+  - Slc2a5
+  - Slc2a8
+  cofactors: []
+  description: Glucose Exchange - 葡萄糖交换 (GLUT转运体)
+PYR_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Pdk1
+  - Pdk2
+  - Pdk3
+  - Pdk4
+  downstream_enzymes:
+  - Pdha1
+  - Pdhb
+  transporters:
+  - Mpc1
+  - Mpc2
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Pyruvate Transport - 丙酮酸转运 (MPC复合物)
+GLU_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Glud1
+  - Gls
+  downstream_enzymes: []
+  transporters:
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Slc1a4
+  - Slc1a5
+  - Slc1a6
+  - Slc1a7
+  cofactors: []
+  description: Glutamate Transport - 谷氨酸转运 (EAAT家族)
+GLN_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Glul
+  - Gls
+  downstream_enzymes: []
+  transporters:
+  - Slc1a5
+  - Slc7a5
+  - Slc7a8
+  - Slc38a1
+  - Slc38a2
+  - Slc38a3
+  - Slc38a5
+  cofactors: []
+  description: Glutamine Transport - 谷氨酰胺转运
+ALA_exchange:
+  direct_enzymes:
+  - Gpt
+  - Gpt2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc1a4
+  - Slc7a1
+  - Slc7a2
+  cofactors: []
+  description: Alanine Exchange - 丙氨酸交换
+ASP_exchange:
+  direct_enzymes:
+  - Got1
+  - Got2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc1a3
+  - Slc25a12
+  - Slc25a13
+  cofactors: []
+  description: Aspartate Exchange - 天冬氨酸交换
+SER_exchange:
+  direct_enzymes:
+  - Phgdh
+  - Psat1
+  - Psph
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc1a4
+  - Slc1a5
+  cofactors: []
+  description: Serine Exchange - 丝氨酸交换
+GLY_exchange:
+  direct_enzymes:
+  - Gldc
+  - Amt
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc6a9
+  - Slc7a1
+  cofactors: []
+  description: Glycine Exchange - 甘氨酸交换
+LAC_exchange:
+  direct_enzymes:
+  - Ldha
+  - Ldhb
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Lactate Exchange - 乳酸交换 (MCT转运体)
+LAC_trans:
+  direct_enzymes: []
+  upstream_regulators:
+  - Ldha
+  - Ldhb
+  downstream_enzymes: []
+  transporters:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Lactate Transport - 乳酸转运
+GLYCEROL_exchange:
+  direct_enzymes:
+  - Gpd1
+  - Gpd2
+  - Gyk
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Aqp3
+  - Aqp7
+  - Aqp9
+  cofactors: []
+  description: Glycerol Exchange - 甘油交换
+ME2_c:
+  direct_enzymes:
+  - Me1
+  - Me2
+  - Me3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malic Enzyme - 苹果酸酶
+ACITL_c:
+  direct_enzymes:
+  - Acly
+  upstream_regulators:
+  - Cs
+  - Aco2
+  downstream_enzymes:
+  - Acaca
+  - Acacb
+  - Fasn
+  transporters:
+  - Slc25a1
+  cofactors: []
+  description: ATP-Citrate Lyase - ATP柠檬酸裂解酶 (脂肪酸合成)
+LIPID_c:
+  direct_enzymes:
+  - Acly
+  - Fasn
+  - Acaca
+  - Acacb
+  upstream_regulators:
+  - Srebf1
+  - Srebf2
+  - Mlxipl
+  downstream_enzymes:
+  - Scd1
+  - Scd2
+  - Fads1
+  - Fads2
+  transporters: []
+  cofactors: []
+  description: Lipid Synthesis - 脂质合成
+AKGMAL_m:
+  direct_enzymes:
+  - Ogdh
+  - Dlst
+  - Dld
+  - Mdh2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: α-Ketoglutarate-Malate Carrier - α-酮戊二酸-苹果酸载体
+ASPGLU_m:
+  direct_enzymes: []
+  upstream_regulators:
+  - Got1
+  - Got2
+  downstream_enzymes: []
+  transporters:
+  - Slc25a12
+  - Slc25a13
+  cofactors: []
+  description: Aspartate-Glutamate Carrier - 天冬氨酸-谷氨酸载体 (AGC)
+ACE_trans:
+  direct_enzymes:
+  - Acss1
+  - Acss2
+  upstream_regulators: []
+  downstream_enzymes:
+  - Acsl1
+  - Acsl3
+  transporters:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Acetate Transport - 乙酸转运
+ACE_exchange:
+  direct_enzymes:
+  - Acss1
+  - Acss2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Acetate Exchange - 乙酸交换
+PDH_m:
+  direct_enzymes:
+  - Pdha1
+  - Pdhb
+  - Dlat
+  - Dld
+  upstream_regulators:
+  - Pdk1
+  - Pdk2
+  - Pdk3
+  - Pdk4
+  - Pdp1
+  - Pdp2
+  downstream_enzymes:
+  - Cs
+  transporters:
+  - Mpc1
+  - Mpc2
+  cofactors: []
+  description: Pyruvate Dehydrogenase Complex - 丙酮酸脱氢酶复合物
+CPS1_m:
+  direct_enzymes:
+  - Cps1
+  upstream_regulators:
+  - Nags
+  downstream_enzymes:
+  - Otc
+  transporters:
+  - Slc25a2
+  - Slc25a15
+  cofactors: []
+  description: Carbamoyl Phosphate Synthetase I - 氨基甲酰磷酸合成酶I
+PC_m:
+  direct_enzymes:
+  - Pc
+  upstream_regulators: []
+  downstream_enzymes:
+  - Cs
+  - Pck1
+  transporters:
+  - Mpc1
+  - Mpc2
+  cofactors: []
+  description: Pyruvate Carboxylase - 丙酮酸羧化酶 (回补反应)
+SCOT_m:
+  direct_enzymes:
+  - Oxct1
+  - Oxct2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Succinyl-CoA:3-Ketoacid CoA Transferase - 酮体利用
+ACC_c:
+  direct_enzymes:
+  - Acaca
+  - Acacb
+  upstream_regulators:
+  - Prkaa1
+  - Prkaa2
+  - Srebf1
+  downstream_enzymes:
+  - Fasn
+  transporters: []
+  cofactors: []
+  description: Acetyl-CoA Carboxylase - 乙酰辅酶A羧化酶 (脂肪酸合成关键酶)
+FAS_c:
+  direct_enzymes:
+  - Fasn
+  upstream_regulators:
+  - Srebf1
+  - Srebf2
+  - Mlxipl
+  downstream_enzymes:
+  - Scd1
+  - Scd2
+  - Fads1
+  - Fads2
+  transporters: []
+  cofactors: []
+  description: Fatty Acid Synthase - 脂肪酸合酶
+G6PDH_c:
+  direct_enzymes:
+  - G6pd
+  upstream_regulators:
+  - Nfe2l2
+  - Tp53
+  downstream_enzymes:
+  - Pgl
+  - Rgn
+  - Pgd
+  transporters: []
+  cofactors: []
+  description: Glucose-6-Phosphate Dehydrogenase - 葡萄糖-6-磷酸脱氢酶 (PPP限速酶)
+PK_c:
+  direct_enzymes:
+  - Pkm
+  - Pklr
+  upstream_regulators: []
+  downstream_enzymes:
+  - Ldha
+  - Ldhb
+  transporters: []
+  cofactors: []
+  description: Pyruvate Kinase - 丙酮酸激酶 (糖酵解关键调控点, alias of PYK_c)
+G6Pase:
+  direct_enzymes:
+  - G6pc
+  - G6pc2
+  - G6pc3
+  upstream_regulators:
+  - Pck1
+  - Pck2
+  - Fbp1
+  - Fbp2
+  downstream_enzymes: []
+  transporters:
+  - Slc37a1
+  - Slc37a2
+  - Slc37a4
+  cofactors: []
+  description: Glucose-6-Phosphatase - 葡萄糖-6-磷酸酶 (alias of G6Pase_c)
+FUM_m:
+  direct_enzymes:
+  - Fh1
+  upstream_regulators: []
+  downstream_enzymes:
+  - Mdh1
+  - Mdh2
+  transporters: []
+  cofactors: []
+  description: Fumarase - 延胡索酸酶 (alias of FUMH_m)
+FUM1_m:
+  direct_enzymes:
+  - Fh1
+  upstream_regulators: []
+  downstream_enzymes:
+  - Mdh1
+  - Mdh2
+  transporters: []
+  cofactors: []
+  description: Fumarase - 延胡索酸酶 (alias of FUMH_m)
+MDH1_c:
+  direct_enzymes:
+  - Mdh1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malate Dehydrogenase (cytosolic, alias of MDH_c)
+MDH2_m:
+  direct_enzymes:
+  - Mdh2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc25a10
+  - Slc25a11
+  cofactors: []
+  description: Malate Dehydrogenase (mitochondrial, alias of MDH_m)
+ME_c:
+  direct_enzymes:
+  - Me1
+  - Me3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malic Enzyme (cytosolic, NADP+ dependent)
+ME_m:
+  direct_enzymes:
+  - Me2
+  - Me3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malic Enzyme (mitochondrial, NAD+ dependent)
+ME1_c:
+  direct_enzymes:
+  - Me1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malic Enzyme 1 (cytosolic, NADP+)
+ME2_m:
+  direct_enzymes:
+  - Me2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Malic Enzyme 2 (mitochondrial, NAD+)
+GLYCOGENOLYSIS:
+  direct_enzymes:
+  - Pygb
+  - Pygm
+  - Pygl
+  - Agl
+  upstream_regulators:
+  - Phka1
+  - Phka2
+  - Phkb
+  - Phkg1
+  - Phkg2
+  downstream_enzymes:
+  - Pgm1
+  - Pgm2
+  transporters: []
+  cofactors: []
+  description: Glycogenolysis - 糖原分解 (alias of GLYCOGENOLYSIS_c)
+FA_usage:
+  direct_enzymes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt2
+  - Acadm
+  - Acadvl
+  - Hadha
+  - Hadhb
+  upstream_regulators:
+  - Ppara
+  - Ppargc1a
+  downstream_enzymes: []
+  transporters:
+  - Cd36
+  - Slc27a1
+  cofactors: []
+  description: Fatty Acid Utilization - 脂肪酸利用 (alias of FA_exchange)
+FAO_m:
+  direct_enzymes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt2
+  - Acadm
+  - Acadvl
+  - Hadha
+  - Hadhb
+  - Ehhadh
+  upstream_regulators:
+  - Ppara
+  - Ppargc1a
+  downstream_enzymes: []
+  transporters:
+  - Slc22a5
+  cofactors: []
+  description: Fatty Acid beta-Oxidation - 脂肪酸beta氧化
+FRD_m:
+  direct_enzymes:
+  - Sdha
+  - Sdhb
+  - Sdhc
+  - Sdhd
+  upstream_regulators: []
+  downstream_enzymes:
+  - Fh1
+  transporters: []
+  cofactors: []
+  description: Fumarate Reductase - 延胡索酸还原酶 (reverse SDH)
+AKGDH_m:
+  direct_enzymes:
+  - Ogdh
+  - Ogdhl
+  - Dlst
+  - Dld
+  upstream_regulators: []
+  downstream_enzymes:
+  - Suclg1
+  - Suclg2
+  - Sucla2
+  transporters: []
+  cofactors: []
+  description: alpha-Ketoglutarate Dehydrogenase (alias of AKGD_m)
+GLN_exchange:
+  direct_enzymes: []
+  upstream_regulators:
+  - Glul
+  - Gls
+  - Gls2
+  downstream_enzymes: []
+  transporters:
+  - Slc1a5
+  - Slc7a5
+  - Slc7a8
+  - Slc38a1
+  - Slc38a2
+  - Slc38a3
+  - Slc38a5
+  cofactors: []
+  description: Glutamine Exchange - 谷氨酰胺交换 (alias of GLN_trans)
+GLU_exchange:
+  direct_enzymes: []
+  upstream_regulators:
+  - Glud1
+  - Gls
+  - Gls2
+  downstream_enzymes: []
+  transporters:
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Slc1a4
+  - Slc1a5
+  - Slc1a6
+  - Slc1a7
+  cofactors: []
+  description: Glutamate Exchange - 谷氨酸交换 (alias of GLU_trans)
+PYR_exchange:
+  direct_enzymes: []
+  upstream_regulators:
+  - Pdk1
+  - Pdk2
+  - Pdk3
+  - Pdk4
+  downstream_enzymes:
+  - Pdha1
+  - Pdhb
+  transporters:
+  - Mpc1
+  - Mpc2
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  cofactors: []
+  description: Pyruvate Exchange - 丙酮酸交换 (alias of PYR_trans)

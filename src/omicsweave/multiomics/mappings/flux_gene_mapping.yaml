@@ -1,0 +1,2219 @@
+GLC_exchange:
+  genes:
+  - Slc2a1
+  - Slc2a2
+  - Slc2a3
+  - Slc2a4
+  - Slc2a5
+  - Slc2a8
+  - Slc5a1
+  - Slc5a2
+  - Slc5a3
+  - Insr
+  - Irs1
+  - Irs2
+  - Pik3r1
+  - Akt1
+  - Akt2
+  - Foxo1
+  - Hif1a
+  - Mlxipl
+  - Mlxipl
+  - Srebf1
+  - Srebf1
+  gene_roles:
+    regulatory:
+    - Insr
+    - Irs1
+    - Irs2
+    - Pik3r1
+    - Akt1
+    - Akt2
+    transporter:
+    - Slc2a1
+    - Slc2a2
+    - Slc2a3
+    - Slc2a4
+    - Slc2a5
+    - Slc2a8
+    - Slc5a1
+    - Slc5a2
+    - Slc5a3
+    transcription_factor:
+    - Foxo1
+    - Hif1a
+    - Mlxipl
+    - Mlxipl
+    - Srebf1
+    - Srebf1
+  pathway: Glycolysis
+  description: Glucose transport
+HEX_c:
+  genes:
+  - Hk1
+  - Hk2
+  - Hk3
+  - Gck
+  - Gckr
+  - Pfkfb1
+  - Pfkfb2
+  - Pfkfb3
+  - Pfkfb4
+  - Hif1a
+  - Myc
+  - Mlxipl
+  gene_roles:
+    catalytic:
+    - Hk1
+    - Hk2
+    - Hk3
+    - Gck
+    - Gckr
+    - Pfkfb1
+    - Pfkfb2
+    - Pfkfb3
+    - Pfkfb4
+    transcription_factor:
+    - Hif1a
+    - Myc
+    - Mlxipl
+  pathway: Glycolysis
+  description: Hexokinase / Glucokinase
+PGI_c:
+  genes:
+  - Gpi
+  - Gpi
+  - G6pd
+  - Pgm1
+  - Gys1
+  gene_roles:
+    catalytic:
+    - Gpi
+    - Gpi
+    - G6pd
+    - Pgm1
+    - Gys1
+  pathway: Glycolysis
+  description: Glucose-6-phosphate isomerase
+PFK_c:
+  genes:
+  - Pfkp
+  - Pfkm
+  - Pfkl
+  - Pfkfb1
+  - Pfkfb2
+  - Pfkfb3
+  - Pfkfb4
+  - Tp53
+  - Hif1a
+  - Myc
+  - Akt1
+  - Aldoa
+  - Aldob
+  gene_roles:
+    catalytic:
+    - Pfkp
+    - Pfkm
+    - Pfkl
+    - Pfkfb1
+    - Pfkfb2
+    - Pfkfb3
+    - Pfkfb4
+    - Aldoa
+    - Aldob
+    regulatory:
+    - Akt1
+    transcription_factor:
+    - Tp53
+    - Hif1a
+    - Myc
+  pathway: Glycolysis
+  description: Phosphofructokinase
+FBA_c:
+  genes:
+  - Aldoa
+  - Aldob
+  - Aldoc
+  - Aldoart1
+  - Hif1a
+  - Zeb1
+  gene_roles:
+    catalytic:
+    - Aldoa
+    - Aldob
+    - Aldoc
+    - Aldoart1
+    transcription_factor:
+    - Hif1a
+    - Zeb1
+  pathway: Glycolysis
+  description: Fructose-bisphosphate aldolase
+TPI_c:
+  genes:
+  - Tpi1
+  gene_roles:
+    catalytic:
+    - Tpi1
+  pathway: Glycolysis
+  description: Triosephosphate isomerase
+GAPDH_c:
+  genes:
+  - Gapdh
+  - Gapdhs
+  gene_roles:
+    catalytic:
+    - Gapdh
+    - Gapdhs
+  pathway: Glycolysis
+  description: Glyceraldehyde-3-phosphate dehydrogenase (alias of GAPD_c)
+PGK_c:
+  genes:
+  - Pgk1
+  - Pgk2
+  gene_roles:
+    catalytic:
+    - Pgk1
+    - Pgk2
+  pathway: Glycolysis
+  description: Phosphoglycerate kinase
+PGM_c:
+  genes:
+  - Pgam1
+  - Pgam2
+  - Pgam5
+  - Bpgm
+  - Bpgm
+  - Bpgm
+  gene_roles:
+    catalytic:
+    - Pgam1
+    - Pgam2
+    - Pgam5
+    - Bpgm
+    - Bpgm
+    - Bpgm
+  pathway: Glycolysis
+  description: Phosphoglycerate mutase
+ENO_c:
+  genes:
+  - Eno1
+  - Eno2
+  - Eno3
+  - Myc
+  - Mycn
+  - Hnrnpa1
+  - Ptbp1
+  gene_roles:
+    catalytic:
+    - Eno1
+    - Eno2
+    - Eno3
+    - Hnrnpa1
+    - Ptbp1
+    transcription_factor:
+    - Myc
+    - Mycn
+  pathway: Glycolysis
+  description: Enolase
+PK_c:
+  genes:
+  - Pkm
+  - Pklr
+  - Hnrnpa1
+  - Hnrnpa2b1
+  - Ptbp1
+  - Srsf1
+  - Srsf3
+  - Hif1a
+  - Myc
+  - Tp53
+  gene_roles:
+    catalytic:
+    - Pkm
+    - Pklr
+    - Hnrnpa1
+    - Hnrnpa2b1
+    - Ptbp1
+    - Srsf1
+    - Srsf3
+    transcription_factor:
+    - Hif1a
+    - Myc
+    - Tp53
+  pathway: Glycolysis
+  description: Pyruvate kinase
+LDH_c:
+  genes:
+  - Ldha
+  - Ldhb
+  - Ldhc
+  - Mdh1
+  - Mdh2
+  - Got1
+  - Got2
+  - Hif1a
+  - Vhl
+  - Slc16a1
+  - Slc16a1
+  gene_roles:
+    catalytic:
+    - Ldha
+    - Ldhb
+    - Ldhc
+    - Mdh1
+    - Mdh2
+    - Got1
+    - Got2
+    regulatory:
+    - Vhl
+    transporter:
+    - Slc16a1
+    - Slc16a1
+    transcription_factor:
+    - Hif1a
+  pathway: Glycolysis
+  description: Lactate dehydrogenase
+LAC_exchange:
+  genes:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  - Bsg
+  - Bsg
+  - Ldha
+  - Ldhb
+  - Car9
+  - Car2
+  - Slc4a1
+  gene_roles:
+    catalytic:
+    - Ldha
+    - Ldhb
+    - Car9
+    - Car2
+    transporter:
+    - Slc16a1
+    - Slc16a3
+    - Slc16a7
+    - Bsg
+    - Bsg
+    - Slc4a1
+  pathway: Glycolysis
+  description: Lactate transport
+PGMT_c:
+  genes:
+  - Pgm1
+  - Pgm2
+  - Pgm3
+  - Pgm5
+  - Gys1
+  - Gys2
+  - Gsk3a
+  - Gsk3b
+  - Ppp1r3a
+  - Ppp1r3b
+  - Ppp1r3c
+  - Pygb
+  - Pygm
+  - Pygl
+  - Ugp2
+  - Ugp2
+  gene_roles:
+    catalytic:
+    - Pgm1
+    - Pgm2
+    - Pgm3
+    - Pgm5
+    - Gys1
+    - Gys2
+    - Pygb
+    - Pygm
+    - Pygl
+    - Ugp2
+    - Ugp2
+    regulatory:
+    - Gsk3a
+    - Gsk3b
+    - Ppp1r3a
+    - Ppp1r3b
+    - Ppp1r3c
+  pathway: Glycolysis
+  description: Phosphoglucomutase
+G6PDH_c:
+  genes:
+  - G6pd
+  - Pgd
+  - Nfe2l2
+  - Nfe2l2
+  - Keap1
+  - Sod1
+  - Sod2
+  - Cat
+  - Gpx1
+  - Gclc
+  - Gclm
+  - Tp53
+  - Nrf1
+  - Tkt
+  - Taldo1
+  - Rpia
+  - Rpe
+  gene_roles:
+    catalytic:
+    - G6pd
+    - Pgd
+    - Sod1
+    - Sod2
+    - Cat
+    - Gpx1
+    - Gclc
+    - Gclm
+    - Tkt
+    - Taldo1
+    - Rpia
+    - Rpe
+    regulatory:
+    - Keap1
+    transcription_factor:
+    - Nfe2l2
+    - Nfe2l2
+    - Tp53
+    - Nrf1
+  pathway: Pentose Phosphate Pathway
+  description: Glucose-6-phosphate dehydrogenase
+TKT1_c:
+  genes:
+  - Tkt
+  - Taldo1
+  - Rpia
+  - Rpe
+  - Prps1
+  - Prps2
+  - Prpsap1
+  gene_roles:
+    catalytic:
+    - Tkt
+    - Taldo1
+    - Rpia
+    - Rpe
+    - Prps1
+    - Prps2
+    - Prpsap1
+  pathway: Pentose Phosphate Pathway
+  description: Transketolase
+TKT2_c:
+  genes:
+  - Tkt
+  - Taldo1
+  - Taldo2
+  - Rpia
+  - Rpe
+  - Pgd
+  - Prps1
+  - Prps2
+  gene_roles:
+    catalytic:
+    - Tkt
+    pathway_neighbor:
+    - Taldo1
+    - Taldo2
+    - Rpia
+    - Rpe
+    - Pgd
+    - Prps1
+    - Prps2
+  pathway: Pentose Phosphate Pathway
+  description: Transketolase second carbon-transfer reaction
+TALA_c:
+  genes:
+  - Taldo1
+  - Taldo2
+  - Tkt
+  - G6pd
+  - Pgd
+  - Nfe2l2
+  - Prdx1
+  gene_roles:
+    catalytic:
+    - Taldo1
+    - Taldo2
+    - Tkt
+    - G6pd
+    - Pgd
+    - Prdx1
+    transcription_factor:
+    - Nfe2l2
+  pathway: Pentose Phosphate Pathway
+  description: Transaldolase
+RPE_c:
+  genes:
+  - Rpe
+  - Rpia
+  - Tkt
+  - Taldo1
+  gene_roles:
+    catalytic:
+    - Rpe
+    - Rpia
+    - Tkt
+    - Taldo1
+  pathway: Pentose Phosphate Pathway
+  description: Ribulose-phosphate 3-epimerase
+RPI_c:
+  genes:
+  - Rpia
+  - Rpia
+  - Rpe
+  - Tkt
+  - Prps1
+  gene_roles:
+    catalytic:
+    - Rpia
+    - Rpia
+    - Rpe
+    - Tkt
+    - Prps1
+  pathway: Pentose Phosphate Pathway
+  description: Ribose-5-phosphate isomerase
+CS_m:
+  genes:
+  - Cs
+  - Pdha1
+  - Pdha1
+  - Pdhb
+  - Dlat
+  - Dld
+  - Pc
+  - Mdh1
+  - Mdh2
+  - Ppargc1a
+  - Ppargc1b
+  - Pparg
+  - Nrf1
+  - Tfam
+  gene_roles:
+    catalytic:
+    - Cs
+    - Pdha1
+    - Pdha1
+    - Pdhb
+    - Dlat
+    - Dld
+    - Pc
+    - Mdh1
+    - Mdh2
+    transcription_factor:
+    - Ppargc1a
+    - Ppargc1b
+    - Pparg
+    - Nrf1
+    - Tfam
+  pathway: TCA Cycle
+  description: Citrate synthase
+ACONT_m:
+  genes:
+  - Aco1
+  - Aco2
+  - Nfs1
+  - Iscu
+  - Fxn
+  - Sod1
+  - Sod2
+  - Prdx3
+  - Idh1
+  - Idh2
+  - Idh3a
+  gene_roles:
+    catalytic:
+    - Aco1
+    - Aco2
+    - Nfs1
+    - Iscu
+    - Fxn
+    - Sod1
+    - Sod2
+    - Prdx3
+    - Idh1
+    - Idh2
+    - Idh3a
+  pathway: TCA Cycle
+  description: Aconitase
+ICDH_m:
+  genes:
+  - Idh3a
+  - Idh3b
+  - Idh3g
+  - Idh1
+  - Idh2
+  - Ogdh
+  - Dlst
+  - Nfe2l2
+  - G6pd
+  gene_roles:
+    catalytic:
+    - Idh3a
+    - Idh3b
+    - Idh3g
+    - Idh1
+    - Idh2
+    - Ogdh
+    - Dlst
+    - G6pd
+    transcription_factor:
+    - Nfe2l2
+  pathway: TCA Cycle
+  description: Isocitrate dehydrogenase
+AKGDH_m:
+  genes:
+  - Ogdh
+  - Ogdh
+  - Dlst
+  - Dld
+  - Tkt
+  - Tkt
+  - Glud1
+  - Gls
+  - Gls2
+  - Got1
+  - Got2
+  gene_roles:
+    catalytic:
+    - Ogdh
+    - Ogdh
+    - Dlst
+    - Dld
+    - Tkt
+    - Tkt
+    - Glud1
+    - Gls
+    - Gls2
+    - Got1
+    - Got2
+  pathway: TCA Cycle
+  description: Alpha-Ketoglutarate dehydrogenase
+SUCD_m:
+  genes:
+  - Sdha
+  - Sdhb
+  - Sdhc
+  - Sdhd
+  - Fh1
+  - Uqcc2
+  - Cyc1
+  - Hif1a
+  - Vhl
+  - Egln2
+  - Egln1
+  gene_roles:
+    catalytic:
+    - Sdha
+    - Sdhb
+    - Sdhc
+    - Sdhd
+    - Fh1
+    - Uqcc2
+    - Cyc1
+    - Egln2
+    - Egln1
+    regulatory:
+    - Vhl
+    transcription_factor:
+    - Hif1a
+  pathway: TCA Cycle
+  description: Succinate dehydrogenase
+FRD_m:
+  genes:
+  - Sdha
+  - Sdhb
+  - Sdhc
+  - Sdhd
+  - Fh1
+  - Hif1a
+  gene_roles:
+    catalytic:
+    - Sdha
+    - Sdhb
+    - Sdhc
+    - Sdhd
+    - Fh1
+    transcription_factor:
+    - Hif1a
+  pathway: TCA Cycle
+  description: Fumarate reductase
+FUM_m:
+  genes:
+  - Fh1
+  - Mdh1
+  - Mdh2
+  - Keap1
+  - Nfe2l2
+  gene_roles:
+    catalytic:
+    - Fh1
+    - Mdh1
+    - Mdh2
+    regulatory:
+    - Keap1
+    transcription_factor:
+    - Nfe2l2
+  pathway: TCA Cycle
+  description: Fumarase
+MDH_m:
+  genes:
+  - Mdh1
+  - Mdh2
+  - Got1
+  - Got2
+  - Slc25a12
+  - Slc25a13
+  - Cs
+  - Pc
+  gene_roles:
+    catalytic:
+    - Mdh1
+    - Mdh2
+    - Got1
+    - Got2
+    - Cs
+    - Pc
+    transporter:
+    - Slc25a12
+    - Slc25a13
+  pathway: TCA Cycle
+  description: Malate dehydrogenase
+CIT_trans:
+  genes:
+  - Slc25a1
+  - Acly
+  - Acaca
+  - Acacb
+  - Fasn
+  - Scd1
+  gene_roles:
+    catalytic:
+    - Acly
+    - Acaca
+    - Acacb
+    - Fasn
+    - Scd1
+    transporter:
+    - Slc25a1
+  pathway: TCA Cycle
+  description: Citrate transport (mitochondrial)
+FA_exchange:
+  genes:
+  - Cd36
+  - Slc27a1
+  - Slc27a2
+  - Slc27a3
+  - Slc27a4
+  - Fabp1
+  - Fabp2
+  - Fabp3
+  - Fabp4
+  - Fabp5
+  - Fabp6
+  - Fabp7
+  - Slc27a1
+  - Slc27a2
+  - Slc27a3
+  - Slc27a4
+  - Slc27a5
+  - Slc27a6
+  - Ppara
+  - Ppard
+  - Ppard
+  - Srebf1
+  - Lpl
+  - Lipe
+  - Mgll
+  gene_roles:
+    catalytic:
+    - Lpl
+    - Lipe
+    - Mgll
+    transporter:
+    - Cd36
+    - Slc27a1
+    - Slc27a2
+    - Slc27a3
+    - Slc27a4
+    - Fabp1
+    - Fabp2
+    - Fabp3
+    - Fabp4
+    - Fabp5
+    - Fabp6
+    - Fabp7
+    - Slc27a1
+    - Slc27a2
+    - Slc27a3
+    - Slc27a4
+    - Slc27a5
+    - Slc27a6
+    transcription_factor:
+    - Ppara
+    - Ppard
+    - Ppard
+    - Srebf1
+  pathway: Fatty Acid Metabolism
+  description: Fatty acid uptake/transport
+FAO_m:
+  genes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt1c
+  - Cpt2
+  - Slc22a5
+  - Acadm
+  - Acadvl
+  - Acads
+  - Hadh
+  - Hadha
+  - Hadhb
+  - Ehhadh
+  - Acadm
+  - Acadl
+  - Acadm
+  - Acads
+  - Acadvl
+  - Acad9
+  - Acad10
+  - Ppara
+  - Ppard
+  - Ppargc1a
+  - Ppargc1b
+  - Acaca
+  - Acacb
+  - Mlycd
+  gene_roles:
+    catalytic:
+    - Cpt1a
+    - Cpt1b
+    - Cpt1c
+    - Cpt2
+    - Acadm
+    - Acadvl
+    - Acads
+    - Hadh
+    - Hadha
+    - Hadhb
+    - Ehhadh
+    - Acadm
+    - Acadl
+    - Acadm
+    - Acads
+    - Acadvl
+    - Acad9
+    - Acad10
+    - Acaca
+    - Acacb
+    - Mlycd
+    transporter:
+    - Slc22a5
+    transcription_factor:
+    - Ppara
+    - Ppard
+    - Ppargc1a
+    - Ppargc1b
+  pathway: Fatty Acid Oxidation
+  description: Fatty acid beta-oxidation
+ACC_c:
+  genes:
+  - Acaca
+  - Acacb
+  - Mlycd
+  - Slc25a1
+  - Acly
+  - Prkaa1
+  - Prkaa2
+  - Prkaa1
+  - Prkaa2
+  - Prkag1
+  - Srebf1
+  - Srebf1
+  - Mlxipl
+  - Mlx
+  gene_roles:
+    catalytic:
+    - Acaca
+    - Acacb
+    - Mlycd
+    - Acly
+    regulatory:
+    - Prkaa1
+    - Prkaa2
+    - Prkaa1
+    - Prkaa2
+    - Prkag1
+    transporter:
+    - Slc25a1
+    transcription_factor:
+    - Srebf1
+    - Srebf1
+    - Mlxipl
+    - Mlx
+  pathway: Fatty Acid Synthesis
+  description: Acetyl-CoA carboxylase
+FAS_c:
+  genes:
+  - Fasn
+  - Elovl1
+  - Elovl2
+  - Elovl3
+  - Elovl4
+  - Elovl5
+  - Elovl6
+  - Elovl7
+  - Scd1
+  - Scd2
+  - Fads1
+  - Fads2
+  - Fads3
+  - Srebf1
+  - Mlxipl
+  - Pparg
+  - Nr1h3
+  - Nr1h4
+  - Acaca
+  - Acacb
+  - Acly
+  gene_roles:
+    catalytic:
+    - Fasn
+    - Elovl1
+    - Elovl2
+    - Elovl3
+    - Elovl4
+    - Elovl5
+    - Elovl6
+    - Elovl7
+    - Scd1
+    - Scd2
+    - Fads1
+    - Fads2
+    - Fads3
+    - Acaca
+    - Acacb
+    - Acly
+    transcription_factor:
+    - Srebf1
+    - Mlxipl
+    - Pparg
+    - Nr1h3
+    - Nr1h4
+  pathway: Fatty Acid Synthesis
+  description: Fatty acid synthase
+FA_usage:
+  genes:
+  - Cd36
+  - Fabp3
+  - Fabp4
+  - Slc27a1
+  - Cpt1a
+  - Cpt1b
+  - Cpt2
+  - Acadm
+  - Acadvl
+  - Hadha
+  - Hadhb
+  gene_roles:
+    catalytic:
+    - Cpt1a
+    - Cpt1b
+    - Cpt2
+    - Acadm
+    - Acadvl
+    - Hadha
+    - Hadhb
+    transporter:
+    - Cd36
+    - Fabp3
+    - Fabp4
+    - Slc27a1
+  pathway: Fatty Acid Metabolism
+  description: Fatty acid utilization
+BHBDH_m:
+  genes:
+  - Bdh1
+  - Hmgcs2
+  - Hmgcl
+  - Oxct1
+  - Oxct2
+  - Ppara
+  - Ppargc1a
+  - Fgf21
+  - Fgfr1
+  - Klb
+  gene_roles:
+    catalytic:
+    - Bdh1
+    - Hmgcs2
+    - Hmgcl
+    - Oxct1
+    - Oxct2
+    regulatory:
+    - Fgf21
+    - Fgfr1
+    - Klb
+    transcription_factor:
+    - Ppara
+    - Ppargc1a
+  pathway: Ketogenesis
+  description: Beta-Hydroxybutyrate dehydrogenase / Ketogenesis
+BHB_trans:
+  genes:
+  - Slc16a1
+  - Slc16a6
+  - Slc16a7
+  - Slc5a8
+  - Hmgcs2
+  - Hmgcl
+  - Bdh1
+  - Oxct1
+  - Bdh1
+  gene_roles:
+    catalytic:
+    - Hmgcs2
+    - Hmgcl
+    - Bdh1
+    - Oxct1
+    - Bdh1
+    transporter:
+    - Slc16a1
+    - Slc16a6
+    - Slc16a7
+    - Slc5a8
+  pathway: Ketogenesis
+  description: Beta-Hydroxybutyrate transport
+BHB_exchange:
+  genes:
+  - Slc16a1
+  - Slc16a6
+  - Slc16a7
+  - Bdh1
+  - Hmgcs2
+  - Oxct1
+  gene_roles:
+    catalytic:
+    - Bdh1
+    - Hmgcs2
+    - Oxct1
+    transporter:
+    - Slc16a1
+    - Slc16a6
+    - Slc16a7
+  pathway: Ketogenesis
+  description: Beta-Hydroxybutyrate exchange
+BHB_input:
+  genes:
+  - Slc16a1
+  - Slc16a6
+  - Slc16a7
+  - Bdh1
+  - Oxct1
+  - Acat1
+  gene_roles:
+    catalytic:
+    - Bdh1
+    - Oxct1
+    - Acat1
+    transporter:
+    - Slc16a1
+    - Slc16a6
+    - Slc16a7
+  pathway: Ketogenesis
+  description: Beta-Hydroxybutyrate uptake
+BHB_output:
+  genes:
+  - Slc16a1
+  - Slc16a6
+  - Slc16a7
+  - Bdh1
+  - Hmgcs2
+  - Hmgcl
+  gene_roles:
+    catalytic:
+    - Bdh1
+    - Hmgcs2
+    - Hmgcl
+    transporter:
+    - Slc16a1
+    - Slc16a6
+    - Slc16a7
+  pathway: Ketogenesis
+  description: Beta-Hydroxybutyrate release
+ACAC_trans:
+  genes:
+  - Slc16a6
+  - Slc16a7
+  - Hmgcs2
+  - Hmgcl
+  - Oxct1
+  - Acat1
+  gene_roles:
+    catalytic:
+    - Hmgcs2
+    - Hmgcl
+    - Oxct1
+    - Acat1
+    transporter:
+    - Slc16a6
+    - Slc16a7
+  pathway: Ketogenesis
+  description: Acetoacetate transport
+GLU_trans:
+  genes:
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Slc1a4
+  - Slc1a5
+  - Slc1a6
+  - Slc1a7
+  - Slc17a6
+  - Slc17a7
+  - Slc17a8
+  - Glud1
+  - Glul
+  - Gls
+  - Gls2
+  - Got1
+  - Got2
+  - Atf4
+  - Eif2ak4
+  - Eif2ak4
+  gene_roles:
+    catalytic:
+    - Glud1
+    - Glul
+    - Gls
+    - Gls2
+    - Got1
+    - Got2
+    regulatory:
+    - Eif2ak4
+    - Eif2ak4
+    transporter:
+    - Slc1a1
+    - Slc1a2
+    - Slc1a3
+    - Slc1a4
+    - Slc1a5
+    - Slc1a6
+    - Slc1a7
+    - Slc17a6
+    - Slc17a7
+    - Slc17a8
+    transcription_factor:
+    - Atf4
+  pathway: Amino Acid Metabolism
+  description: Glutamate transport
+GLU_exchange:
+  genes:
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Slc1a5
+  - Slc7a11
+  - Slc3a2
+  - Glud1
+  - Gls
+  - Gls2
+  gene_roles:
+    catalytic:
+    - Glud1
+    - Gls
+    - Gls2
+    transporter:
+    - Slc1a1
+    - Slc1a2
+    - Slc1a3
+    - Slc1a5
+    - Slc7a11
+    - Slc3a2
+  pathway: Amino Acid Metabolism
+  description: Glutamate exchange
+GLN_exchange:
+  genes:
+  - Slc1a5
+  - Slc38a1
+  - Slc38a2
+  - Slc38a3
+  - Slc38a5
+  - Glul
+  - Gls
+  - Gls2
+  - Mtor
+  - Rptor
+  - Rraga
+  - Rragb
+  - Rragc
+  - Rragd
+  - Myc
+  gene_roles:
+    catalytic:
+    - Glul
+    - Gls
+    - Gls2
+    regulatory:
+    - Mtor
+    - Rptor
+    - Rraga
+    - Rragb
+    - Rragc
+    - Rragd
+    transporter:
+    - Slc1a5
+    - Slc38a1
+    - Slc38a2
+    - Slc38a3
+    - Slc38a5
+    transcription_factor:
+    - Myc
+  pathway: Amino Acid Metabolism
+  description: Glutamine exchange
+GLN_trans:
+  genes:
+  - Slc1a5
+  - Slc38a1
+  - Slc38a2
+  - Slc38a3
+  - Glul
+  - Gls
+  - Gls2
+  - Mtor
+  gene_roles:
+    catalytic:
+    - Glul
+    - Gls
+    - Gls2
+    regulatory:
+    - Mtor
+    transporter:
+    - Slc1a5
+    - Slc38a1
+    - Slc38a2
+    - Slc38a3
+  pathway: Amino Acid Metabolism
+  description: Glutamine transport
+ASP_exchange:
+  genes:
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Got1
+  - Got2
+  - Mdh1
+  - Mdh2
+  - Slc25a12
+  - Slc25a13
+  - Cad
+  - Ppat
+  - Gart
+  gene_roles:
+    catalytic:
+    - Got1
+    - Got2
+    - Mdh1
+    - Mdh2
+    - Cad
+    - Ppat
+    - Gart
+    transporter:
+    - Slc1a1
+    - Slc1a2
+    - Slc1a3
+    - Slc25a12
+    - Slc25a13
+  pathway: Amino Acid Metabolism
+  description: Aspartate exchange
+ALA_exchange:
+  genes:
+  - Slc7a1
+  - Slc7a2
+  - Slc7a5
+  - Slc38a2
+  - Gpt
+  - Gpt2
+  - Pck1
+  - Pc
+  gene_roles:
+    catalytic:
+    - Gpt
+    - Gpt2
+    - Pck1
+    - Pc
+    transporter:
+    - Slc7a1
+    - Slc7a2
+    - Slc7a5
+    - Slc38a2
+  pathway: Amino Acid Metabolism
+  description: Alanine exchange
+ASPTA_m:
+  genes:
+  - Got2
+  - Mdh2
+  - Slc25a12
+  - Slc25a13
+  - Glud1
+  - Gls2
+  gene_roles:
+    catalytic:
+    - Got2
+    - Mdh2
+    - Glud1
+    - Gls2
+    transporter:
+    - Slc25a12
+    - Slc25a13
+  pathway: Amino Acid Metabolism
+  description: Aspartate transaminase (mitochondrial)
+ASPTA_c:
+  genes:
+  - Got1
+  - Mdh1
+  - Slc25a12
+  - Slc25a13
+  gene_roles:
+    catalytic:
+    - Got1
+    - Mdh1
+    transporter:
+    - Slc25a12
+    - Slc25a13
+  pathway: Amino Acid Metabolism
+  description: Aspartate transaminase (cytosolic)
+AKGMAL_m:
+  genes:
+  - Ogdh
+  - Mdh2
+  - Gls
+  - Gls2
+  - Glul
+  - Glud1
+  - Idh3a
+  - Idh3b
+  - Sdha
+  gene_roles:
+    catalytic:
+    - Ogdh
+    - Mdh2
+    - Gls
+    - Gls2
+    - Glul
+    - Glud1
+    - Idh3a
+    - Idh3b
+    - Sdha
+  pathway: Amino Acid Metabolism
+  description: Alpha-Ketoglutarate-malate metabolism
+GLND_m:
+  genes:
+  - Glul
+  - Gls
+  - Gls2
+  - Glud1
+  - Cps1
+  - Otc
+  gene_roles:
+    catalytic:
+    - Glul
+    - Gls
+    - Gls2
+    - Glud1
+    - Cps1
+    - Otc
+  pathway: Amino Acid Metabolism
+  description: Glutamine metabolism
+GLNS_c:
+  genes:
+  - Glul
+  - Slc1a5
+  - Slc38a1
+  - Cps1
+  - Ass1
+  gene_roles:
+    catalytic:
+    - Glul
+    - Cps1
+    - Ass1
+    transporter:
+    - Slc1a5
+    - Slc38a1
+  pathway: Amino Acid Metabolism
+  description: Glutamine synthesis
+GLUD_m:
+  genes:
+  - Glud1
+  - Glud2
+  - Gls
+  - Gls2
+  - Glul
+  - Ogdh
+  - Idh3a
+  gene_roles:
+    catalytic:
+    - Glud1
+    - Glud2
+    - Gls
+    - Gls2
+    - Glul
+    - Ogdh
+    - Idh3a
+  pathway: Amino Acid Metabolism
+  description: Glutamate dehydrogenase
+ASPGLU_m:
+  genes:
+  - Got2
+  - Slc1a1
+  - Slc1a2
+  - Slc1a3
+  - Glud1
+  - Mdh2
+  gene_roles:
+    catalytic:
+    - Got2
+    - Glud1
+    - Mdh2
+    transporter:
+    - Slc1a1
+    - Slc1a2
+    - Slc1a3
+  pathway: Amino Acid Metabolism
+  description: Aspartate-glutamate metabolism
+GPS_c:
+  genes:
+  - Gpd1
+  - Gpd2
+  - Gk
+  - Gpam
+  - Agpat1
+  - Agpat2
+  - Uqcrfs1
+  - Cyc1
+  gene_roles:
+    catalytic:
+    - Gpd1
+    - Gpd2
+    upstream:
+    - Gk
+    downstream:
+    - Gpam
+    - Agpat1
+    - Agpat2
+    - Uqcrfs1
+    - Cyc1
+  pathway: Glycerol Metabolism
+  description: Glycerol-3-phosphate shuttle
+GLYCEROL_exchange:
+  genes:
+  - Aqp3
+  - Aqp7
+  - Aqp9
+  - Aqp10
+  - Gk
+  - Gpd1
+  - Gpd2
+  - Pnpla2
+  - Pnpla2
+  - Lipe
+  - Mgll
+  gene_roles:
+    catalytic:
+    - Gk
+    - Gpd1
+    - Gpd2
+    - Pnpla2
+    - Pnpla2
+    - Lipe
+    - Mgll
+    transporter:
+    - Aqp3
+    - Aqp7
+    - Aqp9
+    - Aqp10
+  pathway: Glycerol Metabolism
+  description: Glycerol transport
+ACE_exchange:
+  genes:
+  - Slc16a1
+  - Slc5a8
+  - Acss1
+  - Acss2
+  - Acly
+  - Pdha1
+  - Fasn
+  gene_roles:
+    catalytic:
+    - Acss1
+    - Acss2
+    - Acly
+    - Pdha1
+    - Fasn
+    transporter:
+    - Slc16a1
+    - Slc5a8
+  pathway: Acetate Metabolism
+  description: Acetate exchange
+ACE_trans:
+  genes:
+  - Slc5a8
+  - Slc16a1
+  - Slc16a3
+  - Acss1
+  - Acss2
+  gene_roles:
+    catalytic:
+    - Acss1
+    - Acss2
+    transporter:
+    - Slc5a8
+    - Slc16a1
+    - Slc16a3
+  pathway: Acetate Metabolism
+  description: Acetate transport
+ACITL_c:
+  genes:
+  - Acly
+  - Acaca
+  - Acacb
+  - Fasn
+  - Scd1
+  - Kat2a
+  - Ep300
+  - Crebbp
+  - Mlxipl
+  - Mlx
+  gene_roles:
+    catalytic:
+    - Acly
+    - Acaca
+    - Acacb
+    - Fasn
+    - Scd1
+    transcription_factor:
+    - Kat2a
+    - Ep300
+    - Crebbp
+    - Mlxipl
+    - Mlx
+  pathway: Acetyl-CoA Metabolism
+  description: ATP citrate lyase
+PYR_exchange:
+  genes:
+  - Mpc1
+  - Mpc2
+  - Slc16a1
+  - Slc16a3
+  - Pdha1
+  - Pdhb
+  - Dlat
+  - Dld
+  - Pdk1
+  - Pdk2
+  - Pdk3
+  - Pdk4
+  gene_roles:
+    catalytic:
+    - Pdha1
+    - Pdhb
+    - Dlat
+    - Dld
+    - Pdk1
+    - Pdk2
+    - Pdk3
+    - Pdk4
+    transporter:
+    - Mpc1
+    - Mpc2
+    - Slc16a1
+    - Slc16a3
+  pathway: Pyruvate Metabolism
+  description: Pyruvate transport
+PDH_m:
+  genes:
+  - Pdha1
+  - Pdhb
+  - Dlat
+  - Dld
+  - Pdk1
+  - Pdk2
+  - Pdk3
+  - Pdk4
+  - Pdp1
+  - Pdp2
+  - Ppara
+  - Hif1a
+  gene_roles:
+    catalytic:
+    - Pdha1
+    - Pdhb
+    - Dlat
+    - Dld
+    - Pdk1
+    - Pdk2
+    - Pdk3
+    - Pdk4
+    - Pdp1
+    - Pdp2
+    transcription_factor:
+    - Ppara
+    - Hif1a
+  pathway: Pyruvate Metabolism
+  description: Pyruvate dehydrogenase
+PC_m:
+  genes:
+  - Pc
+  - Hlcs
+  - Mcc1
+  - Pck1
+  - Pck2
+  - Fbp1
+  - Fbp2
+  - Ppara
+  gene_roles:
+    catalytic:
+    - Pc
+    - Hlcs
+    - Mcc1
+    - Pck1
+    - Pck2
+    - Fbp1
+    - Fbp2
+    transcription_factor:
+    - Ppara
+  pathway: Gluconeogenesis
+  description: Pyruvate carboxylase
+PEPCK_c:
+  genes:
+  - Pck1
+  - Pck2
+  - Foxo1
+  - Creb1
+  - Crtc2
+  - Hnf4a
+  - Ppara
+  - Pparg
+  - Pparg
+  - Pc
+  - Fbp1
+  - G6pc
+  gene_roles:
+    catalytic:
+    - Pck1
+    - Pck2
+    - Pc
+    - Fbp1
+    - G6pc
+    transcription_factor:
+    - Foxo1
+    - Creb1
+    - Crtc2
+    - Hnf4a
+    - Ppara
+    - Pparg
+    - Pparg
+  pathway: Gluconeogenesis
+  description: Phosphoenolpyruvate carboxykinase
+G6Pase_c:
+  genes:
+  - G6pc
+  - G6pc2
+  - G6pc3
+  - Slc37a1
+  - Slc37a2
+  - Slc37a4
+  - Pck1
+  - Fbp1
+  - Foxo1
+  - Creb1
+  - Hnf4a
+  - Insr
+  - Irs1
+  - Irs2
+  - Pik3r1
+  gene_roles:
+    catalytic:
+    - G6pc
+    - G6pc2
+    - G6pc3
+    - Pck1
+    - Fbp1
+    regulatory:
+    - Insr
+    - Irs1
+    - Irs2
+    - Pik3r1
+    transporter:
+    - Slc37a1
+    - Slc37a2
+    - Slc37a4
+    transcription_factor:
+    - Foxo1
+    - Creb1
+    - Hnf4a
+  pathway: Gluconeogenesis
+  description: Glucose-6-phosphatase
+LIPID_c:
+  genes:
+  - Gpam
+  - Gpam
+  - Agpat1
+  - Agpat2
+  - Agpat3
+  - Dgat1
+  - Dgat2
+  - Chka
+  - Chkb
+  - Pcyt1a
+  - Pcyt2
+  - Srebf1
+  - Srebf2
+  - Mlxipl
+  - Pparg
+  - Nr1h3
+  gene_roles:
+    catalytic:
+    - Gpam
+    - Gpam
+    - Agpat1
+    - Agpat2
+    - Agpat3
+    - Dgat1
+    - Dgat2
+    - Chka
+    - Chkb
+    - Pcyt1a
+    - Pcyt2
+    transcription_factor:
+    - Srebf1
+    - Srebf2
+    - Mlxipl
+    - Pparg
+    - Nr1h3
+  pathway: Lipid Synthesis
+  description: Triglyceride synthesis
+BIOMASS_REACTION_6:
+  genes:
+  - Myc
+  - Mtor
+  - Eif4e
+  - Eif4ebp1
+  - Rptor
+  - Mlst8
+  - Deptor
+  - Rheb
+  - Tsc1
+  - Tsc2
+  - Igf1
+  - Igf1r
+  - Egfr
+  gene_roles:
+    regulatory:
+    - Mtor
+    - Eif4e
+    - Eif4ebp1
+    - Rptor
+    - Mlst8
+    - Deptor
+    - Rheb
+    - Tsc1
+    - Tsc2
+    - Igf1
+    - Igf1r
+    - Egfr
+    transcription_factor:
+    - Myc
+  pathway: Biomass/Growth
+  description: Biomass synthesis (growth-related)
+BIOMASS_REACTION_1:
+  genes:
+  - Myc
+  - Mtor
+  - Eif4e
+  - Rheb
+  - Tsc1
+  - Tsc2
+  gene_roles:
+    regulatory:
+    - Mtor
+    - Eif4e
+    - Rheb
+    - Tsc1
+    - Tsc2
+    transcription_factor:
+    - Myc
+  pathway: Biomass/Growth
+  description: Biomass synthesis
+AKGD_m:
+  genes:
+  - Ogdh
+  - Dlst
+  - Dld
+  - Glud1
+  - Gls
+  - Gls2
+  gene_roles:
+    catalytic:
+    - Ogdh
+    - Dlst
+    - Dld
+    - Glud1
+    - Gls
+    - Gls2
+  pathway: TCA Cycle
+  description: Alpha-ketoglutarate dehydrogenase
+PGL_c:
+  genes:
+  - Pgd
+  - G6pd
+  gene_roles:
+    catalytic:
+    - Pgd
+    - G6pd
+  pathway: Pentose Phosphate Pathway
+  description: 6-Phosphogluconolactonase
+GND_c:
+  genes:
+  - Pgd
+  gene_roles:
+    catalytic:
+    - Pgd
+  pathway: Pentose Phosphate Pathway
+  description: 6-Phosphogluconate dehydrogenase
+GLYCK_c:
+  genes:
+  - Gk
+  - Gpd1
+  - Gpd2
+  gene_roles:
+    catalytic:
+    - Gk
+    - Gpd1
+    - Gpd2
+  pathway: Glycerol Metabolism
+  description: Glycerol kinase
+G3PDH_c:
+  genes:
+  - Gpd1
+  - Gpd2
+  gene_roles:
+    catalytic:
+    - Gpd1
+    - Gpd2
+  pathway: Glycerol Metabolism
+  description: Glycerol-3-phosphate dehydrogenase
+TRIOSE_c:
+  genes:
+  - Tpi1
+  - Gapdh
+  - Aldoa
+  gene_roles:
+    catalytic:
+    - Tpi1
+    - Gapdh
+    - Aldoa
+  pathway: Glycolysis
+  description: Triose phosphate metabolism
+GAPD_c:
+  genes:
+  - Gapdh
+  - Gapdhs
+  gene_roles:
+    catalytic:
+    - Gapdh
+    - Gapdhs
+  pathway: Glycolysis
+  description: Glyceraldehyde phosphate dehydrogenase
+SER_exchange:
+  genes:
+  - Phgdh
+  - Psat1
+  - Psph
+  - Shmt1
+  - Shmt2
+  - Slc1a4
+  - Slc1a5
+  - Slc38a5
+  gene_roles:
+    catalytic:
+    - Phgdh
+    - Psat1
+    - Psph
+    - Shmt1
+    - Shmt2
+    transporter:
+    - Slc1a4
+    - Slc1a5
+    - Slc38a5
+  pathway: Nucleotide Metabolism
+  description: Serine exchange / Serine biosynthesis pathway
+SCOT_m:
+  genes:
+  - Oxct1
+  - Oxct2
+  gene_roles:
+    catalytic:
+    - Oxct1
+    - Oxct2
+  pathway: Ketone Body Metabolism
+  description: Succinyl-CoA:3-ketoacid CoA transferase
+SUCOAS_m:
+  genes:
+  - Suclg1
+  - Sucla2
+  gene_roles:
+    catalytic:
+    - Suclg1
+    - Sucla2
+  pathway: TCA Cycle
+  description: Succinyl-CoA synthetase
+FUM1_m:
+  genes:
+  - Fh1
+  gene_roles:
+    catalytic:
+    - Fh1
+  pathway: TCA Cycle
+  description: Fumarase
+MDH1_c:
+  genes:
+  - Mdh1
+  gene_roles:
+    catalytic:
+    - Mdh1
+  pathway: TCA Cycle
+  description: Malate dehydrogenase (cytosolic)
+MDH2_m:
+  genes:
+  - Mdh2
+  gene_roles:
+    catalytic:
+    - Mdh2
+  pathway: TCA Cycle
+  description: Malate dehydrogenase (mitochondrial)
+ME1_c:
+  genes:
+  - Me1
+  - Me2
+  gene_roles:
+    catalytic:
+    - Me1
+    - Me2
+  pathway: Pyruvate Metabolism
+  description: Malic enzyme (NADP+ dependent)
+ME2_m:
+  genes:
+  - Me2
+  - Me3
+  gene_roles:
+    catalytic:
+    - Me2
+    - Me3
+  pathway: Pyruvate Metabolism
+  description: Malic enzyme (mitochondrial)
+GK_c:
+  genes:
+  - Gk
+  - Gk2
+  gene_roles:
+    catalytic:
+    - Gk
+    - Gk2
+  pathway: Glycerol Metabolism
+  description: Glycerol kinase
+G3PD_m:
+  genes:
+  - Gpd2
+  - Gpd1
+  gene_roles:
+    catalytic:
+    - Gpd2
+    - Gpd1
+  pathway: Glycerol Metabolism
+  description: Mitochondrial glycerol-3-phosphate dehydrogenase
+GLYCOGENOLYSIS:
+  genes:
+  - Pygl
+  - Pygb
+  - Pygm
+  - Gde1
+  - Agl
+  gene_roles:
+    catalytic:
+    - Pygl
+    - Pygb
+    - Pygm
+    - Gde1
+    - Agl
+  pathway: Glycogen Metabolism
+  description: Glycogenolysis
+GLYCOLYSIS:
+  genes:
+  - Hk1
+  - Hk2
+  - Hk3
+  - Gck
+  - Pfkp
+  - Pfkm
+  - Pfkl
+  - Aldoa
+  - Aldob
+  - Aldoc
+  - Tpi1
+  - Gapdh
+  - Pgk1
+  - Pgam1
+  - Pgam2
+  - Eno1
+  - Eno2
+  - Eno3
+  - Pkm
+  - Pklr
+  - Hif1a
+  - Myc
+  - Tp53
+  gene_roles:
+    catalytic:
+    - Hk1
+    - Hk2
+    - Hk3
+    - Gck
+    - Pfkp
+    - Pfkm
+    - Pfkl
+    - Aldoa
+    - Aldob
+    - Aldoc
+    - Tpi1
+    - Gapdh
+    - Pgk1
+    - Pgam1
+    - Pgam2
+    - Eno1
+    - Eno2
+    - Eno3
+    - Pkm
+    - Pklr
+    transcription_factor:
+    - Hif1a
+    - Myc
+    - Tp53
+  pathway: Glycolysis
+  description: Glycolysis
+G6Pase:
+  genes:
+  - G6pc
+  - G6pc2
+  - G6pc3
+  - Slc37a1
+  - Slc37a2
+  - Slc37a4
+  - Pck1
+  - Fbp1
+  - Pc
+  - Foxo1
+  - Creb1
+  - Hnf4a
+  gene_roles:
+    catalytic:
+    - G6pc
+    - G6pc2
+    - G6pc3
+    - Pck1
+    - Fbp1
+    - Pc
+    transporter:
+    - Slc37a1
+    - Slc37a2
+    - Slc37a4
+    transcription_factor:
+    - Foxo1
+    - Creb1
+    - Hnf4a
+  pathway: Gluconeogenesis
+  description: Glucose-6-phosphatase
+lipid_mobilization:
+  genes:
+  - Pnpla2
+  - Pnpla2
+  - Lipe
+  - Mgll
+  - Lipe
+  gene_roles:
+    catalytic:
+    - Pnpla2
+    - Pnpla2
+    - Lipe
+    - Mgll
+    - Lipe
+  pathway: Lipid Mobilization
+  description: Lipid mobilization and lipolysis
+PYK_c:
+  genes:
+  - Pkm
+  - Pklr
+  gene_roles:
+    catalytic:
+    - Pkm
+    - Pklr
+  pathway: Glycolysis
+  description: Pyruvate kinase (alias of PK_c)
+G6PDH2R_PGL_GND_c:
+  genes:
+  - G6pd
+  - Pgd
+  - Pgl
+  gene_roles:
+    catalytic:
+    - G6pd
+    - Pgd
+    - Pgl
+  pathway: Pentose Phosphate Pathway
+  description: Oxidative PPP aggregate (G6PDH + PGL + 6PGD)
+FBPase_c:
+  genes:
+  - Fbp1
+  - Fbp2
+  gene_roles:
+    catalytic:
+    - Fbp1
+    - Fbp2
+  pathway: Gluconeogenesis
+  description: Fructose-1,6-bisphosphatase (gluconeogenesis)
+GPT_c:
+  genes:
+  - Gpt
+  - Gpt2
+  gene_roles:
+    catalytic:
+    - Gpt
+    - Gpt2
+  pathway: Amino Acid Metabolism
+  description: Alanine transaminase (ALT)
+FUMH_m:
+  genes:
+  - Fh1
+  gene_roles:
+    catalytic:
+    - Fh1
+  pathway: TCA Cycle
+  description: Fumarase (alias of FUM_m)
+MDH_c:
+  genes:
+  - Mdh1
+  gene_roles:
+    catalytic:
+    - Mdh1
+  pathway: TCA Cycle
+  description: Malate dehydrogenase (cytosolic, alias of MDH_m)
+ME_c:
+  genes:
+  - Me1
+  - Me3
+  gene_roles:
+    catalytic:
+    - Me1
+    - Me3
+  pathway: Pyruvate Metabolism
+  description: Malic enzyme (cytosolic, NADP+ dependent)
+ME_m:
+  genes:
+  - Me2
+  - Me3
+  gene_roles:
+    catalytic:
+    - Me2
+    - Me3
+  pathway: Pyruvate Metabolism
+  description: Malic enzyme (mitochondrial, NAD+ dependent)
+ME2_c:
+  genes:
+  - Me2
+  gene_roles:
+    catalytic:
+    - Me2
+  pathway: Pyruvate Metabolism
+  description: Malic enzyme 2 (mitochondrial, NAD+)
+GLYCOGENOLYSIS_c:
+  genes:
+  - Pygl
+  - Pygb
+  - Pygm
+  - Gde1
+  - Agl
+  gene_roles:
+    catalytic:
+    - Pygl
+    - Pygb
+    - Pygm
+    - Gde1
+    - Agl
+  pathway: Glycogen Metabolism
+  description: Glycogenolysis (cytosolic, alias)
+LAC_trans:
+  genes:
+  - Slc16a1
+  - Slc16a3
+  - Slc16a7
+  - Bsg
+  - Bsg
+  gene_roles:
+    transporter:
+    - Slc16a1
+    - Slc16a3
+    - Slc16a7
+    - Bsg
+    - Bsg
+  pathway: Glycolysis
+  description: Lactate transmembrane transport (MCT family)
+MAL_trans:
+  genes:
+  - Slc25a10
+  - Slc25a11
+  - Mdh1
+  - Mdh2
+  gene_roles:
+    catalytic:
+    - Mdh1
+    - Mdh2
+    transporter:
+    - Slc25a10
+    - Slc25a11
+  pathway: TCA Cycle
+  description: Malate transport (mitochondrial dicarboxylate carrier)
+PYR_trans:
+  genes:
+  - Mpc1
+  - Mpc2
+  - Slc16a1
+  - Slc16a3
+  gene_roles:
+    transporter:
+    - Mpc1
+    - Mpc2
+    - Slc16a1
+    - Slc16a3
+  pathway: Pyruvate Metabolism
+  description: Pyruvate transmembrane transport (MPC complex)
+GLY_exchange:
+  genes:
+  - Slc6a9
+  - Slc7a1
+  - Gldc
+  - Amt
+  - Shmt1
+  - Shmt2
+  gene_roles:
+    catalytic:
+    - Gldc
+    - Amt
+    - Shmt1
+    - Shmt2
+    transporter:
+    - Slc6a9
+    - Slc7a1
+  pathway: Amino Acid Metabolism
+  description: Glycine exchange / glycine metabolism

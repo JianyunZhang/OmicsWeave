@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# 外部工具与参考数据（kallisto 可执行文件、转录组 FASTA 等），不随代码分发
+external/
+
+# 实验数据与分析结果属于实验项目仓库，不进入工具包仓库
+experiments/
+analysis_results/
+
+# 本地课题工作区：课题数据副本与课题专用脚本，只保留说明文件
+local/*
+!local/README.md

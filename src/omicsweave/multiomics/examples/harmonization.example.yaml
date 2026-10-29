@@ -1,0 +1,32 @@
+# 样本级协调模板。所有相对路径均相对于本 YAML 所在目录。
+output_dir: ../../../analysis_results/example_experiment/harmonized_multiomics
+sample_map: sample_map.example.csv
+min_assays: 2
+
+# 仅在 batch 与 condition 可辨识时启用；完全混淆会直接报错。
+batch_correction:
+  enabled: true
+  batch_column: batch_id
+  condition_column: condition
+
+# 默认开启：控制 condition 后计算特征和 PCA 的 batch partial R²。
+# suggested_batch_reliability 仅供人工审核，不会自动进入评分。
+batch_qc:
+  enabled: true
+  max_components: 5
+  max_features: 5000
+  high_batch_partial_r2: 0.20
+
+assays:
+  transcriptomics:
+    path: ../../../analysis_results/example_experiment/input/rna_counts.csv
+    feature_column: gene
+    normalization: transcriptomics
+  proteomics:
+    path: ../../../analysis_results/example_experiment/input/protein_abundance.csv
+    feature_column: protein
+    normalization: proteomics
+  metabolomics:
+    path: ../../../analysis_results/example_experiment/input/metabolite_abundance.csv
+    feature_column: compound
+    normalization: metabolomics
