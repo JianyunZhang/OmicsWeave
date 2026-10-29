@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import hashlib
 import platform
 import secrets
 from datetime import datetime, timezone
@@ -18,11 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omicsweave import __version__
 from omicsweave.core.model import Omics
+from omicsweave.core.provenance import sha256_file
 
 MANIFEST_FILE = "manifest.json"
 # 交换契约 v1 在阶段 2 定稿；此前为草案版本
 BUNDLE_SCHEMA_VERSION = "0.1"
-_CHUNK = 1 << 20
 
 
 class FileRecord(BaseModel):
@@ -56,14 +55,6 @@ def new_run_id(now: datetime | None = None) -> str:
     """形如 ``run_20261029_153012_a3f9`` 的运行 ID：按时间排序，末尾随机后缀避免同秒冲突。"""
     now = now or datetime.now()
     return f"run_{now:%Y%m%d_%H%M%S}_{secrets.token_hex(2)}"
-
-
-def sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def file_record(path: str | Path, base: str | Path, role: Literal["input", "output"],

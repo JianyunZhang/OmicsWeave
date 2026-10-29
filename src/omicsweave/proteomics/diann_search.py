@@ -10,13 +10,14 @@ was requested. A matching provenance file skips the executable.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Sequence
+
+from omicsweave.core.provenance import sha256_file
 
 from .experiment_config import ProteomicsConfig, get_sample_to_mouse_id_map
 
@@ -307,14 +308,6 @@ def _format_qvalue(qvalue: float) -> str:
     return format(float(qvalue), "g")
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _file_stamp(path: Path) -> dict[str, Any]:
     stat = path.stat()
     return {
@@ -334,7 +327,7 @@ def _fingerprint(cfg: ProteomicsConfig, raw_files: Sequence[Path]) -> dict[str, 
 
     assert cfg.search_fasta is not None
     fasta_stamp = _file_stamp(cfg.search_fasta)
-    fasta_stamp["sha256"] = _sha256(cfg.search_fasta)
+    fasta_stamp["sha256"] = sha256_file(cfg.search_fasta)
     return {
         "expected_version": cfg.diann_expected_version,
         "qvalue": _format_qvalue(cfg.search_qvalue),

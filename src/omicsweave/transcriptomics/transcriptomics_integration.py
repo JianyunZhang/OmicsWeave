@@ -25,7 +25,8 @@ from .experiment_config import (  # type: ignore
     load_integration_config,
     resolve_output_root,
 )
-from . import provenance as provenance_mod  # type: ignore
+from omicsweave.core import provenance as core_provenance
+from .provenance import CRITICAL_PROVENANCE_FIELDS
 from . import joint_model as joint_model_mod  # type: ignore
 
 
@@ -248,13 +249,13 @@ def check_batch_consistency(
         return True, {"consistent": True, "skipped": True}, "一致性校验已按配置跳过。"
 
     provenances = {
-        batch_id: provenance_mod.load_run_provenance(
+        batch_id: core_provenance.load_run_provenance(
             output_root / "runs" / protocol_id / batch_id
         )
         for batch_id in batch_ids
     }
-    result = provenance_mod.compare_provenance(provenances)
-    report = provenance_mod.format_provenance_report(result)
+    result = core_provenance.compare_provenance(provenances, CRITICAL_PROVENANCE_FIELDS)
+    report = core_provenance.format_provenance_report(result)
 
     if result["consistent"]:
         return True, result, report

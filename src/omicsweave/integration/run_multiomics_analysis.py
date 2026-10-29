@@ -58,7 +58,7 @@ from omicsweave.integration.plotting import (
     plot_score_distribution,
 )
 from omicsweave.integration.report import generate_report
-from omicsweave.integration.provenance import build_input_audit
+from omicsweave.integration.input_audit import build_input_audit
 from omicsweave.integration.mappings import audit_mapping_integrity
 
 

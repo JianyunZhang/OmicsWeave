@@ -133,7 +133,7 @@ omicsweave/
     df_analysis.py                 # 分析函数（计算 + CSV → 01_df_results/）
     mfa_experiment_config.py       # 配置加载器（MFAConfig + load_mfa_config）
     infusion_qc.py                 # 灌注期血糖稳态 QC
-    provenance.py                  # 运行溯源指纹 + 跨批次可合并性断言
+    provenance.py                  # MFA 溯源字段 + 跨批次可合并性断言（读写与比对见 core/provenance.py）
     bridging_qc.py                 # 桥接样本一致性 → 技术噪声地板
     mfa_integration.py             # 多批次 Meta + 跨 protocol 一致性 + 整合报告
     mfa_integration_plotting.py    # 整合结果绘图

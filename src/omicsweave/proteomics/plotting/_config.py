@@ -10,8 +10,9 @@ import os
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import pandas as pd
+
+from omicsweave.visualization.theme import apply_theme
 
 from ..experiment_config import (
     ProteomicsConfig,
@@ -22,13 +23,8 @@ from ..experiment_config import (
     get_comp_labels,
 )
 
-# Set plotting style
-try:
-    plt.style.use("seaborn-whitegrid")
-except OSError:
-    plt.style.use("seaborn-v0_8-whitegrid")
-plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial"]
-plt.rcParams["axes.unicode_minus"] = False
+# 统一主题；蛋白组图件沿用白色网格样式
+apply_theme(style="seaborn-v0_8-whitegrid")
 
 # ============================================================================
 # Module-level globals (populated by apply_config)

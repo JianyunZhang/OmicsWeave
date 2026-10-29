@@ -9,9 +9,8 @@ import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 
-
+from omicsweave.visualization.theme import apply_theme
 from ..experiment_config import (
     load_transcriptomics_config, config_arg_help, resolve_comparisons,
     get_group_colors, get_tissue_labels, get_comp_labels, get_plot_colors,
@@ -114,12 +113,5 @@ def load_de_results(tissue: str, comparison: str) -> pd.DataFrame | None:
     return None
 
 
-plt.rcParams.update({
-    'font.size': 10,
-    'axes.titlesize': 12,
-    'axes.labelsize': 11,
-    'figure.dpi': 200,
-    'savefig.dpi': 200,
-    'savefig.bbox': 'tight',
-    'font.family': 'sans-serif',
-})
+# 统一主题；转录组图件沿用 200 dpi
+apply_theme(dpi=200, save_dpi=200)

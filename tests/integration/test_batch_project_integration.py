@@ -26,7 +26,7 @@ from omicsweave.integration.loaders import (
 )
 from omicsweave.integration.mappings import FLUX_GENE_MAPPING
 from omicsweave.integration.project_integration import run_project_integration
-from omicsweave.integration.provenance import build_input_audit
+from omicsweave.integration.input_audit import build_input_audit
 from omicsweave.mfa.df_analysis import (
     _compute_biological_net_flux,
     differential_flux,

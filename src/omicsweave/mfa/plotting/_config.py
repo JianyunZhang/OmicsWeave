@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from omicsweave.visualization.theme import apply_theme
+
+# 统一主题（MFA 图件在 savefig 处显式指定 dpi）
+apply_theme()
+
 # ── 模块级共享状态（由 apply_config 填充） ──────────────────────────
 
 OUTPUT_DIR: Path | None = None

@@ -38,7 +38,7 @@ omicsweave/integration/
   config.py                              # MultiOmicsConfig dataclass + YAML 加载器
   harmonization.py                       # 样本映射、归一化、缺失与批次校正
   project_integration.py                 # estimand 校验 + 跨实验随机效应 Meta
-  provenance.py                          # 配置输入与实际批次来源审计
+  input_audit.py                         # 配置输入与实际批次来源审计
   mappings/
     __init__.py
     feature_resolver.py                  # 标准 ID 优先的基因/蛋白/代谢物精准匹配

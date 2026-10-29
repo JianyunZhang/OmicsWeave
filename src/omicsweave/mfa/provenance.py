@@ -13,18 +13,19 @@ MFA 运行溯源与跨批次可合并性断言
 指纹，对不一致项按 ``integration.provenance_mismatch_policy``
 （``fail`` | ``warn`` | ``ignore``，默认 ``warn``）作出反应。
 
-与转录组的 ``run_provenance.json`` 作用相同。
+文件读写与比对使用 :mod:`omicsweave.core.provenance`，与转录组共用；这里只定义 MFA 的字段。
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-_PROVENANCE_FILE = "run_provenance.json"
+from omicsweave.core import provenance as core_provenance
+
+_PROVENANCE_FILE = core_provenance.PROVENANCE_FILE
 
 # 这些字段不一致意味着两个批次测的不是同一件事，合并前必须人工确认。
 _CRITICAL_FIELDS = [
@@ -99,11 +100,7 @@ def write_run_provenance(
         },
     }
 
-    path = Path(output_dir) / _PROVENANCE_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    path = core_provenance.write_run_provenance(output_dir, record)
     print(f"  Saved {_PROVENANCE_FILE} "
           f"(network {record['reaction_set_hash']}, "
           f"{record['n_reactions']} reactions, "
@@ -116,13 +113,7 @@ def read_run_provenance(
     protocol_id: str,
     batch_id: str,
 ) -> dict[str, Any] | None:
-    path = output_root / "runs" / protocol_id / batch_id / _PROVENANCE_FILE
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    return core_provenance.load_run_provenance(Path(output_root) / "runs" / protocol_id / batch_id)
 
 
 def assert_batch_compatibility(
@@ -162,18 +153,11 @@ def assert_batch_compatibility(
     if len(records) < 2:
         return []
 
-    mismatches = []
-    for field in _CRITICAL_FIELDS + _ADVISORY_FIELDS:
-        values = {b: r.get(field) for b, r in records.items()}
-        distinct = {json.dumps(v, ensure_ascii=False, sort_keys=True)
-                    for v in values.values()}
-        if len(distinct) <= 1:
-            continue
-        mismatches.append({
-            "field": field,
-            "severity": "critical" if field in _CRITICAL_FIELDS else "advisory",
-            "values": values,
-        })
+    comparison = core_provenance.compare_provenance(records, _CRITICAL_FIELDS, _ADVISORY_FIELDS)
+    mismatches = [
+        {"field": field, "severity": comparison["severity"][field], "values": values}
+        for field, values in comparison["mismatches"].items()
+    ]
 
     if not mismatches:
         print("    [provenance] 各批次技术链指纹一致")

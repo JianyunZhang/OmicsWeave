@@ -18,7 +18,8 @@ from typing import Any
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+
+from omicsweave.visualization.theme import apply_theme
 
 from ..config import (
     MultiOmicsConfig,
@@ -111,16 +112,7 @@ def apply_config(
 # Matplotlib global settings
 # ============================================================================
 
-plt.rcParams.update({
-    "font.sans-serif": ["SimHei", "Microsoft YaHei", "DejaVu Sans"],
-    "axes.unicode_minus": False,
-    "figure.dpi": 150,
-    "savefig.dpi": 300,
-    "font.size": 10,
-    "axes.titlesize": 12,
-    "axes.labelsize": 11,
-    "savefig.bbox": "tight",
-})
+apply_theme(dpi=150, save_dpi=300)
 
 
 def flush_print(*args: Any, **kwargs: Any) -> None:

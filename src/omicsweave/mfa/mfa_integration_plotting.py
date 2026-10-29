@@ -19,6 +19,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from omicsweave.visualization.theme import apply_theme
+
+# 统一主题（图件在 savefig 处显式指定 dpi）
+apply_theme()
+
 
 def _safe_name(name: str) -> str:
     """将任意字符串转换为文件名安全片段。"""

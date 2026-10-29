@@ -1,18 +1,8 @@
 """
-绘图模块共享配置：中文字体、样式设置。
+绘图模块共享配置：导入时应用统一主题（代谢组图件沿用白色网格样式）。
 """
 from __future__ import annotations
 
-import matplotlib
-import matplotlib.pyplot as plt
-import seaborn as sns
+from omicsweave.visualization.theme import apply_theme
 
-
-def setup_plotting():
-    """设置绘图样式和中文字体。"""
-    plt.style.use("seaborn-v0_8-whitegrid")
-    plt.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial"]
-    plt.rcParams["axes.unicode_minus"] = False
-
-
-setup_plotting()
+apply_theme(style="seaborn-v0_8-whitegrid")

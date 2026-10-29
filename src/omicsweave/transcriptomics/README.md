@@ -277,7 +277,7 @@ omicsweave/transcriptomics/
 ├── gene_annotate.py                    ← 基因注释增强（Ensembl/NCBI ID 交叉引用）
 ├── normalization.py                    ← ★基因层聚合（lengthScaledTPM）+ median-of-ratios 大小因子
 ├── qc_gate.py                          ← ★比对率采集 + QC 阈值门控
-├── provenance.py                       ← ★参考/工具指纹 + 跨批次一致性断言
+├── provenance.py                       ← ★参考/工具指纹采集（读写与跨批次比对见 core/provenance.py）
 ├── joint_model.py                      ← ★跨批次联合建模（merge_runs + ~batch + condition）
 ├── transcriptomics_integration.py      ← 多批次/多协议 DE 结果整合（Meta 分析 + consensus）
 ├── generate_interpretation_report.py   ← 自动化解读报告（Step 8）

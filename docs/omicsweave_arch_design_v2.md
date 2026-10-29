@@ -124,7 +124,7 @@ src/omicsweave/
 │   ├── config.py           # YAML 与样本表的读取 ✅
 │   ├── validate.py         # 结合样本表与文件系统的校验（omicsweave validate）✅
 │   ├── scaffold.py         # 项目模板（omicsweave init）✅
-│   ├── provenance.py       # 合并现有 3 份 provenance
+│   ├── provenance.py       # 文件指纹、run_provenance.json 读写与跨批次比对 ✅
 │   ├── statistics/         # nonparametric / meta_analysis / stability ✅
 │   ├── idmap/              # ID 映射（暂为原有字典，阶段 2 改为数据文件 + 解析器）
 │   └── safety.py           # pandas 数值安全检查 ✅
@@ -140,7 +140,7 @@ src/omicsweave/
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
-├── visualization/
+├── visualization/          # theme.py：统一绘图主题 ✅；通用图形阶段 2 迁入
 └── cli.py
 ```
 
@@ -471,9 +471,9 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 |---|---|---|
 | `common/nonparametric.py`、`meta_analysis.py`、`stability.py` | `core/statistics/` | 推断单位、秩检验 p 值下限等方法学核心 |
 | `common/pandas_safety.py`、`common/project.py` | `core/` | |
-| 3 份 `provenance.py`（mfa / transcriptomics / multiomics） | `core/provenance.py` | 合并 |
+| 3 份 `provenance.py`（mfa / transcriptomics / multiomics） | `core/provenance.py` | ✅ MFA 与转录组的读写、比对已合并，各自只保留本组学的字段；multiomics 的那份实为输入审计，改名为 `integration/input_audit.py` |
 | 5 套配置加载器（约 3,450 行） | `core/config.py` + 各组学设置段 | 改为第 5 节的统一模型；旧配置通过 `omicsweave migrate` 转换 |
-| 5 份 `plotting/_config.py`；3–4 份火山图、热图、PCA | `visualization/` | 共用主题和通用图，组学专用图保留在各模块 |
+| 5 份 `plotting/_config.py`；3–4 份火山图、热图、PCA | `visualization/` | 主题 ✅（`visualization/theme.py`）；通用图在阶段 2 合并，组学专用图保留在各模块；`_config.py` 中的全局状态在 1.10 去除 |
 
 ### 10.2 保留为各组学核心（接入新数据契约）
 
@@ -531,7 +531,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 1.1 改名：`common`→`core`，`multiomics`→`integration`；删除兼容转发模块 | 新包结构 | ✅ `core` 下分出 `statistics/`、`idmap/`、`safety.py`；`integration` 内原 `integration/` 子包改名为 `methods/` |
 | 1.2 项目模型与配置校验（`core/model.py`、`config.py`），含比较角色与逆转配对 | `project.yaml` / `experiment.yaml` / 样本表的规范与校验 | ✅ 含 `core/validate.py` 全部第 5.6 节规则 |
 | 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | 部分：数据集、差异结果表、运行清单（草案 0.1）已完成；富集与 MFA 结果表待补 |
-| 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | 未开始 |
+| 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | ✅ 另把 `contract` 与蛋白组 DIA-NN 搜库中的文件哈希也改用 `core.provenance.sha256_file` |
 | 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | 部分：`init`、`validate` 已完成；`migrate` 需要真实课题配置做对照，等本地副本就位 |
 | 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | ✅ `omicsweave mfa template / check / convert`；标准格式见第 6.2 节 |
 | 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除，其余见第 10.5 节 |
@@ -633,7 +633,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 - [x] 1.1 包改名、删除兼容转发模块
 - [x] 1.2 `project.yaml` / `experiment.yaml` / 样本表规范与 `omicsweave validate`
 - [ ] 1.3 数据契约：富集结果表、MFA 结果表（数据集、差异结果表、运行清单已完成）
-- [ ] 1.4 合并溯源记录与绘图主题
+- [x] 1.4 合并溯源记录与绘图主题
 - [ ] 1.5 `omicsweave migrate`（需课题数据本地副本）
 - [x] 1.6 MFA Excel 模板与自研软件格式转换器
 - [ ] 1.7 课题专用脚本移到本地工作区（需本地副本）

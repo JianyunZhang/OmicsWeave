@@ -70,7 +70,8 @@ from .experiment_config import (  # type: ignore
     resolve_comparisons,
     resolve_output_root,
 )
-from . import provenance as provenance_mod  # type: ignore
+from omicsweave.core import provenance as core_provenance
+from .provenance import CRITICAL_PROVENANCE_FIELDS
 
 
 # 合并时对基因集的处理策略
@@ -137,7 +138,7 @@ def discover_run_outputs(
             run_dir=run_dir,
             counts_path=run_dir / "04_de_results" / "gene_counts_matrix.csv",
             metadata_path=run_dir / "sample_metadata.csv",
-            provenance=provenance_mod.load_run_provenance(run_dir),
+            provenance=core_provenance.load_run_provenance(run_dir),
         )
     return found
 
@@ -548,10 +549,10 @@ def run_joint_model_for_protocol(
 
     # ---- 参考/技术参数一致性（与 Meta 路径共用同一套断言）----
     if check_provenance:
-        comparison = provenance_mod.compare_provenance(
-            {bid: run.provenance for bid, run in runs.items()}
+        comparison = core_provenance.compare_provenance(
+            {bid: run.provenance for bid, run in runs.items()}, CRITICAL_PROVENANCE_FIELDS
         )
-        report = provenance_mod.format_provenance_report(comparison)
+        report = core_provenance.format_provenance_report(comparison)
         summary["provenance"] = comparison
         summary["provenance_report"] = report
         if not comparison["consistent"]:

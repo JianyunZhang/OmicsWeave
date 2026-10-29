@@ -27,7 +27,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from omicsweave.transcriptomics import normalization, provenance, qc_gate, rnaseq_pipeline
+from omicsweave.core import provenance
+from omicsweave.transcriptomics import normalization, qc_gate, rnaseq_pipeline
+from omicsweave.transcriptomics.provenance import CRITICAL_PROVENANCE_FIELDS
 from omicsweave.transcriptomics.run_wilcoxon_de import min_achievable_pvalue, run_wilcoxon_analysis
 from omicsweave.core import safety as pandas_safety
 
@@ -324,7 +326,7 @@ class ProvenanceTest(unittest.TestCase):
                    "strandedness": "rf-stranded", "gene_aggregation": "lengthScaledTPM"},
             "b2": {"transcriptome_fingerprint": "bbb", "kallisto_version": "0.48.0",
                    "strandedness": "rf-stranded", "gene_aggregation": "lengthScaledTPM"},
-        })
+        }, CRITICAL_PROVENANCE_FIELDS)
 
         self.assertFalse(result["consistent"])
         self.assertIn("transcriptome_fingerprint", result["mismatches"])
@@ -336,14 +338,14 @@ class ProvenanceTest(unittest.TestCase):
                    "strandedness": "unstranded", "gene_aggregation": "lengthScaledTPM"},
             "b2": {"transcriptome_fingerprint": "aaa", "kallisto_version": "0.48.0",
                    "strandedness": "rf-stranded", "gene_aggregation": "lengthScaledTPM"},
-        })
+        }, CRITICAL_PROVENANCE_FIELDS)
         self.assertFalse(result["consistent"])
         self.assertIn("strandedness", result["mismatches"])
 
     def test_consistent_batches_pass(self) -> None:
         same = {"transcriptome_fingerprint": "aaa", "kallisto_version": "0.48.0",
                 "strandedness": "rf-stranded", "gene_aggregation": "lengthScaledTPM"}
-        result = provenance.compare_provenance({"b1": dict(same), "b2": dict(same)})
+        result = provenance.compare_provenance({"b1": dict(same), "b2": dict(same)}, CRITICAL_PROVENANCE_FIELDS)
 
         self.assertTrue(result["consistent"])
         self.assertEqual(result["n_compared"], 2)
@@ -353,7 +355,7 @@ class ProvenanceTest(unittest.TestCase):
         result = provenance.compare_provenance({
             "b1": {"transcriptome_fingerprint": "aaa"},
             "b2": None,
-        })
+        }, CRITICAL_PROVENANCE_FIELDS)
 
         self.assertFalse(result["consistent"])
         self.assertEqual(result["missing"], ["b2"])
