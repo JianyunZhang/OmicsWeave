@@ -70,7 +70,10 @@ omics:                              # 按需启用；input.level 为 raw（下�
     # input: {{level: table, format: peak_table, source: msdial, files: [experiments/{experiment_id}/data/peaks.tsv]}}
   mfa:
     enabled: false
-    # input: {{level: table, format: legacy_mfa_xlsx, files: [experiments/{experiment_id}/mfa/flux_raw_data.xlsx]}}
+    # 旧版自研软件导出：files 依次为通量文件与可选的 MID 文件；样本名需与 samples.tsv 中 omics = mfa 的 sample_id 一致
+    # input: {{level: table, format: legacy_mfa_xlsx, model_id: central_carbon_v1, flux_units: "nmol/min/g tissue",
+    #          files: [experiments/{experiment_id}/mfa/flux_raw_data.xlsx, experiments/{experiment_id}/mfa/mid_raw_data.xlsx]}}
+    # 标准格式（omicsweave mfa template 生成模板）：format: omicsweave_mfa_xlsx；全部拟合结果用 Parquet 目录：format: mfa_tables
 
 integration:
   enabled: false

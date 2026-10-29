@@ -29,6 +29,20 @@
 | **13CFLUX2**                  | 文本/CSV 格式                             | 需预处理转换  |
 | **OpenFLUX2**                 | CSV 格式                                | 需预处理转换  |
 
+#### 标准输入格式
+
+其他软件的结果可整理成 OmicsWeave 的 MFA 标准格式（列定义见 `docs/omicsweave_arch_design_v2.md` 第 6.2 节）：
+
+```bash
+omicsweave mfa template mfa_results.xlsx           # 生成 Excel 模板，含“说明”工作表
+omicsweave mfa check mfa_results.xlsx              # 检查结构、方向、拟合编号与 MID
+omicsweave mfa convert --flux flux_raw_data.xlsx --mid mid_raw_data.xlsx     --model-id central_carbon_v1 --flux-units "nmol/min/g tissue"   # 旧版自研软件导出 → 标准格式
+omicsweave mfa check --experiment <id>             # 检查实验声明的 MFA 输入，并与 samples.tsv 核对样本
+```
+
+保留全部拟合结果时行数通常超过 Excel 上限，`convert` 默认输出 Parquet 目录（`mfa_tables`）。
+目前 `omicsweave mfa run` 仍直接读取旧版 `flux_raw_data.xlsx` / `mid_raw_data.xlsx`；改为读取标准格式是阶段 2 的工作。
+
 ### 支持的数据类型
 
 | 数据类型 | 输入文件 | 说明 |

@@ -677,6 +677,7 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 - [x] 包改名：`common`→`core`、`multiomics`→`integration`；删除兼容转发模块。
 - [x] 项目模型：`project.yaml` / `experiment.yaml` / `subjects.tsv` / `samples.tsv`，含比较角色与逆转配对。
 - [ ] 定义 `AnalysisRun` 和 `AnalysisResultBundle` 的最小字段（`omicsweave.contract`）：数据集、差异结果表与运行清单（草案 0.1）已完成，富集与 MFA 结果表待补。
+- [x] MFA 求解结果标准格式（Excel 模板 / Parquet 目录）与旧版自研软件格式转换器（`omicsweave mfa template / check / convert`，v2 第 6.2 节）。
 - [ ] 标准化单位、对比组、物种、软件版本与 QC 记录。
 - [ ] `omicsweave init / validate / migrate`；用 `migrate` 转换现有课题的旧配置：`init`、`validate` 已完成，`migrate` 等课题数据本地副本就位。
 - [ ] 删除废弃脚本（v2 第 10.5 节，已失效的已删除，其余按替代进度删除）；课题数据本地副本就位后，把课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）。

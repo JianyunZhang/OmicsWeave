@@ -81,7 +81,7 @@ omicsweave mfa run --help
 
 | 模块 | 动作 |
 |---|---|
-| `mfa` | `run`、`plot`、`report` |
+| `mfa` | `run`、`plot`、`report`；`template`、`check`、`convert`（MFA 求解结果的标准模板、检查与旧格式转换） |
 | `transcriptomics` | `run`、`plot`、`report` |
 | `metabolomics` | `run` |
 | `proteomics` | `run`、`plot`、`report` |

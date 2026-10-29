@@ -204,8 +204,10 @@ class MFAAnalyser:
             print(f"[WARN] Flux file not found: {fp}")
             return
 
-        xl = pd.ExcelFile(fp)
-        if sheet_info_name not in xl.sheet_names:
+        # 只取工作表名并立即关闭文件：pd.ExcelFile 不关闭会一直占用文件句柄（Windows 上无法移动或删除）
+        with pd.ExcelFile(fp) as xl:
+            sheet_names = set(xl.sheet_names)
+        if sheet_info_name not in sheet_names:
             print(f"[WARN] Sheet '{sheet_info_name}' not in {fp.name}")
             return
 
@@ -218,7 +220,7 @@ class MFAAnalyser:
 
         for _, row in info.iterrows():
             sn = row["sheet_name"]
-            if sn not in xl.sheet_names:
+            if sn not in sheet_names:
                 continue
             sid = str(row.get("complete_result_name", sn))
             cond = str(row.get("condition", "unknown")).lower()
@@ -279,8 +281,10 @@ class MFAAnalyser:
             print(f"[WARN] MID file not found: {fp}")
             return
 
-        xl = pd.ExcelFile(fp)
-        if sheet_info_name not in xl.sheet_names:
+        # 只取工作表名并立即关闭文件：pd.ExcelFile 不关闭会一直占用文件句柄（Windows 上无法移动或删除）
+        with pd.ExcelFile(fp) as xl:
+            sheet_names = set(xl.sheet_names)
+        if sheet_info_name not in sheet_names:
             print(f"[WARN] Sheet '{sheet_info_name}' not in {fp.name}")
             return
 
@@ -290,7 +294,7 @@ class MFAAnalyser:
         all_samples = {}
         for _, row in info.iterrows():
             sn = row["sheet_name"]
-            if sn not in xl.sheet_names:
+            if sn not in sheet_names:
                 continue
             sid = str(row.get("complete_result_name", sn))
             cond = str(row.get("condition", "unknown")).lower()

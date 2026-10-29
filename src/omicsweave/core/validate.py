@@ -237,10 +237,33 @@ def _check_inputs(exp: Experiment, out: _Collector) -> None:
             for f in spec.files:
                 if not project.resolve(f).exists():
                     out.error(f"{omics.value} 的输入文件不存在：{f}")
+            if omics is Omics.MFA:
+                _check_mfa_input(project, spec, out)
 
         executable = settings.adapter.get("executable")
         if executable and shutil.which(str(executable)) is None and not project.resolve(executable).is_file():
             out.warning(f"{omics.value} 的外部程序找不到：{executable}")
+
+
+def _check_mfa_input(project: Project, spec, out: _Collector) -> None:
+    """MFA 输入的结构检查；文件内容与样本核对见 ``omicsweave mfa check --experiment``。"""
+    files = spec.files
+    if spec.format in ("omicsweave_mfa_xlsx", "legacy_mfa_xlsx"):
+        not_xlsx = [f for f in files if not f.lower().endswith(".xlsx")]
+        if not_xlsx:
+            out.error(f"mfa 输入格式 {spec.format} 需要 .xlsx 文件：{_preview(not_xlsx)}")
+    if spec.format == "mfa_tables":
+        not_dir = [f for f in files if project.resolve(f).exists() and not project.resolve(f).is_dir()]
+        if not_dir:
+            out.error(f"mfa 输入格式 mfa_tables 需要 Parquet 目录：{_preview(not_dir)}")
+    if spec.format == "legacy_mfa_xlsx":
+        missing = [key for key in ("model_id", "flux_units") if not getattr(spec, key, None)]
+        if missing:
+            out.error(f"legacy_mfa_xlsx 需要在 mfa.input 中给出 {'、'.join(missing)}（旧文件中没有这些信息）")
+        if len(files) > 2:
+            out.error("legacy_mfa_xlsx 的 files 依次为通量文件与可选的 MID 文件，最多 2 个")
+    elif len(files) > 1:
+        out.warning(f"mfa 输入格式 {spec.format} 只读取 files 中的第一个")
 
 
 def _check_raw_files(project: Project, omics: Omics, fmt: str, layout: str | None,

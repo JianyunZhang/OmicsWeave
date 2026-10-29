@@ -37,6 +37,9 @@ COMMANDS: dict[str, dict[str, tuple[str, str]]] = {
         "run": ("omicsweave.mfa.run_mfa_analysis:main", "MFA 差异通量分析与绘图"),
         "plot": ("omicsweave.mfa.plot_mfa_results:main", "基于已生成表格重新绘图"),
         "report": ("omicsweave.mfa.generate_mfa_interpretation_report:main", "生成按组织解读报告"),
+        "template": ("omicsweave.adapters.mfa.cli:template_main", "生成 MFA 求解结果的标准 Excel 模板"),
+        "check": ("omicsweave.adapters.mfa.cli:check_main", "检查 MFA 结果文件，或检查实验的 MFA 输入"),
+        "convert": ("omicsweave.adapters.mfa.cli:convert_main", "旧版自研软件导出格式 → 标准格式"),
     },
     "transcriptomics": {
         "run": ("omicsweave.transcriptomics.rnaseq_pipeline:main", "QC → 修剪 → kallisto 定量 → 差异表达"),

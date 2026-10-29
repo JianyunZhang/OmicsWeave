@@ -322,7 +322,7 @@ integration:
 | 代谢组（靶向） | SCIEX `.wiff` + `.wiff.scan` | Thermo `.raw`、mzML | Skyline / SCIEX OS / MultiQuant | 峰面积矩阵 |
 | 代谢组（非靶向） | Thermo `.raw`、mzML | Waters `.raw`（目录） | msconvert → MS-DIAL / MZmine | 特征强度矩阵 + 注释表 |
 | 同位素示踪代谢组 | 同上 | — | 上述工具 + 天然丰度校正（IsoCor 等） | MID 表 |
-| MFA | 求解结果 Excel（标准模板） | CSV/TSV、INCA 导出 | 外部求解软件（自研软件、INCA 等） | 通量表 + MID 拟合表 |
+| MFA | 求解结果 Excel（标准模板，或旧版自研软件导出） | Parquet 目录（全部拟合结果）、INCA 导出 | 外部求解软件（自研软件、INCA 等） | 通量表 + MID 拟合表 |
 
 注意事项：
 - **原始文件只登记、不复制**：大文件留在原位置，`samples.tsv` 中写路径，可选填 MD5。
@@ -353,10 +353,21 @@ integration:
 | `units` | MFA 必填，如 `nmol/min/g tissue` |
 | `source` | 适配器名称与版本、外部工具版本、输入文件校验值 |
 
-MFA 另有专用约定（不套用普通矩阵）：
-- **通量表**：`reaction_id, subject_id, sample_id, value, ci_lower, ci_upper, units, direction, model_id, fit_id`（逐次拟合的结果可以有多行，统计时按 `subject_id` 汇总）。
-- **MID 表**：`metabolite, isotopologue, sample_id, measured, simulated, sd`。
-- **Excel 模板**：固定工作表 `flux`、`mid`、`fit_summary`，列名同上。附带模板文件和校验命令；现有自研软件的 `flux_raw_data.xlsx` / `mid_raw_data.xlsx` 通过转换器自动导入。
+MFA 另有专用约定（不套用普通矩阵；实现见 `omicsweave.contract.mfa`，阶段 1 已完成）：
+
+| 表 | 列（加粗为必填） | 说明 |
+|---|---|---|
+| `info` | **`template_version`、`model_id`、`flux_units`**、`software`、`tracer`、`notes` | 模型与单位写在这里，不逐行重复 |
+| `flux` | **`sample_id`、`tissue`、`reaction_id`、`direction`、`value`**、`fit_id`、`ci_lower`、`ci_upper` | `direction` 为 `forward` / `reverse` / `net`。可逆反应分别给出正、逆向，净通量 = 正向 − 逆向，**按同一次拟合配对计算**；求解软件直接给净通量时用 `net`。`fit_id` 留空表示每个样本一个估计值 |
+| `mid` | **`sample_id`、`metabolite`、`isotopologue`**、`tissue`、`measured`、`simulated`、`sd`、`fit_id` | 每行至少有 `measured` 或 `simulated` 之一；`simulated` 为最优拟合的模拟值 |
+| `fits` | **`sample_id`、`fit_id`、`loss`** | 每个样本取 `loss` 最小的拟合作为代表值；没有 `fits` 表时取各次拟合的均值 |
+
+- **样本与动物、分组的对应关系**不写在 MFA 表里，统一由 `samples.tsv`（`omics = mfa`）给出；`sample_id` 必须与之一致。
+- **两种载体，列定义相同**：
+  - Excel（`omicsweave_mfa_xlsx`）：工作表 `info` / `flux` / `mid` / `fits`，适合每个样本一个估计值（可附置信区间）或少量拟合。
+  - Parquet 目录（`mfa_tables`）：`info.json` 加 `flux` / `mid` / `fits.parquet`。保留全部拟合结果时，行数通常超过 Excel 的 104 万行上限（约 150 次拟合 × 450 个通量列 × 30 个样本 ≈ 200 万行），应使用这种载体。
+- **旧版自研软件格式**（`legacy_mfa_xlsx`）可以直接作为输入，`files` 依次为 `flux_raw_data.xlsx` 与可选的 `mid_raw_data.xlsx`，并在 `mfa.input` 中补充 `model_id` 与 `flux_units`；也可以用转换器一次性转为标准格式。转换结果与旧版 `MFAAnalyser` 的读取结果逐值一致（最优拟合通量、MID 矩阵、按拟合配对的净通量均有回归测试）。
+- **命令**：`omicsweave mfa template` 生成 Excel 模板（含“说明”工作表）；`omicsweave mfa check <文件>` 检查结果文件，`--experiment <ID>` 时检查实验声明的 MFA 输入并与 `samples.tsv` 核对样本；`omicsweave mfa convert` 把旧版导出转为标准格式。
 
 ---
 
@@ -522,7 +533,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | 部分：数据集、差异结果表、运行清单（草案 0.1）已完成；富集与 MFA 结果表待补 |
 | 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | 未开始 |
 | 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | 部分：`init`、`validate` 已完成；`migrate` 需要真实课题配置做对照，等本地副本就位 |
-| 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | 未开始 |
+| 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | ✅ `omicsweave mfa template / check / convert`；标准格式见第 6.2 节 |
 | 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除，其余见第 10.5 节 |
 | 1.8 合成示例项目（小型、可公开） | `examples/demo_project/`，CI 中端到端运行 | ✅ CI 中运行 `validate` |
 | 1.9 修复 SSL 校验；补 CITATION.cff（LICENSE 已于阶段 0 加入） | | ✅ |
@@ -624,7 +635,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 - [ ] 1.3 数据契约：富集结果表、MFA 结果表（数据集、差异结果表、运行清单已完成）
 - [ ] 1.4 合并溯源记录与绘图主题
 - [ ] 1.5 `omicsweave migrate`（需课题数据本地副本）
-- [ ] 1.6 MFA Excel 模板与自研软件格式转换器
+- [x] 1.6 MFA Excel 模板与自研软件格式转换器
 - [ ] 1.7 课题专用脚本移到本地工作区（需本地副本）
 - [x] 1.8 制作合成示例项目
 - [x] 1.9 修复 SSL 校验、补 CITATION.cff
