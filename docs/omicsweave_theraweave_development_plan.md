@@ -676,7 +676,7 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 
 - [x] 包改名：`common`→`core`、`multiomics`→`integration`；删除兼容转发模块。
 - [x] 项目模型：`project.yaml` / `experiment.yaml` / `subjects.tsv` / `samples.tsv`，含比较角色与逆转配对。
-- [ ] 定义 `AnalysisRun` 和 `AnalysisResultBundle` 的最小字段（`omicsweave.contract`）：数据集、差异结果表与运行清单（草案 0.1）已完成，富集与 MFA 结果表待补。
+- [x] 定义 `AnalysisRun` 和 `AnalysisResultBundle` 的最小字段（`omicsweave.contract`）：数据集、差异结果表（含 MFA 专有必填列）、富集结果表与运行清单（草案 0.1）。
 - [x] MFA 求解结果标准格式（Excel 模板 / Parquet 目录）与旧版自研软件格式转换器（`omicsweave mfa template / check / convert`，v2 第 6.2 节）。
 - [ ] 标准化单位、对比组、物种、软件版本与 QC 记录。
 - [x] 合并溯源记录（`core/provenance.py`）与绘图主题（`visualization/theme.py`）。

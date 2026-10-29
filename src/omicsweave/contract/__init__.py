@@ -16,7 +16,16 @@ from .manifest import (
     read_manifest,
     write_manifest,
 )
-from .tables import DIFFERENTIAL_COLUMNS, read_differential, validate_differential, write_differential
+from .tables import (
+    DIFFERENTIAL_COLUMNS,
+    ENRICHMENT_COLUMNS,
+    read_differential,
+    read_enrichment,
+    validate_differential,
+    validate_enrichment,
+    write_differential,
+    write_enrichment,
+)
 
 
 def export_json_schema() -> dict[str, dict[str, Any]]:
@@ -31,6 +40,7 @@ __all__ = [
     "BUNDLE_SCHEMA_VERSION",
     "ContractError",
     "DIFFERENTIAL_COLUMNS",
+    "ENRICHMENT_COLUMNS",
     "Dataset",
     "DatasetMeta",
     "FileRecord",
@@ -42,9 +52,12 @@ __all__ = [
     "new_run_id",
     "read_dataset",
     "read_differential",
+    "read_enrichment",
     "read_manifest",
     "validate_differential",
+    "validate_enrichment",
     "write_dataset",
     "write_differential",
+    "write_enrichment",
     "write_manifest",
 ]

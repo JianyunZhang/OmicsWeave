@@ -419,9 +419,40 @@ analysis_results/<experiment_id>/<run_id>/
 | `statistic`、`pvalue`、`padj`、`padj_method` | |
 | `n_numerator`、`n_denominator` | 实际参与检验的**生物学重复**数 |
 | `min_achievable_p` | 秩检验在当前样本量下可达到的最小 p 值（沿用 MFA 模块已有的逻辑） |
-| `method`、`flags` | 检验方法；标记（如 `at_bound`、`low_n`、`imputed`） |
+| `method`、`flags` | 检验方法或证据路径（如 `deseq2`、`ttest`、`effect_size_only`）；标记（如 `low_n`、`underpowered`、`effect_size_undefined`） |
+| `mean_numerator`、`mean_denominator`、`units` | 两组均值及其单位 |
+| `inference_unit`、`evidence_level` | 推断单位（如 `biological_replicate`）；证据等级 `statistical_test` / `effect_size_only` / `insufficient` |
+| `selected`、`selection_rule` | 是否入选，以及入选规则的文字描述 |
 
-富集结果、MFA 通量结果另行规定列名，但统一包含 `contrast_id / tissue / omics`，便于整合模块直接合并。候选通路与候选靶点表（`hypotheses/`）的字段见总纲 3.5 节。
+**MFA 的行另有必填列**：`effect_size`、`effect_size_type`、`mean_numerator`、`mean_denominator`、`units`、`inference_unit`、`evidence_level`。
+- `pvalue` / `padj` 取主检验路径的值。样本量不足以达到显著时，证据路径为 `effect_size_only`，`pvalue` 为空，`padj_method` 为 `none`。
+- 效应量只在两种情况下允许为空：`evidence_level = insufficient`，或行上标记了 `effect_size_undefined`（例如所有动物都贴在约束边界，两组方差均为 0，Hedges' g 为 0/0）。
+- 可辨识性、贴边比例、稳定性校准等 MFA 专有指标为可选列：`identifiability`、`frac_at_bound`、`selection_probability`、`direction_stability`、`permutation_pvalue`。
+
+### 8.2b 富集结果统一列名（`enrichment.parquet`）
+
+比较层面的通路富集结果，ORA 与预排序 GSEA 共用一张表。样本层面的 ssGSEA 得分属于数据集（行为通路、列为样本），不放在这里。
+
+| 列 | 说明 |
+|---|---|
+| `contrast_id`、`contrast_role`、`tissue`、`omics` | 同差异结果表 |
+| `method`、`query` | `ora`（`query` 为所用特征列表：`up` / `down` / `all`）或 `gsea_prerank`（`query` 为 `ranked`） |
+| `gene_set_library`、`term_id`、`term_name` | 基因集库、条目 ID（如 `ko00010`、`GO:0006096`，可空）、条目名称 |
+| `pvalue`、`padj`、`padj_method` | GSEA 自带的 FDR q 值记为 `gsea_fdr` |
+| `effect_direction` | `up` / `down` / `mixed` / `none`：ORA 由查询列表决定（`all` → `mixed`），GSEA 由 NES 的符号决定 |
+| `overlap_size`、`set_size` | ORA 必填：命中数与通路大小；GSEA 为 leading edge 数与通路大小 |
+| `query_size`、`universe_size`、`odds_ratio` | ORA 可选 |
+| `es`、`nes` | GSEA；`nes` 必填 |
+| `hit_features`、`tool`、`flags` | 以分号分隔的命中特征；产生结果的工具 |
+
+**从现有输出转换**（阶段 2 各组学改为直接写出统一表之前使用）：
+- `omicsweave.mfa.export.differential_flux_to_contract`：MFA 差异通量宽表；
+- `omicsweave.adapters.gseapy_results.enrichr_to_contract` / `prerank_to_contract`：转录组、蛋白组的 gseapy 结果；
+- `omicsweave.metabolomics.export.ora_to_contract`：代谢组 ORA。
+
+测试中这些转换器的输入来自真实函数：MFA 的 `differential_flux`、代谢组的 `calculate_pathway_enrichment`、gseapy 的 `prerank`。
+
+候选通路与候选靶点表（`hypotheses/`）的字段见总纲 3.5 节。
 
 ### 8.3 图件、报告与溯源
 
@@ -530,7 +561,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 |---|---|---|
 | 1.1 改名：`common`→`core`，`multiomics`→`integration`；删除兼容转发模块 | 新包结构 | ✅ `core` 下分出 `statistics/`、`idmap/`、`safety.py`；`integration` 内原 `integration/` 子包改名为 `methods/` |
 | 1.2 项目模型与配置校验（`core/model.py`、`config.py`），含比较角色与逆转配对 | `project.yaml` / `experiment.yaml` / 样本表的规范与校验 | ✅ 含 `core/validate.py` 全部第 5.6 节规则 |
-| 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | 部分：数据集、差异结果表、运行清单（草案 0.1）已完成；富集与 MFA 结果表待补 |
+| 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | ✅ 数据集、差异结果表（含 MFA 专有必填列）、富集结果表、运行清单（草案 0.1），以及从现有输出转换的函数；见第 8.2 节 |
 | 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | ✅ 另把 `contract` 与蛋白组 DIA-NN 搜库中的文件哈希也改用 `core.provenance.sha256_file` |
 | 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | 部分：`init`、`validate` 已完成；`migrate` 需要真实课题配置做对照，等本地副本就位 |
 | 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | ✅ `omicsweave mfa template / check / convert`；标准格式见第 6.2 节 |
@@ -632,7 +663,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 - [ ] 在 GitHub 上跑通 CI
 - [x] 1.1 包改名、删除兼容转发模块
 - [x] 1.2 `project.yaml` / `experiment.yaml` / 样本表规范与 `omicsweave validate`
-- [ ] 1.3 数据契约：富集结果表、MFA 结果表（数据集、差异结果表、运行清单已完成）
+- [x] 1.3 数据契约：数据集、差异结果表（含 MFA）、富集结果表、运行清单
 - [x] 1.4 合并溯源记录与绘图主题
 - [ ] 1.5 `omicsweave migrate`（需课题数据本地副本）
 - [x] 1.6 MFA Excel 模板与自研软件格式转换器
