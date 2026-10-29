@@ -4,7 +4,7 @@ pytest 全局配置。
 ``--project-dir <目录>`` 指定实验项目目录（例如 ``local/projects/<课题名>``）。
 需要真实实验数据的测试只在该目录中找到对应数据时运行，否则自动跳过。
 """
-from omicsweave.common.project import set_project_dir
+from omicsweave.core.project import set_project_dir
 
 
 def pytest_addoption(parser):

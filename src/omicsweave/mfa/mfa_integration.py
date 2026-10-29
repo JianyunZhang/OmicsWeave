@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from omicsweave.common.meta_analysis import random_effects_meta
+from omicsweave.core.statistics.meta_analysis import random_effects_meta
 
 # ─── 常量 ──────────────────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from omicsweave.common.metabolite_id_mapping import annotate_metabolites
+from omicsweave.core.idmap.metabolite_id_mapping import annotate_metabolites
 from omicsweave.metabolomics.data_preprocessing import (
     PreprocessingOptions,
     classify_data_columns,

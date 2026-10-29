@@ -542,7 +542,7 @@ class DownstreamCompatibilityTests(unittest.TestCase):
     def test_multiomics_loader_names_new_evidence_columns_per_comparison(self) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            from omicsweave.multiomics.loaders.metabolomics_loader import MetabolomicsLoader
+            from omicsweave.integration.loaders.metabolomics_loader import MetabolomicsLoader
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

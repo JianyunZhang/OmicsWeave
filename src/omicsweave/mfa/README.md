@@ -209,7 +209,7 @@ MFA 模块采用**配置层 + 计算层 + 可视化层**三层架构，与实验
 - `mfa_results/integration/` 作为跨 tracer 汇总与联合评分固定出口
 - `all_tissues/` 目录按设计仅包含 `0_qc/3_pca_clustering/6_tissue_overview/7_mid_analysis`，不包含 `1_volcano/2_heatmap/4_pathway_flux`
 - 多组学集成 loader 通过递归 glob (`**/`) 自动发现所有组织子目录的文件并合并
-- 所有差异通量输出自动附带公共数据库通路注释（ec_number, kegg_pathway, reactome_id），由 `omicsweave/common/reaction_pathway_mapping.py` 提供统一映射
+- 所有差异通量输出自动附带公共数据库通路注释（ec_number, kegg_pathway, reactome_id），由 `omicsweave/core/idmap/reaction_pathway_mapping.py` 提供统一映射
 - 绘图层兼容新旧 `01_df_results` 布局（`all_tissues/` 新路径 / 历史根层级旧路径），重绘时会统一输出到标准 `02_result_plot/<tissue>/...` 路径
 - 两个流程可独立运行：`run_mfa_analysis.py`（支持多运行模式），`plot_mfa_results.py` 仅重新生成图表
 
@@ -598,7 +598,7 @@ Excel 工作簿，结构与 flux 文件类似：
 `effect_size_only`，用基于生物学重复的 |Hedges' g| + |log2FC| 选择，
 并在日志中打印 `[POWER]` / `[AUTO]` 提示。这样避免把
 「0 个显著通量」这一组合数学上限误读成生物学结论。
-实现见 `omicsweave/common/nonparametric.py`。
+实现见 `omicsweave/core/statistics/nonparametric.py`。
 
 **显著性阈值**（由 `analysis.differential_flux` 配置，见下文覆盖链）：
 - `pvalue_threshold` / `fdr_threshold` — p 值路径
@@ -643,7 +643,7 @@ Excel 工作簿，结构与 flux 文件类似：
 | `reactome_id` | Reactome 反应 ID，如 `R-MMU-70493` |
 | `description` | 反应英文描述 |
 
-**通路注释说明**：以上 5 个注释列由 `omicsweave/common/reaction_pathway_mapping.py` 中的 `annotate_flux_dataframe()` 函数自动添加，无需手动干预。映射表包含 137 个 MFA 反应 ID，覆盖糖酵解、TCA 循环、磷酸戊糖途径、脂肪酸代谢、氨基酸代谢、酮体代谢等主要代谢通路。注释列极大地方便了多组学集成分析时按 KEGG/Reactome 通路进行跨组学 join 操作。
+**通路注释说明**：以上 5 个注释列由 `omicsweave/core/idmap/reaction_pathway_mapping.py` 中的 `annotate_flux_dataframe()` 函数自动添加，无需手动干预。映射表包含 137 个 MFA 反应 ID，覆盖糖酵解、TCA 循环、磷酸戊糖途径、脂肪酸代谢、氨基酸代谢、酮体代谢等主要代谢通路。注释列极大地方便了多组学集成分析时按 KEGG/Reactome 通路进行跨组学 join 操作。
 
 **文献依据**：
 - Crown SB, Antoniewicz MR. (2013). "Publishing 13C metabolic flux analysis studies: a review and future perspectives". *Metabolic Engineering*, 20, 42-48.
@@ -1498,7 +1498,7 @@ Mann-Whitney 精确检验的最小双侧 p 值为 `2/C(n1+n2, n1)`，由样本�
 BH 校正后还有第二道下界（`min_achievable_fdr`）：即使未校正 p 可达，
 在数百条通量上做校正后仍可能整体不可达。
 
-实现见 `omicsweave/common/nonparametric.py`；结果列
+实现见 `omicsweave/core/statistics/nonparametric.py`；结果列
 `min_achievable_pvalue` / `min_achievable_fdr` / `rank_test_underpowered` /
 `fdr_unreachable`。
 
@@ -1674,7 +1674,7 @@ pathway_groups:
 
 ### 概述
 
-MFA 分析模块通过 `omicsweave/common/reaction_pathway_mapping.py` 为所有自定义反应 ID 提供公共数据库通路注释。该模块是项目级别的单一数据源（single source of truth），被 MFA 管线、多组学集成和任何需要反应-通路映射的工具共享使用。
+MFA 分析模块通过 `omicsweave/core/idmap/reaction_pathway_mapping.py` 为所有自定义反应 ID 提供公共数据库通路注释。该模块是项目级别的单一数据源（single source of truth），被 MFA 管线、多组学集成和任何需要反应-通路映射的工具共享使用。
 
 ### 映射表内容
 
@@ -1709,7 +1709,7 @@ MFA 分析模块通过 `omicsweave/common/reaction_pathway_mapping.py` 为所有
 ### 使用示例
 
 ```python
-from omicsweave.common.reaction_pathway_mapping import (
+from omicsweave.core.idmap.reaction_pathway_mapping import (
     get_kegg_pathway, get_ec_number, annotate_flux_dataframe,
 )
 
@@ -1726,9 +1726,9 @@ annotated = annotate_flux_dataframe(df)
 
 ### 设计原则
 
-- **单一数据源**：定义在 `omicsweave/common/`，所有模块共享同一份映射
+- **单一数据源**：定义在 `omicsweave/core/`，所有模块共享同一份映射
 - **自动注释**：MFA 差分通量 CSV 输出时自动 join 注释列，无需手动调用
-- **向后兼容**：`omicsweave/multiomics/mappings/reaction_registry.py` 保留为 re-export，旧导入路径仍可用
+- **向后兼容**：`omicsweave/integration/mappings/reaction_registry.py` 保留为 re-export，旧导入路径仍可用
 - **缺失容忍**：聚合反应或转运反应对应的注释字段为 `None`，下游代码应做空值检查
 
 ---

@@ -36,12 +36,12 @@ from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from omicsweave.common.stability import calibrate_biological_stability
-from omicsweave.common.nonparametric import (
+from omicsweave.core.statistics.stability import calibrate_biological_stability
+from omicsweave.core.statistics.nonparametric import (
     min_achievable_bh_fdr,
     min_achievable_pvalue,
 )
-from omicsweave.common.reaction_pathway_mapping import annotate_flux_dataframe
+from omicsweave.core.idmap.reaction_pathway_mapping import annotate_flux_dataframe
 
 warnings.filterwarnings("ignore")
 

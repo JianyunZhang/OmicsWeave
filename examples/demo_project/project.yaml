@@ -1,0 +1,10 @@
+# 合成示例项目：所有数据均为随机生成，不对应任何真实实验。
+schema_version: 1
+project:
+  id: demo_dio_glp1
+  title: 合成示例：饮食诱导肥胖小鼠的 GLP-1 干预
+  species: mus_musculus
+defaults:
+  padj_method: fdr_bh
+  alpha: 0.05
+  random_seed: 20261029

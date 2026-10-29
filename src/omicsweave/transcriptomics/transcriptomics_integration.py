@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from omicsweave.common.meta_analysis import random_effects_meta
+from omicsweave.core.statistics.meta_analysis import random_effects_meta
 
 from .experiment_config import (  # type: ignore
     discover_experiment_protocols,

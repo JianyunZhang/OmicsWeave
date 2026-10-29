@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use OmicsWeave in your research, please cite it as below."
+title: "OmicsWeave: A Modular Python Toolkit for Multi-Omics Data Analysis and Integration"
+type: software
+authors:
+  - family-names: Zhang
+    given-names: Jianyun
+version: 0.1.0.dev0
+license: BSD-3-Clause
+repository-code: "https://github.com/JianyunZhang/omicsweave"
+keywords:
+  - multi-omics
+  - metabolic flux analysis
+  - transcriptomics
+  - proteomics
+  - metabolomics

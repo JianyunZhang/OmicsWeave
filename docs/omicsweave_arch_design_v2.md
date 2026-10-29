@@ -2,7 +2,7 @@
 
 > 文档类型：架构规划 + 实施计划
 > 版本：v2.1（2026-10-29），在 [v1](omicsweave_arch_design.md) 基础上修订；v1 中“单仓库 + 单分发包 + 可选依赖 + 分阶段拆分”的仓库组织决策继续有效，本文不再重复论证
-> 当前状态：阶段 0（工程化打包）已完成，见第 3 节
+> 当前状态：阶段 0（工程化打包）已完成，见第 3 节；阶段 1 进行中，进度见第 11 节
 > 配套文档：[OmicsWeave × TheraWeave 开发规划](omicsweave_theraweave_development_plan.md) 是两个系统的总纲，**结果数据格式与交换契约以总纲为准**。本文的阶段 0–4 即总纲中的 O0–O4
 > v2.1 修订：与总纲 v1.1 同步——结果正式格式改为 Parquet；结果目录加入运行 ID；比较增加角色与逆转配对；包结构增加 `contract`、`evidence`、`reporting`；阶段 2 增加证据层与交换契约 v1；第 13 节改为决策记录；新增本地课题工作区、集群与联网的预留约束和阶段 5
 
@@ -119,14 +119,16 @@
 ```text
 src/omicsweave/
 ├── core/
-│   ├── project.py          # 项目目录定位（阶段 0 已有，位于 common/）
-│   ├── model.py            # Project / Experiment / Subject / Sample / Factor / Contrast
-│   ├── config.py           # YAML 与样本表的读取和校验
+│   ├── project.py          # 项目目录定位 ✅
+│   ├── model.py            # project.yaml / experiment.yaml 的 Pydantic 模型 ✅
+│   ├── config.py           # YAML 与样本表的读取 ✅
+│   ├── validate.py         # 结合样本表与文件系统的校验（omicsweave validate）✅
+│   ├── scaffold.py         # 项目模板（omicsweave init）✅
 │   ├── provenance.py       # 合并现有 3 份 provenance
-│   ├── statistics/         # nonparametric / meta_analysis / stability
-│   ├── idmap/              # ID 映射：数据文件 + 解析器
-│   └── safety.py           # pandas_safety
-├── contract/               # 分析层数据集、结果表与结果包的 Pydantic 模型、读写和校验；导出 JSON Schema
+│   ├── statistics/         # nonparametric / meta_analysis / stability ✅
+│   ├── idmap/              # ID 映射（暂为原有字典，阶段 2 改为数据文件 + 解析器）
+│   └── safety.py           # pandas 数值安全检查 ✅
+├── contract/               # 分析层数据集、结果表与结果包的 Pydantic 模型、读写和校验；导出 JSON Schema（草案 ✅）
 ├── adapters/
 │   ├── base.py             # 适配器接口：检查工具、运行或导入、产出数据契约
 │   ├── rnaseq/             # kallisto、salmon、计数矩阵导入
@@ -135,7 +137,7 @@ src/omicsweave/
 │   └── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
 ├── transcriptomics/  proteomics/  metabolomics/  mfa/
 │   └── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
-├── integration/            # 跨组学统计整合，由现 multiomics/ 改名
+├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
 ├── visualization/
@@ -288,7 +290,7 @@ integration:
 | 列 | 必填 | 说明 |
 |---|---|---|
 | `sample_id` | 是 | 项目内唯一 |
-| `subject_id` | 是 | 对应 `subjects.tsv` |
+| `subject_id` | 生物学样本必填 | 对应 `subjects.tsv`；QC、空白、混样等非生物学样本可留空 |
 | `omics` | 是 | `transcriptomics` / `proteomics` / `metabolomics` / `mfa` |
 | `tissue` | 是 | 组织或体液 |
 | `timepoint` | 否 | 数值，单位在 `factors` 中声明 |
@@ -450,7 +452,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 ## 10. 现有代码整合清单
 
-依据模块之间的导入关系与实际用途整理（行数为当前值）。
+依据模块之间的导入关系与实际用途整理（行数为当前值）。下文沿用改名前的路径：阶段 1 已把 `common/` 改为 `core/`（统计模块在 `core/statistics/`，ID 映射在 `core/idmap/`），`multiomics/` 改为 `integration/`，其中的 `multiomics/integration/` 子包改为 `integration/methods/`。
 
 ### 10.1 保留，迁入 `core` / `visualization` 并合并
 
@@ -487,17 +489,19 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 另外，`multiomics/pipeline_evaluation_report.md`（已标注为历史文档）移到 `docs/history/`。
 
-### 10.5 删除（需逐项确认）
+### 10.5 删除
 
-| 文件 | 原因 |
-|---|---|
-| `transcriptomics/rerun_enrichment.py` | 已无法运行（导入的函数已不存在） |
-| `transcriptomics/rerun_de_analysis.py`、`finish_gsea.py`、`summarize_gsea.py`、`run_enrichment.py`、`run_gsea.py` | 一次性补跑或薄包装脚本，由 `omicsweave run --steps` 取代 |
-| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 |
-| `transcriptomics/setup_kallisto.py`、`download_transcriptome.py` | 只适用于 Windows 和小鼠，且关闭了 SSL 校验；改为文档说明外部工具安装 + 配置参考文件路径 |
-| `transcriptomics/run_rna_seq.sh` | 自动生成的 STAR 脚本，路径是占位符，代码中没有使用 |
-| `proteomics/run_proteomics_analysis.py` | 已标注弃用的兼容入口 |
-| 兼容转发模块：`multiomics/integration/meta_analysis.py`、`stability.py`，`mappings/reaction_registry.py`、`gene_annotations.py`、`metabolite_annotations.py`、`protein_annotations.py` | 目前没有外部用户，可直接改为新路径导入 |
+原则：已失效或已有替代的立即删除；仍提供实际功能的脚本，等替代命令就绪后再删。
+
+| 文件 | 原因 | 状态 |
+|---|---|---|
+| `transcriptomics/rerun_enrichment.py` | 已无法运行（导入的函数已不存在） | ✅ 已删除 |
+| `transcriptomics/run_rna_seq.sh` | 自动生成的 STAR 脚本，路径是占位符，代码中没有使用 | ✅ 已删除 |
+| `proteomics/run_proteomics_analysis.py` | 已标注弃用的兼容入口 | ✅ 已删除 |
+| 兼容转发模块：`multiomics/integration/meta_analysis.py`、`stability.py`，`mappings/reaction_registry.py`、`gene_annotations.py`、`metabolite_annotations.py`、`protein_annotations.py` | 目前没有外部用户，已改为新路径导入 | ✅ 已删除 |
+| `transcriptomics/rerun_de_analysis.py`、`finish_gsea.py`、`summarize_gsea.py`、`run_enrichment.py`、`run_gsea.py` | 一次性补跑或薄包装脚本，由 `omicsweave run --steps` 取代 | 阶段 2 替代命令就绪后删除 |
+| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 | 随课题专用脚本移到本地工作区（第 10.4 节） |
+| `transcriptomics/setup_kallisto.py`、`download_transcriptome.py` | 只适用于 Windows 和小鼠；SSL 校验已恢复默认开启 | 阶段 3 由外部工具适配器取代后删除 |
 
 ---
 
@@ -509,19 +513,20 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 可安装、可导入、统一命令行、测试与 CI 配置、大文件移出仓库。
 
-### 阶段 1：核心契约与项目模型（约 6–8 周）→ v0.2
+### 阶段 1：核心契约与项目模型（约 6–8 周）→ v0.2（进行中）
 
-| 任务 | 交付物 |
-|---|---|
-| 1.1 改名：`common`→`core`，`multiomics`→`integration`；删除兼容转发模块 | 新包结构 |
-| 1.2 项目模型与配置校验（`core/model.py`、`config.py`），含比较角色与逆转配对 | `project.yaml` / `experiment.yaml` / 样本表的规范与校验 |
-| 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） |
-| 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` |
-| 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 |
-| 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 |
-| 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 |
-| 1.8 合成示例项目（小型、可公开） | `examples/demo_project/`，CI 中端到端运行 |
-| 1.9 修复 SSL 校验；补 CITATION.cff（LICENSE 已于阶段 0 加入） | |
+| 任务 | 交付物 | 状态（2026-10-29） |
+|---|---|---|
+| 1.1 改名：`common`→`core`，`multiomics`→`integration`；删除兼容转发模块 | 新包结构 | ✅ `core` 下分出 `statistics/`、`idmap/`、`safety.py`；`integration` 内原 `integration/` 子包改名为 `methods/` |
+| 1.2 项目模型与配置校验（`core/model.py`、`config.py`），含比较角色与逆转配对 | `project.yaml` / `experiment.yaml` / 样本表的规范与校验 | ✅ 含 `core/validate.py` 全部第 5.6 节规则 |
+| 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | 部分：数据集、差异结果表、运行清单（草案 0.1）已完成；富集与 MFA 结果表待补 |
+| 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | 未开始 |
+| 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | 部分：`init`、`validate` 已完成；`migrate` 需要真实课题配置做对照，等本地副本就位 |
+| 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | 未开始 |
+| 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除，其余见第 10.5 节 |
+| 1.8 合成示例项目（小型、可公开） | `examples/demo_project/`，CI 中端到端运行 | ✅ CI 中运行 `validate` |
+| 1.9 修复 SSL 校验；补 CITATION.cff（LICENSE 已于阶段 0 加入） | | ✅ |
+| 1.10 运行函数改为接受显式项目上下文，逐步去除进程级全局状态 | 为阶段 5 预留 | 未开始 |
 
 **验收标准**
 - 示例项目能通过 `validate`。
@@ -612,10 +617,14 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 - [x] 加入 `LICENSE`（版权方 The OmicsWeave Developers）与 `pyproject.toml` 许可证字段
 - [x] 建立本地课题工作区 `local/` 与 `pytest --project-dir` 选项
 - [ ] 把课题数据副本拷贝到 `local/projects/<课题>/`，用 `pytest --project-dir` 跑通需要真实数据的 3 个测试
-- [ ] 提交阶段 0 的改动
+- [x] 提交阶段 0 的改动
 - [ ] 在 GitHub 上跑通 CI
-- [ ] 1.1 包改名、删除兼容转发模块
-- [ ] 1.2 定稿 `project.yaml` / `experiment.yaml` / 样本表规范（以本文第 5 节为草案）
-- [ ] 1.3 定稿数据契约与差异结果列名（以第 6.2、8.2 节为草案）
-- [ ] 1.7 移出课题专用脚本、删除废弃脚本
-- [ ] 1.8 制作合成示例项目
+- [x] 1.1 包改名、删除兼容转发模块
+- [x] 1.2 `project.yaml` / `experiment.yaml` / 样本表规范与 `omicsweave validate`
+- [ ] 1.3 数据契约：富集结果表、MFA 结果表（数据集、差异结果表、运行清单已完成）
+- [ ] 1.4 合并溯源记录与绘图主题
+- [ ] 1.5 `omicsweave migrate`（需课题数据本地副本）
+- [ ] 1.6 MFA Excel 模板与自研软件格式转换器
+- [ ] 1.7 课题专用脚本移到本地工作区（需本地副本）
+- [x] 1.8 制作合成示例项目
+- [x] 1.9 修复 SSL 校验、补 CITATION.cff

@@ -21,7 +21,7 @@ from typing import Any, Sequence
 import pandas as pd
 import yaml
 
-from omicsweave.common.project import project_dir
+from omicsweave.core.project import project_dir
 
 
 # ============================================================================
@@ -85,7 +85,7 @@ class ProteomicsConfig:
 # ============================================================================
 
 def repo_root() -> Path:
-    """项目目录（实验配置与结果所在仓库），见 :func:`omicsweave.common.project.project_dir`。"""
+    """项目目录（实验配置与结果所在仓库），见 :func:`omicsweave.core.project.project_dir`。"""
     return project_dir()
 
 

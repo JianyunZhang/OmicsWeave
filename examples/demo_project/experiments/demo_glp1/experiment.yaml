@@ -1,0 +1,43 @@
+schema_version: 1
+experiment:
+  id: demo_glp1
+  description: LFD/HFD 小鼠肝脏转录组与代谢组；HFD 小鼠分 Saline 与 GLP1 处理（合成数据）
+  metadata:
+    intervention_duration: 4 weeks
+
+design:
+  subjects: subjects.tsv
+  samples: samples.tsv
+  factors:
+    diet:      {level: subject, levels: [LFD, HFD], reference: LFD}
+    treatment: {level: subject, levels: [Saline, GLP1], reference: Saline}
+    timepoint: {level: sample, type: numeric, unit: week}
+  contrasts:
+    - {id: HFD_vs_LFD, factor: diet, numerator: HFD, denominator: LFD,
+       subset: {treatment: Saline}, role: disease_effect}
+    - {id: GLP1_vs_Saline_in_HFD, factor: treatment, numerator: GLP1, denominator: Saline,
+       subset: {diet: HFD}, role: treatment_effect}
+  reversal_pairs:
+    - {disease: HFD_vs_LFD, treatment: GLP1_vs_Saline_in_HFD}
+  stratify_by: [tissue]
+  covariates: [batch]
+
+omics:
+  transcriptomics:
+    enabled: true
+    input:
+      level: table
+      format: counts_matrix
+      files: [experiments/demo_glp1/data/rna_counts.tsv]
+  metabolomics:
+    enabled: true
+    input:
+      level: table
+      format: peak_table
+      source: msdial
+      mode: untargeted
+      files: [experiments/demo_glp1/data/metabolite_peaks.tsv]
+
+integration:
+  enabled: true
+  modes: [pathway_convergence, sample_level]

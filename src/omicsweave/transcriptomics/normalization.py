@@ -28,8 +28,8 @@ import pandas as pd
 # `DataFrame.mul(Series, axis=0)`；在 35,983 基因 × 95 样本（341 万元素）
 # 下它越过 pandas 的 numexpr 阈值，实测约 93% 的输出被静默填成 0，
 # 且每次运行错的位置都不同。19 样本（68 万元素）时完全正常，所以小规模
-# 单元测试测不到。详见 omicsweave/common/pandas_safety.py。
-from omicsweave.common.pandas_safety import harden_pandas
+# 单元测试测不到。详见 omicsweave/core/safety.py。
+from omicsweave.core.safety import harden_pandas
 
 harden_pandas()
 
@@ -164,7 +164,7 @@ def _assert_aggregation_sane(
         f"  受影响样本 : {len(bad)} / {len(ratio)}（阈值 {min_ratio:.0%}）\n"
         f"  最差样本   : {worst} 保留 {bad.min():.1%} 的非零基因\n"
         "  常见成因   : pandas 的 numexpr 路径在 >100 万元素时静默算错；\n"
-        "               请确认 omicsweave/common/pandas_safety.py 的 "
+        "               请确认 omicsweave/core/safety.py 的 "
         "harden_pandas() 已生效，\n"
         "               或用 assert_broadcast_ops_sane() 探测当前环境。"
     )

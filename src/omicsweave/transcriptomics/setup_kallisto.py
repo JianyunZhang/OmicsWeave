@@ -6,7 +6,7 @@ import zipfile
 import urllib.request
 import time
 
-from omicsweave.common.project import project_dir
+from omicsweave.core.project import project_dir
 
 # 外部程序安装到项目目录，而不是安装后的包目录
 TOOLS_DIR = os.path.join(str(project_dir()), "tools")
@@ -15,9 +15,8 @@ KALLISTO_EXE = os.path.join(TOOLS_DIR, "kallisto", "kallisto.exe")
 
 
 def download_file(url, dest, label=""):
+    # 保持默认的证书与主机名校验；网络环境无法校验时请手动下载
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
     
     req = urllib.request.Request(url, headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'

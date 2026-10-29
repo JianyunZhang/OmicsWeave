@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 
-from omicsweave.common.project import project_dir
+from omicsweave.core.project import project_dir
 from omicsweave.proteomics.diann_search import DiannSearchError, run_tissue_search  # noqa: E402
 from omicsweave.proteomics.enrichment.gsea import (  # noqa: E402
     build_ranked_list,

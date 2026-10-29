@@ -1,0 +1,27 @@
+sample_id	subject_id	omics	tissue	timepoint	batch	sample_type	files
+rna_liver_m01	m01	transcriptomics	liver	4	b1	sample	
+rna_liver_m02	m02	transcriptomics	liver	4	b2	sample	
+rna_liver_m03	m03	transcriptomics	liver	4	b1	sample	
+rna_liver_m04	m04	transcriptomics	liver	4	b2	sample	
+rna_liver_m05	m05	transcriptomics	liver	4	b1	sample	
+rna_liver_m06	m06	transcriptomics	liver	4	b2	sample	
+rna_liver_m07	m07	transcriptomics	liver	4	b1	sample	
+rna_liver_m08	m08	transcriptomics	liver	4	b2	sample	
+rna_liver_m09	m09	transcriptomics	liver	4	b1	sample	
+rna_liver_m10	m10	transcriptomics	liver	4	b2	sample	
+rna_liver_m11	m11	transcriptomics	liver	4	b1	sample	
+rna_liver_m12	m12	transcriptomics	liver	4	b2	sample	
+met_liver_m01	m01	metabolomics	liver	4	m1	sample	
+met_liver_m02	m02	metabolomics	liver	4	m1	sample	
+met_liver_m03	m03	metabolomics	liver	4	m1	sample	
+met_liver_m04	m04	metabolomics	liver	4	m1	sample	
+met_liver_m05	m05	metabolomics	liver	4	m1	sample	
+met_liver_m06	m06	metabolomics	liver	4	m1	sample	
+met_liver_m07	m07	metabolomics	liver	4	m1	sample	
+met_liver_m08	m08	metabolomics	liver	4	m1	sample	
+met_liver_m09	m09	metabolomics	liver	4	m1	sample	
+met_liver_m10	m10	metabolomics	liver	4	m1	sample	
+met_liver_m11	m11	metabolomics	liver	4	m1	sample	
+met_liver_m12	m12	metabolomics	liver	4	m1	sample	
+met_qc_pool_1		metabolomics	liver		m1	qc	
+met_qc_pool_2		metabolomics	liver		m1	qc	

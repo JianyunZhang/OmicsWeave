@@ -37,9 +37,9 @@
 | `enrichment/gsea.py` | 样本级 ssGSEA 与比较级 pre-ranked GSEA |
 | `plotting/` | PCA、热图、火山图及独立重绘 |
 | `generate_interpretation_report.py` | FDR/证据等级感知的 Markdown 报告 |
-| `test_proteomics_pipeline.py` | 聚焦回归测试 |
+| `tests/proteomics/test_proteomics_pipeline.py`（仓库根目录） | 聚焦回归测试 |
 
-`run_proteomics_analysis.py` 仅是兼容入口，旧版统计实现已经删除；新分析应直接使用 `run_proteomics_pipeline.py`。
+旧的兼容入口 `run_proteomics_analysis.py` 已删除；请使用 `omicsweave proteomics run`（即 `run_proteomics_pipeline.py`）。
 
 ## 运行方式
 

@@ -18,7 +18,7 @@ DE 结果 CSV 增加数据库交叉引用字段，便于与 MFA-gene mapping 字
     enriched.to_csv("de_results_annotated.csv")
 
 依赖:
-    omicsweave/common/mouse_gene_id_mapping.py
+    omicsweave/core/idmap/mouse_gene_id_mapping.py
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import pandas as pd
 
 def _get_annotation_funcs():
     """延迟导入共用映射模块（避免循环依赖）。"""
-    from omicsweave.common.mouse_gene_id_mapping import (
+    from omicsweave.core.idmap.mouse_gene_id_mapping import (
         get_ncbi_gene_id,
         get_ensembl_gene_id,
         get_gene_name,

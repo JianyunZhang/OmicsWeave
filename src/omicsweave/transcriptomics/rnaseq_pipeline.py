@@ -41,7 +41,7 @@ from .normalization import (
 )
 from . import qc_gate
 from . import provenance as provenance_mod
-from omicsweave.common.project import PROJECT_DIR_ENV, project_dir
+from omicsweave.core.project import PROJECT_DIR_ENV, project_dir
 
 # ============================================================================
 # CONFIGURATION — all values are loaded from experiment YAML config.

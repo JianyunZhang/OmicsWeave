@@ -8,7 +8,7 @@ import time
 import urllib.request
 import ssl
 
-from omicsweave.common.project import project_dir
+from omicsweave.core.project import project_dir
 
 # 参考数据下载到项目目录，而不是安装后的包目录
 OUTPUT_DIR = os.path.join(str(project_dir()), "reference")
@@ -29,9 +29,8 @@ URLS = [
 
 def download_with_progress(url, output_path, timeout=600):
     """Download with chunked progress display."""
+    # 保持默认的证书与主机名校验；网络环境无法校验时请手动下载
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
 
     req = urllib.request.Request(url, headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'

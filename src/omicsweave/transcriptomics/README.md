@@ -258,7 +258,7 @@ Step 8 ── 自动化解读报告 ──→ 06_interpretation_report/
 - **物种**：小鼠（*Mus musculus*）
 - **参考转录组**：Ensembl GRCm39 cDNA (`Mus_musculus.GRCm39.cdna.all.fa.gz`)，或 GENCODE vM35
 - **基因注释来源**：Ensembl 转录本 ID → 基因 symbol（从 FASTA header 提取）
-- **多组学 ID 映射**：`omicsweave/common/mouse_gene_id_mapping.py` 提供 gene symbol → Ensembl Gene ID / NCBI Gene ID
+- **多组学 ID 映射**：`omicsweave/core/idmap/mouse_gene_id_mapping.py` 提供 gene symbol → Ensembl Gene ID / NCBI Gene ID
 
 ---
 
@@ -281,16 +281,12 @@ omicsweave/transcriptomics/
 ├── joint_model.py                      ← ★跨批次联合建模（merge_runs + ~batch + condition）
 ├── transcriptomics_integration.py      ← 多批次/多协议 DE 结果整合（Meta 分析 + consensus）
 ├── generate_interpretation_report.py   ← 自动化解读报告（Step 8）
-├── test_transcriptomics_fixes.py       ← ★改进项 1–6 的回归测试（28 个）
-├── test_joint_model.py                 ← ★联合建模回归测试（14 个，含合成两批次端到端）
-├── test_batch_design.py                ← 批次设计与元数据契约测试（5 个）
 ├── finish_gsea.py                      ← 补跑缺失的 GSEA（断点续跑）
 ├── check_markers.py                    ← 快速查看预设 marker 基因的 DE 统计量
 ├── summarize_gsea.py                   ← 按代谢关键词过滤 GSEA 结果汇总
-├── test_qc_one_sample.py              ← 单样本 QC 快速测试
+├── qc_one_sample.py                   ← 单样本 QC 快速检查（调试脚本）
 ├── setup_kallisto.py                   ← 下载 kallisto Windows 二进制
 ├── download_transcriptome.py           ← 下载小鼠参考转录组 FASTA
-├── rerun_enrichment.py                 ← 用于更换基因集后重跑富集（旧版，逐步迁移中）
 │
 ├── plotting/                           ← Step 5: 纯可视化子包（火山图/热力图/PCA）
 │   ├── __init__.py                     ← 导出 generate_volcano/heatmap/pca_plots
@@ -307,13 +303,9 @@ omicsweave/transcriptomics/
 │   ├── __init__.py                     ← 导出 run_gsea
 │   └── _run.py                         ← 自包含（配置加载 + prerank + 绘图）
 │
-├── reference/                          ← 参考转录组文件
-│   └── Mus_musculus.GRCm39.cdna.all.fa.gz
-├── tools/                              ← 本地二进制工具
-│   └── kallisto/
-│       └── kallisto.exe
-└── run_rna_seq.sh                      ← 传统 Linux bash 流程脚本（备用，非 Windows）
 ```
+
+参考转录组与 kallisto 可执行文件不随包分发：`setup_kallisto` 与 `download_transcriptome` 会把它们下载到项目目录下的 `tools/` 与 `reference/`，实验配置中再填写对应路径。
 
 ---
 
@@ -928,7 +920,7 @@ TPM（transcript_tpm_matrix.csv）
 >
 > `_resolve_shrinkage_coeff()` 解析系数名判断方向并按需取反，
 > 并用符号一致性断言（强效应基因 ≥80% 一致）兜底；不一致时回退到未收缩值并报错。
-> **升级 PyDESeq2 后请重跑 `test_transcriptomics_fixes.ShrinkageEndToEndTest`。**
+> **升级 PyDESeq2 后请重跑 `python -m pytest tests/transcriptomics -k ShrinkageEndToEndTest`。**
 
 - 可通过 `run_pydeseq2_analysis(..., shrink_lfc=False)` 关闭
 
@@ -981,7 +973,7 @@ Mann-Whitney 精确检验共有 `C(n1+n2, n1)` 种秩分配，最极端的一种
   - `ncbi_gene_id`：NCBI Gene ID（如 `11461`）
   - `canonical_symbol`：标准化基因符号
   - `mapping_status`：映射状态（`exact` / `case_insensitive` / `synonym` / `not_found`）
-- **依赖**：`omicsweave/common/mouse_gene_id_mapping.py`
+- **依赖**：`omicsweave/core/idmap/mouse_gene_id_mapping.py`
 - **用途**：为多组学整合（MFA-gene mapping）提供标准化 ID 交叉引用
 - **也可独立使用**：
 
@@ -1383,7 +1375,7 @@ python -m omicsweave.transcriptomics.summarize_gsea \
     --experiment 20250425_cimr_wt_mice_dio
 
 # 单样本 QC 快速测试
-python -m omicsweave.transcriptomics.test_qc_one_sample \
+python -m omicsweave.transcriptomics.qc_one_sample \
     --experiment 20250425_cimr_wt_mice_dio --sample 52_brain --reads 50000
 
 # 下载参考转录组（多镜像源：GENCODE → Ensembl）
@@ -1683,7 +1675,7 @@ A：批次内分组平衡时优先信联合模型（效力更高、直接建模�
 A：桥接样本是同一份 RNA 的技术重复，把它们当作独立生物学重复会低估组内方差、虚高显著性（伪重复）。正确用途是量化批次偏移的大小。如确需保留，设 `duplicate_policy: suffix` 并自行在设计中处理其非独立性。
 
 **Q：升级 PyDESeq2 后需要注意什么？**
-A：重跑 `test_transcriptomics_fixes.ShrinkageEndToEndTest`。LFC 收缩依赖 PyDESeq2 的系数命名约定（`condition[T.<level>]`）和参考水平选择规则；这些若发生变化，方向判定可能失效。代码里有符号一致性断言兜底（不一致时回退到未收缩值并报错），但测试能更早发现问题。
+A：重跑 `python -m pytest tests/transcriptomics -k ShrinkageEndToEndTest`。LFC 收缩依赖 PyDESeq2 的系数命名约定（`condition[T.<level>]`）和参考水平选择规则；这些若发生变化，方向判定可能失效。代码里有符号一致性断言兜底（不一致时回退到未收缩值并报错），但测试能更早发现问题。
 
 **Q：`gene_annotate.py` 的作用是什么？**
 A：它为 DE 结果 CSV 自动添加 `ensembl_gene_id` 和 `ncbi_gene_id` 列，便于后续多组学整合时通过标准化 ID 对接 MFA-gene mapping 字典。该步骤由 pipeline 自动调用，无需手动运行。

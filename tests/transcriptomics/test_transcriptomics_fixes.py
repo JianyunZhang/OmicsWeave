@@ -29,7 +29,7 @@ import pandas as pd
 
 from omicsweave.transcriptomics import normalization, provenance, qc_gate, rnaseq_pipeline
 from omicsweave.transcriptomics.run_wilcoxon_de import min_achievable_pvalue, run_wilcoxon_analysis
-from omicsweave.common import pandas_safety
+from omicsweave.core import safety as pandas_safety
 
 
 # ---------------------------------------------------------------------------

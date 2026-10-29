@@ -83,7 +83,7 @@
 
 | 系统 | 状态 |
 |---|---|
-| OmicsWeave | 阶段 O0（工程化打包）已完成：可 `pip install`，统一为 `omicsweave.*` 包内导入，有统一命令行，代码与实验数据目录已解耦；185 个测试在 Python 3.10/3.12 下 182 通过、3 跳过（需真实数据）；已建立不提交的本地课题工作区 `local/`，可用 `pytest --project-dir` 在真实数据上测试；CI 已编写但尚未在 GitHub 上运行；改动尚未提交 |
+| OmicsWeave | 阶段 O0（工程化打包）已完成：可 `pip install`，统一为 `omicsweave.*` 包内导入，有统一命令行，代码与实验数据目录已解耦；185 个测试在 Python 3.10/3.12 下 182 通过、3 跳过（需真实数据）；已建立不提交的本地课题工作区 `local/`，可用 `pytest --project-dir` 在真实数据上测试；CI 已编写但尚未在 GitHub 上运行；阶段 0 已提交（7ef7cf4）。阶段 O1 进行中：包改名、项目模型与 `validate`、`init`、数据契约草案、示例项目已完成 |
 | TheraWeave | 未启动；名称初步检索未发现重名（见第 10 节） |
 
 ---
@@ -669,18 +669,19 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 - [x] 初始化统一仓库及模块化 Python 包（`pyproject.toml`、可选依赖、`src/` 布局）。
 - [x] 统一包内导入，删除 `sys.path` 修改；代码与实验数据目录解耦。
 - [x] 统一命令行入口；测试迁至 `tests/`；编写 CI 配置。
-- [ ] 提交改动并在 GitHub 上跑通 CI。
+- [x] 提交改动（7ef7cf4）。
+- [ ] 在 GitHub 上跑通 CI。
 
 ### Phase O1 — OmicsWeave：核心契约与项目模型
 
-- [ ] 包改名：`common`→`core`、`multiomics`→`integration`；删除兼容转发模块。
-- [ ] 项目模型：`project.yaml` / `experiment.yaml` / `subjects.tsv` / `samples.tsv`，含比较角色与逆转配对。
-- [ ] 定义 `AnalysisRun` 和 `AnalysisResultBundle` 的最小字段（`omicsweave.contract`）。
+- [x] 包改名：`common`→`core`、`multiomics`→`integration`；删除兼容转发模块。
+- [x] 项目模型：`project.yaml` / `experiment.yaml` / `subjects.tsv` / `samples.tsv`，含比较角色与逆转配对。
+- [ ] 定义 `AnalysisRun` 和 `AnalysisResultBundle` 的最小字段（`omicsweave.contract`）：数据集、差异结果表与运行清单（草案 0.1）已完成，富集与 MFA 结果表待补。
 - [ ] 标准化单位、对比组、物种、软件版本与 QC 记录。
-- [ ] `omicsweave init / validate / migrate`；用 `migrate` 转换现有课题的旧配置。
-- [ ] 删除废弃脚本（v2 第 10.5 节）；课题数据本地副本就位后，把课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）。
+- [ ] `omicsweave init / validate / migrate`；用 `migrate` 转换现有课题的旧配置：`init`、`validate` 已完成，`migrate` 等课题数据本地副本就位。
+- [ ] 删除废弃脚本（v2 第 10.5 节，已失效的已删除，其余按替代进度删除）；课题数据本地副本就位后，把课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）。
 - [ ] 运行函数改为接受显式的项目上下文，逐步去除进程级全局状态（为 O5 预留）。
-- [ ] 合成示例项目；补 CITATION.cff（LICENSE 已加入）；修复 SSL 校验。
+- [x] 合成示例项目（`examples/demo_project`，CI 中运行 validate）；补 CITATION.cff；修复 SSL 校验。
 
 **验收标准**：示例项目能通过 `validate`；迁移后的现有课题 MFA 结果与迁移前逐项一致。
 

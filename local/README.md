@@ -36,7 +36,7 @@ local/
 在脚本中取项目目录：
 
 ```python
-from omicsweave.common.project import project_dir
+from omicsweave.core.project import project_dir
 
 experiment_dir = project_dir() / "experiments" / "<experiment_id>"
 ```

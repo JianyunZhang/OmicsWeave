@@ -24,7 +24,7 @@
 | 转录组 | `omicsweave/transcriptomics/` | `omicsweave transcriptomics run` |
 | 代谢组 | `omicsweave/metabolomics/` | `omicsweave metabolomics run` |
 | 蛋白组 | `omicsweave/proteomics/` | `omicsweave proteomics run` |
-| 多组学集成 | `omicsweave/multiomics/` | `omicsweave integration run` |
+| 多组学集成 | `omicsweave/integration/` | `omicsweave integration run` |
 
 ---
 

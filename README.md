@@ -13,8 +13,9 @@ OmicsWeave 提供 MFA（13C 代谢通量分析）、Bulk RNA-seq、代谢组学�
 | 转录组学 | `omicsweave.transcriptomics` | `transcriptomics` |
 | 代谢组学 | `omicsweave.metabolomics` | `metabolomics` |
 | 蛋白质组学 | `omicsweave.proteomics` | `proteomics` |
-| 多组学整合 | `omicsweave.multiomics` | `integration` |
-| 公共工具（ID 映射、统计、项目目录） | `omicsweave.common` | — |
+| 多组学整合 | `omicsweave.integration` | `integration` |
+| 项目配置与校验、统计方法、ID 映射 | `omicsweave.core` | — |
+| 数据契约（分析层数据集、统一结果表、运行清单） | `omicsweave.contract` | — |
 
 ## 安装
 
@@ -39,9 +40,16 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 
 ```text
 <项目目录>/
-├── experiments/<experiment_id>/...        # 各组学配置与输入数据
+├── project.yaml                           # 项目：物种、参考文件、默认参数
+├── experiments/<experiment_id>/
+│   ├── experiment.yaml                    # 实验因素、比较、启用的组学与输入、整合模式
+│   ├── subjects.tsv                       # 每只动物一行（组别、处理等）
+│   └── samples.tsv                        # 每次组学测量一行（组织、时间点、批次、文件）
 └── analysis_results/<experiment_id>/...   # 分析输出
 ```
+
+新建项目用 `omicsweave init` 生成模板，填好后用 `omicsweave validate` 检查；完整示例见
+[examples/demo_project](examples/demo_project)（合成数据），字段说明见 v2 设计文档第 5 节。
 
 配置里的相对路径都相对于项目目录解析。项目目录按以下顺序确定：
 
@@ -54,12 +62,21 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 
 ```bash
 omicsweave --help
+omicsweave --project-dir D:/lab_project init --id dio_mouse
+omicsweave --project-dir D:/lab_project validate
 omicsweave mfa run --experiment <experiment_id>
-omicsweave --project-dir D:/lab_project integration run --experiment <experiment_id>
 omicsweave mfa run --help
 ```
 
-命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
+项目命令：
+
+| 命令 | 作用 |
+|---|---|
+| `init [--id 项目ID] [--species mus_musculus\|homo_sapiens] [--experiment 实验ID]` | 生成项目模板（不会覆盖已有文件，除非加 `--force`） |
+| `validate [--experiment 实验ID ...]` | 检查配置、样本表、因素取值、每个比较的生物学重复数、输入文件与整合前提；有错误时退出码为 1 |
+
+各组学流程的命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
+这些流程目前仍读取旧的各组学配置（`experiments/<id>/<组学>_data/`），阶段 2 改为读取上面的统一项目配置。
 可用的模块与动作：
 
 | 模块 | 动作 |
@@ -97,6 +114,7 @@ OmicsWeave/
 ├── pyproject.toml          # 包配置、依赖与 extras
 ├── src/omicsweave/         # 源代码
 ├── tests/<模块>/           # 测试
+├── examples/demo_project/  # 合成示例项目
 ├── docs/                   # 架构与方法文档
 ├── local/                  # 本地课题工作区：课题数据副本与课题专用脚本（不提交）
 └── .github/workflows/      # CI
