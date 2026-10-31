@@ -562,6 +562,28 @@ def load_proteomics_config(
 # Sample name utilities
 # ============================================================================
 
+def extract_sample_name(run_name: str) -> str:
+    """Extract a stable tissue+animal token from a DIA-NN Run value."""
+
+    name = str(run_name)
+    # e.g. ...ileum_20260124_A35 -> ileumA35
+    match = re.search(
+        r"_([A-Za-z]+(?:_[A-Za-z]+)*)_\d{6,8}_([A-Za-z]*\d+)$", name,
+    )
+    if match:
+        return match.group(1).replace("_", "") + match.group(2)
+    # e.g. ...brown_adipose_10 / ...liver_A35
+    match = re.search(r"_((?:[A-Za-z]+_)*[A-Za-z]+)_([A-Za-z]*\d+)$", name)
+    if match:
+        return match.group(1) + match.group(2)
+    # e.g. ...Heart52 / ...LiverA35
+    match = re.search(r"_([A-Za-z_]+[A-Za-z]\d+)$", name)
+    if match:
+        return match.group(1).replace("_", "")
+    matches = list(re.finditer(r"([A-Za-z]+\d+)", name))
+    return matches[-1].group(0) if matches else name
+
+
 def get_sample_to_mouse_id_map(
     columns: list[str] | pd.Index,
     known_mouse_ids: Sequence[str] | dict[str, Any],

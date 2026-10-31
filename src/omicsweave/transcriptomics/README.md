@@ -282,9 +282,7 @@ omicsweave/transcriptomics/
 ├── transcriptomics_integration.py      ← 多批次/多协议 DE 结果整合（Meta 分析 + consensus）
 ├── generate_interpretation_report.py   ← 自动化解读报告（Step 8）
 ├── finish_gsea.py                      ← 补跑缺失的 GSEA（断点续跑）
-├── check_markers.py                    ← 快速查看预设 marker 基因的 DE 统计量
 ├── summarize_gsea.py                   ← 按代谢关键词过滤 GSEA 结果汇总
-├── qc_one_sample.py                   ← 单样本 QC 快速检查（调试脚本）
 ├── setup_kallisto.py                   ← 下载 kallisto Windows 二进制
 ├── download_transcriptome.py           ← 下载小鼠参考转录组 FASTA
 │
@@ -1366,17 +1364,9 @@ python -m omicsweave.transcriptomics.joint_model \
 python -m omicsweave.transcriptomics.finish_gsea \
     --experiment 20250425_cimr_wt_mice_dio
 
-# 快速查看 marker 基因
-python -m omicsweave.transcriptomics.check_markers \
-    --experiment 20250425_cimr_wt_mice_dio
-
 # GSEA 代谢关键词汇总
 python -m omicsweave.transcriptomics.summarize_gsea \
     --experiment 20250425_cimr_wt_mice_dio
-
-# 单样本 QC 快速测试
-python -m omicsweave.transcriptomics.qc_one_sample \
-    --experiment 20250425_cimr_wt_mice_dio --sample 52_brain --reads 50000
 
 # 下载参考转录组（多镜像源：GENCODE → Ensembl）
 python -m omicsweave.transcriptomics.download_transcriptome
@@ -1559,7 +1549,7 @@ omicsweave transcriptomics run \
 - **一致性聚类分型**：ConsensusClusterPlus（适用于大样本分子分型）
 - **按 `gene_id` 聚合**：当前聚合键为 `gene_symbol`，共享 symbol 的基因会被合并
 - **rRNA / globin / 线粒体占比**、**3' 偏好性**：kallisto 不产生基因组坐标，需换比对流程
-- **样本身份核验**：`check_markers.py` 可查 marker，但未接入流程作为门控
+- **样本身份核验**：尚未接入流程作为门控（查看 marker 的调试脚本 `check_markers.py` 已移到本地课题工作区）
 
 ---
 

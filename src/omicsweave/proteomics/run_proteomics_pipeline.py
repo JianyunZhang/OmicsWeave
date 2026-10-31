@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +30,7 @@ from .experiment_config import (  # noqa: E402
     ProteomicsConfig,
     build_sample_metadata,
     config_arg_help,
+    extract_sample_name,
     generate_comparisons,
     get_group_colors,
     get_sample_to_group_map,
@@ -50,28 +50,6 @@ _estimate_limma_priors = estimate_limma_priors
 
 def flush_print(message: str) -> None:
     print(message, flush=True)
-
-
-def _extract_sample_name(run_name: str) -> str:
-    """Extract a stable tissue+animal token from a DIA-NN Run value."""
-
-    name = str(run_name)
-    # e.g. ...ileum_20260124_A35 -> ileumA35
-    match = re.search(
-        r"_([A-Za-z]+(?:_[A-Za-z]+)*)_\d{6,8}_([A-Za-z]*\d+)$", name,
-    )
-    if match:
-        return match.group(1).replace("_", "") + match.group(2)
-    # e.g. ...brown_adipose_10 / ...liver_A35
-    match = re.search(r"_((?:[A-Za-z]+_)*[A-Za-z]+)_([A-Za-z]*\d+)$", name)
-    if match:
-        return match.group(1) + match.group(2)
-    # e.g. ...Heart52 / ...LiverA35
-    match = re.search(r"_([A-Za-z_]+[A-Za-z]\d+)$", name)
-    if match:
-        return match.group(1).replace("_", "")
-    matches = list(re.finditer(r"([A-Za-z]+\d+)", name))
-    return matches[-1].group(0) if matches else name
 
 
 def load_and_clean_data(
@@ -111,7 +89,7 @@ def load_and_clean_data(
             qvalues = pd.to_numeric(report[qvalue_column], errors="coerce")
             report = report[qvalues < 0.01].copy()
 
-    report["Sample"] = report["Run"].map(_extract_sample_name)
+    report["Sample"] = report["Run"].map(extract_sample_name)
     if "Genes" in report.columns:
         genes = report["Genes"].replace(r"^\s*$", np.nan, regex=True)
         report["Feature"] = genes.fillna(report["Protein.Group"])

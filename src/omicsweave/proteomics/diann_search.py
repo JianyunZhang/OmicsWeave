@@ -19,7 +19,7 @@ from typing import Any, Callable, Sequence
 
 from omicsweave.core.provenance import sha256_file
 
-from .experiment_config import ProteomicsConfig, get_sample_to_mouse_id_map
+from .experiment_config import ProteomicsConfig, extract_sample_name, get_sample_to_mouse_id_map
 
 
 SEARCH_DIR_NAME = "00_diann_search"
@@ -127,13 +127,11 @@ def validate_raw_sample_names(
     stem is parsed here, then matched to ``groups.yaml`` by longest suffix.
     """
 
-    from .run_proteomics_pipeline import _extract_sample_name
-
     rows: list[dict[str, str]] = []
     seen: dict[str, str] = {}
     problems: list[str] = []
     for raw_file in raw_files:
-        sample = _extract_sample_name(raw_file.stem)
+        sample = extract_sample_name(raw_file.stem)
         mouse_id = get_sample_to_mouse_id_map([sample], mouse_groups).get(sample)
         if not mouse_id:
             problems.append(

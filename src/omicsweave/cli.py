@@ -7,12 +7,14 @@ omicsweave 命令行入口。
 
     omicsweave [--project-dir DIR] init [--id 项目ID] [--species mus_musculus] [--experiment 实验ID]
     omicsweave [--project-dir DIR] validate [--experiment 实验ID ...]
+    omicsweave [--project-dir DIR] migrate --experiment 实验ID [--dry-run] [--force]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
 
     omicsweave --project-dir D:/lab_project init --id dio_mouse
     omicsweave --project-dir D:/lab_project validate
+    omicsweave --project-dir D:/lab_project migrate --experiment 20250425_cimr_wt_mice_dio
     omicsweave mfa run --experiment 20250425_cimr_wt_mice_dio
     omicsweave mfa run --help          # 查看该动作自身的参数
 
@@ -86,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--experiment", action="append", default=None,
                           help="只校验指定实验，可重复；默认校验全部实验")
 
+    migrate = modules.add_parser("migrate", help="把旧版各组学配置转换为 experiment.yaml 与样本表")
+    migrate.add_argument("--experiment", action="append", required=True,
+                         help="experiments/ 下的实验 ID，可重复")
+    migrate.add_argument("--dry-run", action="store_true", help="只打印迁移结果，不写文件")
+    migrate.add_argument("--force", action="store_true", help="覆盖实验目录中已有的 experiment.yaml 与样本表")
+
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
         action_parsers = module_parser.add_subparsers(dest="action", metavar="<动作>", required=True)
@@ -120,14 +128,23 @@ def _run_validate(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _run_migrate(args: argparse.Namespace) -> int:
+    from omicsweave.core.migrate import run
+
+    return run(args.experiment, project_dir(), dry_run=args.dry_run, force=args.force)
+
+
+_HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate}
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args, forwarded = parser.parse_known_args(argv)
 
-    if args.module in ("init", "validate"):
+    if args.module in _HANDLERS:
         if forwarded:
             parser.error(f"无法识别的参数：{' '.join(forwarded)}")
-        handler = _run_init if args.module == "init" else _run_validate
+        handler = _HANDLERS[args.module]
         with project_context(args.project_dir):
             code = handler(args)
         sys.exit(code)

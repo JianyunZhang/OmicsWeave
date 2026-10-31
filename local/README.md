@@ -30,6 +30,17 @@ local/
 
 不指定时，需要真实数据的测试会自动跳过，其余测试照常运行。
 
+## 转换旧版配置
+
+从实验项目仓库拷贝来的实验如果还是旧版各组学配置（`mfa_data/`、`transcriptomics_data/` 等），用
+
+```bash
+omicsweave --project-dir local/projects/<课题名> migrate --experiment <id>
+```
+
+生成 `experiment.yaml`、`subjects.tsv`、`samples.tsv`，待补充的内容见同目录的 `MIGRATION.md`。
+旧配置和数据文件只读取、不改动；加 `--dry-run` 可以只预览。
+
 ## 课题专用脚本
 
 `analysis/` 中的脚本通过 `import omicsweave` 使用工具包，自身不放进 `src/omicsweave/`。

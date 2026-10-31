@@ -113,7 +113,7 @@
   - **项目目录（阶段 1 已完成）**：`--project-dir` 的设置保存在上下文变量中，每个线程、每个异步任务各自独立；`project_context()` 临时切换并自动恢复，命令行运行结束后不残留设置。子进程经环境变量 `OMICSWEAVE_PROJECT_DIR` 传递。
   - **新代码**（`core`、`contract`、`adapters`、`visualization`）不含进程级可变状态；唯一的模块级变量是代谢物名称索引的只读懒加载缓存。
   - **旧流程中的模块级状态（阶段 2 随各组学改写去除）**：由 `apply_config()` 一次写入、各步骤读取的全局变量，分布在
-    - 转录组：`rnaseq_pipeline`、`run_wilcoxon_de`、`generate_interpretation_report`、`enrichment/_run`、`gsea/_run`、`plotting/_config`，以及 `check_markers`、`finish_gsea`、`summarize_gsea`、`rerun_de_analysis`、`qc_one_sample`；
+    - 转录组：`rnaseq_pipeline`、`run_wilcoxon_de`、`generate_interpretation_report`、`enrichment/_run`、`gsea/_run`、`plotting/_config`，以及 `finish_gsea`、`summarize_gsea`、`rerun_de_analysis`；
     - 蛋白组：`plotting/_config`、`generate_interpretation_report`；
     - 整合：`plotting/_config`；
     - MFA：`plotting/_config`。
@@ -133,6 +133,7 @@ src/omicsweave/
 │   ├── config.py           # YAML 与样本表的读取 ✅
 │   ├── validate.py         # 结合样本表与文件系统的校验（omicsweave validate）✅
 │   ├── scaffold.py         # 项目模板（omicsweave init）✅
+│   ├── migrate.py          # 旧版各组学配置 → 统一模型（omicsweave migrate）✅
 │   ├── provenance.py       # 文件指纹、run_provenance.json 读写与跨批次比对 ✅
 │   ├── statistics/         # nonparametric / meta_analysis / stability ✅
 │   ├── idmap/              # ID 映射（暂为原有字典，阶段 2 改为数据文件 + 解析器）
@@ -180,6 +181,8 @@ Project（一个课题或队列，如 DIO 小鼠项目）
 | `estimand`（case/control、干预时间、示踪剂…） | `experiment.yaml` 的 `contrasts` 与 `metadata` |
 | `multiomics/examples/sample_map.example.csv` | 已是 `samples.tsv` 的雏形（assay→omics，primary_sample_id→subject_id） |
 | 各组学独立的 `<omics>_data/config.yaml` | 合并到 `experiment.yaml` 的 `omics:` 段 |
+
+现有实验可用 `omicsweave migrate` 按上述关系自动转换，见第 5.7 节。
 
 ### 5.2 目录约定
 
@@ -301,9 +304,10 @@ integration:
 | `sample_id` | 是 | 项目内唯一 |
 | `subject_id` | 生物学样本必填 | 对应 `subjects.tsv`；QC、空白、混样等非生物学样本可留空 |
 | `omics` | 是 | `transcriptomics` / `proteomics` / `metabolomics` / `mfa` |
-| `tissue` | 是 | 组织或体液 |
+| `tissue` | 是 | 组织或体液；MFA 样本是一次多组织联合拟合，写 `multi_tissue`（各组织见 MFA 结果表的 `tissue` 列） |
 | `timepoint` | 否 | 数值，单位在 `factors` 中声明 |
 | `batch` | 否 | 测序或上机批次 |
+| `protocol` | 否 | 实验方案，如 MFA 的示踪剂灌注方案 |
 | `sample_type` | 否 | `sample` / `qc` / `blank` / `pool` / `standard`，默认 `sample` |
 | `run_order` | 否 | 质谱进样顺序，用于 QC 漂移校正 |
 | `specimen_id` | 否 | 同一组织块被多个组学测量时用于关联 |
@@ -319,6 +323,30 @@ integration:
 - 整合模式的前提条件已满足（见第 9 节）。
 
 ---
+
+### 5.7 旧配置迁移（`omicsweave migrate`）
+
+```bash
+omicsweave --project-dir <项目目录> migrate --experiment <实验ID> [--dry-run] [--force]
+```
+
+调用各组学原有的配置加载器，得到实际生效的配置（多层覆盖与路径解析规则都与旧流程相同），再写出 `experiment.yaml`、`subjects.tsv`、`samples.tsv` 和迁移报告 `MIGRATION.md`；项目目录没有 `project.yaml` 时按小鼠生成一份。写出后自动运行 `validate`。已有新格式文件时需要加 `--force` 才覆盖，`project.yaml` 不会被覆盖。
+
+**只读**：旧配置与数据文件都不改动、不复制。样本信息只读取配置和数据文件中记录样本的部分：转录组样本列表、MFA 通量文件的 `sheet_information` 工作表、代谢组数据表的表头、蛋白组报告的 `Run` 列。
+
+| 旧配置 | 迁移为 |
+|---|---|
+| 各组学 `groups.yaml` 的条件 | 动物层因素 `group`（大小写不同的同名条件合并）；显示名、颜色等保存在 `experiment.metadata.conditions` |
+| `comparisons` / `contrast_groups`；未配置时旧流程默认的两两比较 | `contrasts`（`factor: group`，`role: other`）；各组学的同一比较只保留一个 |
+| 转录组样本列表（`<动物>_<组织>`）与 `sample_batches` | 样本行、`batch` 列与 `R1;R2` 文件路径；有批次时 `covariates: [batch]` |
+| 蛋白组 `Run` 名、代谢组样本列 | 样本行，按旧流程的规则对应动物；代谢组的 QC、空白列记为 `sample_type` = `qc` / `blank` |
+| MFA 样本 | `tissue` 为 `multi_tissue`。样本名能按末尾编号与 `mouse_groups` 的动物一一对应且分组一致时，以动物编号为 `subject_id`；否则每个 MFA 样本当作一只动物 |
+| MFA 的 protocol / batch 目录 | `protocol`、`batch` 列；各批次的文件、示踪剂、血糖 QC 设置记在 `omics.mfa.adapter.batches`。`input.files` 目前只能写一个批次（默认批次），多批次输入在阶段 2 解决 |
+| 各组学的分析参数 | `omics.<组学>.analysis`，为合并内置默认值与各层覆盖后的生效值 |
+
+无法从旧配置推断、写进 `MIGRATION.md` 待补充的内容：比较的 `role` 与 `reversal_pairs`；是否把 `group` 拆成饮食、处理等多个因素；MFA 的 `model_id` 与 `flux_units`；整合模式；样本对应不到动物、不同组学样本重名（后出现的加组学前缀）等问题。
+
+旧版各组学流程目前仍读取旧配置。阶段 2 各组学改为读取统一模型后，再用迁移得到的配置重跑，与旧结果逐值比对（阶段 2 验收标准）。
 
 ## 6. 数据输入规范（两层）
 
@@ -533,10 +561,10 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 ### 10.4 移出到本地课题工作区（课题专用）
 
-以下代码迁移到 `local/projects/<课题>/analysis/`（本地，不提交；见仓库中的 `local/README.md`），并在实验项目仓库保留正式副本。迁移在课题数据的本地副本就位、且这些脚本在实验项目仓库中有备份之后进行，在此之前保留在包内：
+以下代码迁移到 `local/projects/<课题>/analysis/`（本地，不提交；见仓库中的 `local/README.md`）。迁移前的版本可从本仓库的 Git 历史取回：
 
-- `multiomics/tissue_pathway_panels.py`、`plot_tissue_pathway_panels.py`、`validate_tissue_pathway_panels.py`（约 1,240 行，六组织图件与脑 HFD/LFD 参照）
-- `multiomics/run_cross_tissue_integration.py`（依赖人工整理的 `cross_tissue_evidence.yaml`）
+- ✅ `multiomics/tissue_pathway_panels.py`、`plot_tissue_pathway_panels.py`、`validate_tissue_pathway_panels.py`（约 1,240 行，六组织图件与脑 HFD/LFD 参照），已移到 `local/projects/dio_mouse/analysis/`
+- `multiomics/run_cross_tissue_integration.py`（依赖人工整理的 `cross_tissue_evidence.yaml`）：暂留包内。它是 `omicsweave integration cross-tissue` 命令，也是多维证据画像端到端测试的入口；阶段 2.3 的 `omicsweave integrate --mode pathway_convergence` 就绪后再移出
 
 另外，`multiomics/pipeline_evaluation_report.md`（已标注为历史文档）移到 `docs/history/`。
 
@@ -551,7 +579,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | `proteomics/run_proteomics_analysis.py` | 已标注弃用的兼容入口 | ✅ 已删除 |
 | 兼容转发模块：`multiomics/integration/meta_analysis.py`、`stability.py`，`mappings/reaction_registry.py`、`gene_annotations.py`、`metabolite_annotations.py`、`protein_annotations.py` | 目前没有外部用户，已改为新路径导入 | ✅ 已删除 |
 | `transcriptomics/rerun_de_analysis.py`、`finish_gsea.py`、`summarize_gsea.py`、`run_enrichment.py`、`run_gsea.py` | 一次性补跑或薄包装脚本，由 `omicsweave run --steps` 取代 | 阶段 2 替代命令就绪后删除 |
-| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 | 随课题专用脚本移到本地工作区（第 10.4 节） |
+| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 | ✅ 已移到本地工作区 `local/projects/dio_mouse/analysis/` |
 | `transcriptomics/setup_kallisto.py`、`download_transcriptome.py` | 只适用于 Windows 和小鼠；SSL 校验已恢复默认开启 | 阶段 3 由外部工具适配器取代后删除 |
 
 ---
@@ -566,22 +594,22 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 ### 阶段 1：核心契约与项目模型（约 6–8 周）→ v0.2（进行中）
 
-| 任务 | 交付物 | 状态（2026-10-29） |
+| 任务 | 交付物 | 状态（2026-10-31） |
 |---|---|---|
 | 1.1 改名：`common`→`core`，`multiomics`→`integration`；删除兼容转发模块 | 新包结构 | ✅ `core` 下分出 `statistics/`、`idmap/`、`safety.py`；`integration` 内原 `integration/` 子包改名为 `methods/` |
 | 1.2 项目模型与配置校验（`core/model.py`、`config.py`），含比较角色与逆转配对 | `project.yaml` / `experiment.yaml` / 样本表的规范与校验 | ✅ 含 `core/validate.py` 全部第 5.6 节规则 |
 | 1.3 数据契约（`omicsweave.contract`）：`AnalysisRun`、`AnalysisResultBundle` 最小字段 | 分析层数据集、结果表与结果包的读写和校验（Parquet） | ✅ 数据集、差异结果表（含 MFA 专有必填列）、富集结果表、运行清单（草案 0.1），以及从现有输出转换的函数；见第 8.2 节 |
 | 1.4 合并溯源记录、合并绘图主题 | `core/provenance.py`、`visualization/theme` | ✅ 另把 `contract` 与蛋白组 DIA-NN 搜库中的文件哈希也改用 `core.provenance.sha256_file` |
-| 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | 部分：`init`、`validate` 已完成；`migrate` 需要真实课题配置做对照，等本地副本就位 |
+| 1.5 `omicsweave init / validate / migrate` | 新建项目模板；把现有实验的旧配置转换为新格式 | ✅ `migrate` 调用各组学原有的加载器转换旧配置（第 5.7 节），已用合成的四组学旧配置测试；尚未在真实课题配置上运行 |
 | 1.6 MFA Excel 模板 + 自研软件格式转换器 | 模板文件、校验命令 | ✅ `omicsweave mfa template / check / convert`；标准格式见第 6.2 节 |
-| 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除，其余见第 10.5 节 |
+| 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除；六组织通路图与两个转录组调试脚本已移到本地工作区；`run_cross_tissue_integration` 待 2.3 后移出；其余见第 10.5 节 |
 | 1.8 合成示例项目（小型、可公开） | `examples/demo_project/`，CI 中端到端运行 | ✅ CI 中运行 `validate` |
 | 1.9 修复 SSL 校验；补 CITATION.cff（LICENSE 已于阶段 0 加入） | | ✅ |
 | 1.10 运行函数改为接受显式项目上下文，逐步去除进程级全局状态 | 为阶段 5 预留 | 部分：项目目录改为上下文变量（线程 / 任务隔离、自动恢复），下载脚本改为运行时解析项目目录；旧流程的模块级状态已逐项列出（第 4.1 节），随阶段 2 各组学改写去除 |
 
 **验收标准**
 - 示例项目能通过 `validate`。
-- 用 `migrate` 转换至少一个现有实验后，MFA 结果与迁移前一致（数值逐项比对）。
+- 用 `migrate` 转换至少一个现有实验（转换已实现；结果的数值比对要等 `mfa run` 改为读取统一模型，移到阶段 2 验收）。
 - 测试全部通过。
 
 ### 阶段 2：各组学接入 + 运行模式 + 证据层与交换契约 v1（约 6–8 周）→ v0.3
@@ -600,7 +628,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 **验收标准**
 - 示例项目能在单组学和三种整合模式下端到端运行。
-- 用现有实验数据回归测试，主要结果与迁移前一致；如有差异，需能逐项说明原因。
+- 用现有实验数据回归测试，主要结果与迁移前一致；如有差异，需能逐项说明原因。其中用 `migrate` 转换的实验，MFA 结果须与旧流程逐值一致。
 - 任一候选通路/靶点可回溯到具体统计结果、输入样本和来源数据库。
 - 标准样例结果包能通过 JSON Schema 校验（TheraWeave 的 T1 以此为前置条件）。
 
@@ -657,7 +685,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 开源许可证 | **BSD-3-Clause**（OmicsWeave 与 TheraWeave 相同）：与主要依赖兼容，并含“未经许可不得用作者或单位名义为衍生产品背书”条款，与 scverse 生态（scanpy、anndata）一致。版权方为 “The OmicsWeave Developers”（集体署名；贡献者名单在 `CITATION.cff` 中维护） | 已定；`LICENSE` 与 `pyproject.toml` 许可证字段已加入 |
 | 运行环境 | 当前实现 Windows/Linux 单机运行；以后扩展多节点集群部署与多客户端联网使用（阶段 5）。从阶段 1 起遵守第 4.1 节的预留约束 | 已定 |
 | 旧打分矩阵 `flux_omics_scorer` | 尚未发表，且加和总分的策略过于粗糙：**删除加和总分及 `legacy_*` 输出，不保留 `--legacy`**。不另起一套新的总分：多维证据画像（`evidence_profile`，现已是主结果）作为唯一整合结果，按维度给出证据等级，并用 `stability` 做生物学稳定性校准；各组学的证据提取部分保留并重构（第 10.3 节） | 已定，阶段 2 实施 |
-| 课题专用脚本与数据 | 暂不移动外部项目的原始数据。本仓库预留 `local/` 本地课题工作区（不提交，已建立）：课题数据副本放 `local/projects/<课题>/`，课题专用脚本放其中的 `analysis/`；通过 `--project-dir`、环境变量 `OMICSWEAVE_PROJECT_DIR` 或 `pytest --project-dir` 指定。包内现有的课题专用模块在本地副本就位后再迁移（第 10.4 节） | 已定，工作区已就绪 |
+| 课题专用脚本与数据 | 暂不移动外部项目的原始数据。本仓库预留 `local/` 本地课题工作区（不提交，已建立）：课题数据副本放 `local/projects/<课题>/`，课题专用脚本放其中的 `analysis/`；通过 `--project-dir`、环境变量 `OMICSWEAVE_PROJECT_DIR` 或 `pytest --project-dir` 指定。包内的课题专用脚本已移到 `local/projects/dio_mouse/analysis/`（第 10.4 节） | 已定，工作区已就绪 |
 | 阶段 2 之后先做阶段 3 还是 TheraWeave MVP | 见总纲第 11 节；现有课题数据已处理成表格，倾向先做 TheraWeave MVP | 待定 |
 | 文档语言 | 中文先行，阶段 4 补英文 | 已定 |
 
@@ -675,8 +703,9 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 - [x] 1.2 `project.yaml` / `experiment.yaml` / 样本表规范与 `omicsweave validate`
 - [x] 1.3 数据契约：数据集、差异结果表（含 MFA）、富集结果表、运行清单
 - [x] 1.4 合并溯源记录与绘图主题
-- [ ] 1.5 `omicsweave migrate`（需课题数据本地副本）
+- [x] 1.5 `omicsweave migrate`（已用合成旧配置测试）
 - [x] 1.6 MFA Excel 模板与自研软件格式转换器
-- [ ] 1.7 课题专用脚本移到本地工作区（需本地副本）
+- [x] 1.7 课题专用脚本移到本地工作区（`run_cross_tissue_integration` 待 2.3 后移出）
+- [ ] 在真实课题配置上运行 `omicsweave migrate`，按 `MIGRATION.md` 补全待补充项
 - [x] 1.8 制作合成示例项目
 - [x] 1.9 修复 SSL 校验、补 CITATION.cff

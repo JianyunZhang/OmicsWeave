@@ -83,7 +83,7 @@
 
 | 系统 | 状态 |
 |---|---|
-| OmicsWeave | 阶段 O0（工程化打包）已完成：可 `pip install`，统一为 `omicsweave.*` 包内导入，有统一命令行，代码与实验数据目录已解耦；185 个测试在 Python 3.10/3.12 下 182 通过、3 跳过（需真实数据）；已建立不提交的本地课题工作区 `local/`，可用 `pytest --project-dir` 在真实数据上测试；CI 已编写但尚未在 GitHub 上运行；阶段 0 已提交（7ef7cf4）。阶段 O1 进行中：包改名、项目模型与 `validate`、`init`、数据契约草案、示例项目已完成 |
+| OmicsWeave | 阶段 O0（工程化打包）已完成：可 `pip install`，统一为 `omicsweave.*` 包内导入，有统一命令行，代码与实验数据目录已解耦；185 个测试在 Python 3.10/3.12 下 182 通过、3 跳过（需真实数据）；已建立不提交的本地课题工作区 `local/`，可用 `pytest --project-dir` 在真实数据上测试；CI 已编写但尚未在 GitHub 上运行；阶段 0 已提交（7ef7cf4）。阶段 O1 进行中：包改名、项目模型与 `validate`、`init`、`migrate`、数据契约草案、示例项目已完成，课题专用脚本已移到本地工作区 |
 | TheraWeave | 未启动；名称初步检索未发现重名（见第 10 节） |
 
 ---
@@ -680,12 +680,12 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 - [x] MFA 求解结果标准格式（Excel 模板 / Parquet 目录）与旧版自研软件格式转换器（`omicsweave mfa template / check / convert`，v2 第 6.2 节）。
 - [ ] 标准化单位、对比组、物种、软件版本与 QC 记录。
 - [x] 合并溯源记录（`core/provenance.py`）与绘图主题（`visualization/theme.py`）。
-- [ ] `omicsweave init / validate / migrate`；用 `migrate` 转换现有课题的旧配置：`init`、`validate` 已完成，`migrate` 等课题数据本地副本就位。
-- [ ] 删除废弃脚本（v2 第 10.5 节，已失效的已删除，其余按替代进度删除）；课题数据本地副本就位后，把课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）。
+- [x] `omicsweave init / validate / migrate`；`migrate` 调用各组学原有的加载器把旧配置转为统一模型（v2 第 5.7 节），已用合成的四组学旧配置测试，尚未在真实课题配置上运行。
+- [ ] 删除废弃脚本（v2 第 10.5 节，已失效的已删除，其余按替代进度删除）；课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）：六组织通路图与两个转录组调试脚本已移出，`run_cross_tissue_integration` 待 O2 的整合命令就绪后移出。
 - [ ] 运行函数改为接受显式的项目上下文，逐步去除进程级全局状态（为 O5 预留）：项目目录已改为上下文变量；旧流程的模块级状态随 O2 各组学改写去除（清单见 v2 第 4.1 节）。
 - [x] 合成示例项目（`examples/demo_project`，CI 中运行 validate）；补 CITATION.cff；修复 SSL 校验。
 
-**验收标准**：示例项目能通过 `validate`；迁移后的现有课题 MFA 结果与迁移前逐项一致。
+**验收标准**：示例项目能通过 `validate`；至少一个现有课题能用 `migrate` 转换。迁移后 MFA 结果与迁移前逐项一致的比对，要等 `mfa run` 读取统一模型，移到 O2 验收。
 
 ### Phase O2 — OmicsWeave：各组学接入、证据整合与报告
 

@@ -50,6 +50,9 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 
 新建项目用 `omicsweave init` 生成模板，填好后用 `omicsweave validate` 检查；完整示例见
 [examples/demo_project](examples/demo_project)（合成数据），字段说明见 v2 设计文档第 5 节。
+已有旧版各组学配置（`mfa_data/`、`transcriptomics_data/` 等）的实验，可用
+`omicsweave migrate --experiment <ID>` 转换为上述格式，待补充的内容写在生成的 `MIGRATION.md` 中
+（只读取旧配置和数据文件中的样本信息，不改动、不复制任何文件；见 v2 设计文档第 5.7 节）。
 
 配置里的相对路径都相对于项目目录解析。项目目录按以下顺序确定：
 
