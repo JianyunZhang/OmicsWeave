@@ -100,6 +100,22 @@ analysis_results/{project_id}/
 
 ---
 
+## 按统一项目模型整合（阶段 2.3）
+
+```bash
+omicsweave run --experiment <id>                                   # 各组学写出统一结果表
+omicsweave integrate --experiment <id> --mode pathway_convergence  # 读取最近一次运行的结果表
+```
+
+`omicsweave integrate` 只读取结果包中的统一结果表，结果写入新的结果包（`integration/<模式>/`），运行清单记录源结果包。
+模式默认取 `experiment.yaml` 的 `integration.modes`，参数写在 `integration.parameters.<模式>`。
+
+- `pathway_convergence`（已接入）：同一组织、同一比较下各组学通路富集结果的融合（组学内 Bonferroni、组学间 Fisher、BH 校正，
+  与本模块 `PathwayConvergenceAnalyzer` 相同），附各组学的效应方向与方向一致性，以及显著通路的两两交集。
+- `flux_anchored`、`sample_level`：待接入，暂用下文的旧命令。
+
+---
+
 ## 快速开始
 
 ```bash

@@ -20,6 +20,141 @@ import pandas as pd
 from scipy.stats import beta, combine_pvalues
 
 
+def bh_fdr(pvals: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg FDR correction.
+
+    Parameters
+    ----------
+    pvals : array-like
+        Raw p-values.
+
+    Returns
+    -------
+    np.ndarray
+        Adjusted FDR values (same shape).
+    """
+    pvals = np.asarray(pvals, dtype=float)
+    if len(pvals) == 0:
+        return np.array([], dtype=float)
+    adjusted = np.full(pvals.shape, np.nan, dtype=float)
+    finite_mask = np.isfinite(pvals)
+    finite = pvals[finite_mask]
+    n = len(finite)
+    if n == 0:
+        return adjusted
+    order = np.argsort(finite)
+    ranked = finite[order]
+    adjusted_ranked = ranked * n / np.arange(1, n + 1)
+    adjusted_ranked = np.minimum.accumulate(adjusted_ranked[::-1])[::-1]
+    finite_adjusted = np.empty(n, dtype=float)
+    finite_adjusted[order] = np.clip(adjusted_ranked, 0.0, 1.0)
+    adjusted[finite_mask] = finite_adjusted
+    return adjusted
+
+
+def normalize_term(value: Any) -> str:
+    """跨组学匹配用的通路名：去掉 ``<库名>__`` 前缀、转小写、合并空白。"""
+    term = str(value).split("__")[-1].strip().lower()
+    return " ".join(term.split())
+
+
+def rra_probability(rank_fractions: np.ndarray) -> float:
+    """Robust Rank Aggregation 的 beta 顺序统计量近似。"""
+    values = np.sort(np.asarray(rank_fractions, dtype=float))
+    values = values[np.isfinite(values)]
+    n_values = len(values)
+    if n_values < 2:
+        return float("nan")
+    probabilities = [
+        beta.cdf(value, rank, n_values - rank + 1)
+        for rank, value in enumerate(values, start=1)
+    ]
+    return float(min(1.0, min(probabilities) * n_values))
+
+
+def fuse_pathway_evidence(evidence_df: pd.DataFrame) -> pd.DataFrame:
+    """按（组织, 比较, 通路）融合各组学证据：组学内 Bonferroni，组学间 Fisher；只有排序时用 RRA。"""
+    if evidence_df.empty:
+        return pd.DataFrame(columns=[
+            "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
+            "fusion_method", "fused_pvalue", "fused_fdr",
+        ])
+
+    # comparison 是 estimand 身份的一部分，禁止跨比较池化。
+    per_omics_rows: list[dict[str, Any]] = []
+    for (tissue, comparison, omics, term), group in evidence_df.groupby(
+        ["tissue", "comparison", "omics", "pathway_term"], sort=True
+    ):
+        probabilities = pd.to_numeric(group["probability"], errors="coerce").dropna()
+        if probabilities.empty:
+            combined_probability = float("nan")
+        else:
+            combined_probability = float(min(1.0, probabilities.min() * len(probabilities)))
+        per_omics_rows.append({
+            "tissue": tissue,
+            "comparison": comparison,
+            "omics": omics,
+            "pathway_term": term,
+            "probability": combined_probability,
+            "rank_fraction": float(group["rank_fraction"].min()),
+        })
+    per_omics = pd.DataFrame(per_omics_rows)
+
+    fused_rows: list[dict[str, Any]] = []
+    for (tissue, comparison, term), group in per_omics.groupby(
+        ["tissue", "comparison", "pathway_term"], sort=True
+    ):
+        if group["omics"].nunique() < 2:
+            continue
+        probabilities = pd.to_numeric(group["probability"], errors="coerce").dropna().to_numpy()
+        if len(probabilities) >= 2:
+            _, fused_probability = combine_pvalues(
+                np.clip(probabilities, np.finfo(float).tiny, 1.0),
+                method="fisher",
+            )
+            fusion_method = "fisher"
+        else:
+            fused_probability = rra_probability(group["rank_fraction"].to_numpy())
+            fusion_method = "rra"
+
+        pvalue_map = {
+            row["omics"]: None if pd.isna(row["probability"]) else round(float(row["probability"]), 6)
+            for _, row in group.iterrows()
+        }
+        rank_map = {
+            row["omics"]: round(float(row["rank_fraction"]), 6)
+            for _, row in group.iterrows()
+        }
+        fused_rows.append({
+            "tissue": tissue,
+            "comparison": comparison,
+            "pathway_term": term,
+            "n_omics": int(group["omics"].nunique()),
+            "contributing_omics": ", ".join(sorted(group["omics"].unique())),
+            "fusion_method": fusion_method,
+            "fused_pvalue": float(fused_probability),
+            "omics_probabilities": str(pvalue_map),
+            "omics_rank_fractions": str(rank_map),
+        })
+
+    fused = pd.DataFrame(fused_rows)
+    if fused.empty:
+        return pd.DataFrame(columns=[
+            "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
+            "fusion_method", "fused_pvalue", "fused_fdr",
+        ])
+    fused["fused_fdr"] = np.nan
+    for _, indices in fused.groupby(["tissue", "comparison"]).groups.items():
+        fused.loc[indices, "fused_fdr"] = bh_fdr(
+            fused.loc[indices, "fused_pvalue"].to_numpy(dtype=float)
+        )
+    return fused.sort_values(
+        ["fused_fdr", "fused_pvalue", "n_omics"],
+        ascending=[True, True, False],
+    ).reset_index(drop=True)
+
+
+
 class PathwayConvergenceAnalyzer:
     """Analyze pathway convergence across omics layers.
 
@@ -46,42 +181,9 @@ class PathwayConvergenceAnalyzer:
         self.evidence_long_df = pd.DataFrame()
         self.fusion_df = pd.DataFrame()
 
-    @staticmethod
-    def _bh_fdr(pvals: np.ndarray) -> np.ndarray:
-        """Benjamini-Hochberg FDR correction.
+    _bh_fdr = staticmethod(bh_fdr)
 
-        Parameters
-        ----------
-        pvals : array-like
-            Raw p-values.
-
-        Returns
-        -------
-        np.ndarray
-            Adjusted FDR values (same shape).
-        """
-        pvals = np.asarray(pvals, dtype=float)
-        if len(pvals) == 0:
-            return np.array([], dtype=float)
-        adjusted = np.full(pvals.shape, np.nan, dtype=float)
-        finite_mask = np.isfinite(pvals)
-        finite = pvals[finite_mask]
-        n = len(finite)
-        if n == 0:
-            return adjusted
-        order = np.argsort(finite)
-        ranked = finite[order]
-        adjusted_ranked = ranked * n / np.arange(1, n + 1)
-        adjusted_ranked = np.minimum.accumulate(adjusted_ranked[::-1])[::-1]
-        finite_adjusted = np.empty(n, dtype=float)
-        finite_adjusted[order] = np.clip(adjusted_ranked, 0.0, 1.0)
-        adjusted[finite_mask] = finite_adjusted
-        return adjusted
-
-    @staticmethod
-    def _normalize_term(value: Any) -> str:
-        term = str(value).split("__")[-1].strip().lower()
-        return " ".join(term.split())
+    _normalize_term = staticmethod(normalize_term)
 
     @staticmethod
     def _first_probability_column(
@@ -176,99 +278,10 @@ class PathwayConvergenceAnalyzer:
                 ))
         return pd.DataFrame(rows)
 
-    @staticmethod
-    def _rra_probability(rank_fractions: np.ndarray) -> float:
-        """Robust Rank Aggregation 的 beta 顺序统计量近似。"""
-        values = np.sort(np.asarray(rank_fractions, dtype=float))
-        values = values[np.isfinite(values)]
-        n_values = len(values)
-        if n_values < 2:
-            return float("nan")
-        probabilities = [
-            beta.cdf(value, rank, n_values - rank + 1)
-            for rank, value in enumerate(values, start=1)
-        ]
-        return float(min(1.0, min(probabilities) * n_values))
+    _rra_probability = staticmethod(rra_probability)
 
     def _fuse_pathway_evidence(self, evidence_df: pd.DataFrame) -> pd.DataFrame:
-        if evidence_df.empty:
-            return pd.DataFrame(columns=[
-                "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
-                "fusion_method", "fused_pvalue", "fused_fdr",
-            ])
-
-        # comparison 是 estimand 身份的一部分，禁止跨比较池化。
-        per_omics_rows: list[dict[str, Any]] = []
-        for (tissue, comparison, omics, term), group in evidence_df.groupby(
-            ["tissue", "comparison", "omics", "pathway_term"], sort=True
-        ):
-            probabilities = pd.to_numeric(group["probability"], errors="coerce").dropna()
-            if probabilities.empty:
-                combined_probability = float("nan")
-            else:
-                combined_probability = float(min(1.0, probabilities.min() * len(probabilities)))
-            per_omics_rows.append({
-                "tissue": tissue,
-                "comparison": comparison,
-                "omics": omics,
-                "pathway_term": term,
-                "probability": combined_probability,
-                "rank_fraction": float(group["rank_fraction"].min()),
-            })
-        per_omics = pd.DataFrame(per_omics_rows)
-
-        fused_rows: list[dict[str, Any]] = []
-        for (tissue, comparison, term), group in per_omics.groupby(
-            ["tissue", "comparison", "pathway_term"], sort=True
-        ):
-            if group["omics"].nunique() < 2:
-                continue
-            probabilities = pd.to_numeric(group["probability"], errors="coerce").dropna().to_numpy()
-            if len(probabilities) >= 2:
-                _, fused_probability = combine_pvalues(
-                    np.clip(probabilities, np.finfo(float).tiny, 1.0),
-                    method="fisher",
-                )
-                fusion_method = "fisher"
-            else:
-                fused_probability = self._rra_probability(group["rank_fraction"].to_numpy())
-                fusion_method = "rra"
-
-            pvalue_map = {
-                row["omics"]: None if pd.isna(row["probability"]) else round(float(row["probability"]), 6)
-                for _, row in group.iterrows()
-            }
-            rank_map = {
-                row["omics"]: round(float(row["rank_fraction"]), 6)
-                for _, row in group.iterrows()
-            }
-            fused_rows.append({
-                "tissue": tissue,
-                "comparison": comparison,
-                "pathway_term": term,
-                "n_omics": int(group["omics"].nunique()),
-                "contributing_omics": ", ".join(sorted(group["omics"].unique())),
-                "fusion_method": fusion_method,
-                "fused_pvalue": float(fused_probability),
-                "omics_probabilities": str(pvalue_map),
-                "omics_rank_fractions": str(rank_map),
-            })
-
-        fused = pd.DataFrame(fused_rows)
-        if fused.empty:
-            return pd.DataFrame(columns=[
-                "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
-                "fusion_method", "fused_pvalue", "fused_fdr",
-            ])
-        fused["fused_fdr"] = np.nan
-        for _, indices in fused.groupby(["tissue", "comparison"]).groups.items():
-            fused.loc[indices, "fused_fdr"] = self._bh_fdr(
-                fused.loc[indices, "fused_pvalue"].to_numpy(dtype=float)
-            )
-        return fused.sort_values(
-            ["fused_fdr", "fused_pvalue", "n_omics"],
-            ascending=[True, True, False],
-        ).reset_index(drop=True)
+        return fuse_pathway_evidence(evidence_df)
 
     def analyze(
         self,

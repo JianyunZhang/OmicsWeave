@@ -266,6 +266,8 @@ class OmicsBlock(_Strict):
 class IntegrationSettings(_Strict):
     enabled: bool = False
     modes: list[IntegrationMode] = Field(default_factory=list)
+    # 各整合模式的参数，如 pathway_convergence: {ora_padj_cutoff: 0.05, gsea_padj_cutoff: 0.25}
+    parameters: dict[IntegrationMode, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ExperimentInfo(_Strict):

@@ -35,9 +35,15 @@ def find_run(results_root: str | Path, experiment_id: str, run_id: str | None = 
 
 
 def bundle_tables(run_dir: str | Path) -> dict[str, pd.DataFrame]:
-    """结果包中的统一结果表：``<组学>_<表名>`` → 表。"""
-    return {f"{path.parent.parent.name}_{path.stem}": pd.read_parquet(path)
-            for path in sorted(Path(run_dir).glob("omics/*/tables/*.parquet"))}
+    """结果包中的结果表：组学结果名为 ``<组学>_<表名>``；整合结果的表名已带模式特有的前缀（如 pathway_fusion），
+    直接用表名，与其他表重名时再加 ``<模式>_``。"""
+    run_dir = Path(run_dir)
+    tables = {f"{path.parent.parent.name}_{path.stem}": pd.read_parquet(path)
+              for path in sorted(run_dir.glob("omics/*/tables/*.parquet"))}
+    for path in sorted(run_dir.glob("integration/*/tables/*.parquet")):
+        name = path.stem if path.stem not in tables else f"{path.parent.parent.name}_{path.stem}"
+        tables[name] = pd.read_parquet(path)
+    return tables
 
 
 def _info(manifest: RunManifest, tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -64,7 +70,7 @@ def export_bundle(run_dir: str | Path, fmt: str = "xlsx", output: str | Path | N
     manifest = read_manifest(run_dir)
     tables = bundle_tables(run_dir)
     if not tables:
-        raise ContractError(f"{run_dir} 中没有统一结果表（omics/<组学>/tables/*.parquet）")
+        raise ContractError(f"{run_dir} 中没有结果表（omics/<组学>/tables/ 或 integration/<模式>/tables/）")
     info = _info(manifest, tables)
     stem = f"{manifest.experiment_id}_{manifest.run_id}"
 

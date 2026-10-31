@@ -9,6 +9,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] validate [--experiment 实验ID ...]
     omicsweave [--project-dir DIR] migrate --experiment 实验ID [--dry-run] [--force]
     omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
+    omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode pathway_convergence] [--source 运行ID]
     omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
@@ -104,6 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--steps", action="append", default=None,
                      help="只运行这些步骤，可重复或用逗号分隔，如 qc,differential；默认全部")
 
+    integrate = modules.add_parser("integrate", help="读取统一结果表做多组学整合，结果写入新的结果包")
+    integrate.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
+    integrate.add_argument("--mode", action="append", default=None,
+                           help="整合模式，可重复或用逗号分隔；默认 experiment.yaml 中 integration.modes 列出的模式")
+    integrate.add_argument("--source", default=None, help="源结果包的运行 ID，默认最近一次含统一结果表的运行")
+
     export = modules.add_parser("export", help="把结果包中的统一结果表导出为 Excel 或 TSV")
     export.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
     export.add_argument("--run", default=None, help="运行 ID，默认最近一次")
@@ -169,6 +176,22 @@ def _run_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_integrate(args: argparse.Namespace) -> int:
+    from omicsweave.core.run import RunError
+    from omicsweave.integration.integrate import integrate_experiment
+
+    try:
+        run_dir, notes = integrate_experiment(args.experiment, _split(args.mode), source=args.source,
+                                              root=project_dir(), command=["omicsweave", *args.argv])
+    except RunError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    for note in notes:
+        print(f"[提示] {note}")
+    print(f"结果包：{run_dir}")
+    return 0
+
+
 def _run_export(args: argparse.Namespace) -> int:
     from omicsweave.contract.dataset import ContractError
     from omicsweave.contract.export import export_bundle, find_run
@@ -186,7 +209,7 @@ def _run_export(args: argparse.Namespace) -> int:
 
 
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
-             "export": _run_export}
+             "integrate": _run_integrate, "export": _run_export}
 
 
 def main(argv: list[str] | None = None) -> None:

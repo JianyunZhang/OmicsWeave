@@ -151,10 +151,8 @@ def _expand(paths: list[Path]) -> list[Path]:
     return list(dict.fromkeys(p.resolve() for p in files))
 
 
-def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
-                   steps: list[str] | None = None, root: str | Path | None = None,
-                   command: list[str] | None = None, run_id: str | None = None) -> tuple[Path, list[str]]:
-    """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
+def load_validated(experiment_id: str, root: str | Path | None = None) -> tuple[Project, Experiment]:
+    """读取项目与实验；配置未通过校验时抛出 :class:`RunError`，不开始运行。"""
     try:
         project = load_project(root)
         experiment = load_experiment(project, experiment_id)
@@ -164,7 +162,48 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
     if errors:
         raise RunError(f"实验 {experiment.id} 未通过校验（omicsweave validate），请先修正：\n"
                        + "\n".join(f"  - {e}" for e in errors))
+    return project, experiment
 
+
+def start_run(project: Project, experiment: Experiment, run_id: str | None = None,
+              steps: list[str] | None = None) -> RunContext:
+    """新建结果包目录并写出 metadata/。"""
+    run_id = run_id or new_run_id()
+    run_dir = project.path("results") / experiment.id / run_id
+    if run_dir.exists():
+        raise RunError(f"{run_dir} 已存在")
+    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None)
+    _write_metadata(ctx)
+    return ctx
+
+
+def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], parameters: dict[str, Any],
+               command: list[str] | None = None) -> Path:
+    """写出运行清单：登记实验配置、样本表与 ``inputs``，以及结果包内的全部输出文件。"""
+    experiment = ctx.experiment
+    design = experiment.config.design
+    files = _expand([experiment.root / EXPERIMENT_FILE, experiment.root / design.subjects,
+                     experiment.root / design.samples, *inputs])
+    outputs = sorted(p for p in ctx.run_dir.rglob("*") if p.is_file())
+    manifest = RunManifest(
+        run_id=ctx.run_id,
+        project_id=ctx.project.id,
+        experiment_id=experiment.id,
+        command=command or [],
+        config_sha256=sha256_file(experiment.root / EXPERIMENT_FILE),
+        omics=omics,
+        parameters=parameters,
+        files=[file_record(p, ctx.project.root, "input") for p in files]
+        + [file_record(p, ctx.run_dir, "output") for p in outputs],
+    )
+    return write_manifest(manifest, ctx.run_dir)
+
+
+def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
+                   steps: list[str] | None = None, root: str | Path | None = None,
+                   command: list[str] | None = None, run_id: str | None = None) -> tuple[Path, list[str]]:
+    """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
+    project, experiment = load_validated(experiment_id, root)
     chosen, notes = _select_omics(experiment, list(omics))
     runners = {o: _load_runner(o) for o in chosen}
     if steps:
@@ -173,35 +212,15 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
         if unknown:
             raise RunError(f"未知步骤 {'、'.join(unknown)}；{'、'.join(o.value for o in chosen)} 可选：{'、'.join(known)}")
 
-    run_id = run_id or new_run_id()
-    run_dir = project.path("results") / experiment.id / run_id
-    if run_dir.exists():
-        raise RunError(f"{run_dir} 已存在")
-    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None)
-    _write_metadata(ctx)
-
+    ctx = start_run(project, experiment, run_id, steps)
     runs: list[OmicsRun] = []
     for o in chosen:
         func, _ = runners[o]
         try:
             runs.append(func(ctx))
         except RunError as exc:
-            raise RunError(f"{o.value} 运行失败：{exc}（结果包 {run_dir} 不完整，没有 manifest.json）") from exc
+            raise RunError(f"{o.value} 运行失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
 
-    design = experiment.config.design
-    inputs = _expand([experiment.root / EXPERIMENT_FILE, experiment.root / design.subjects,
-                      experiment.root / design.samples, *(p for r in runs for p in r.inputs)])
-    outputs = sorted(p for p in run_dir.rglob("*") if p.is_file())
-    manifest = RunManifest(
-        run_id=run_id,
-        project_id=project.id,
-        experiment_id=experiment.id,
-        command=command or [],
-        config_sha256=sha256_file(experiment.root / EXPERIMENT_FILE),
-        omics=chosen,
-        parameters={"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}},
-        files=[file_record(p, project.root, "input") for p in inputs]
-        + [file_record(p, run_dir, "output") for p in outputs],
-    )
-    write_manifest(manifest, run_dir)
-    return run_dir, notes + [n for r in runs for n in r.notes]
+    finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command,
+               parameters={"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}})
+    return ctx.run_dir, notes + [n for r in runs for n in r.notes]

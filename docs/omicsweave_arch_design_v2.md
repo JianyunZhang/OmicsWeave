@@ -152,6 +152,8 @@ src/omicsweave/
 │   ├── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
 │   └── runner.py           # 接入 omicsweave run 的运行器（四个组学均已接入 ✅）
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
+│   ├── integrate.py        # 整合入口（omicsweave integrate）：读取源结果包的统一结果表，写出新的结果包 ✅
+│   └── modes/              # 整合模式：pathway_convergence ✅；flux_anchored、sample_level 待接入
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
 ├── visualization/          # theme.py：统一绘图主题 ✅；通用图形阶段 2 迁入
@@ -289,6 +291,8 @@ omics:
 integration:
   enabled: true
   modes: [flux_anchored, pathway_convergence]
+  parameters:                     # 可选：各模式的参数
+    pathway_convergence: {ora_padj_cutoff: 0.05, gsea_padj_cutoff: 0.25}
 ```
 
 ### 5.5 样本表
@@ -450,6 +454,7 @@ analysis_results/<experiment_id>/<run_id>/
 ```
 
 每次运行都会生成 `metadata/` 与 `manifest.json`；单组学运行只生成对应的 `omics/<omics>/`。运行清单登记全部输入文件（含 `experiment.yaml`、样本表与组学输入）和结果包内全部输出文件的校验值。
+整合（`omicsweave integrate`）读取一次单组学运行的结果表，写出新的结果包，其中只有 `integration/<mode>/`；运行清单记录源结果包的运行 ID（`parameters.source_run`），并把读取的每个结果表登记为输入。
 
 ### 8.2 差异结果统一列名（`differential.parquet`）
 
@@ -550,6 +555,12 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 不满足前提条件时，`validate` 和 `integrate` 会明确说明缺少什么（例如“flux_anchored 需要 MFA 数据，当前实验未启用 MFA”），而不是静默跳过。
 
+**现状（阶段 2.3 进行中）**：
+
+- `omicsweave integrate --experiment <ID> [--mode ...] [--source <运行ID>]`：默认读取最近一次含统一结果表的运行，模式默认取 `integration.modes`，参数写在 `integration.parameters.<模式>`。
+- `pathway_convergence` 已接入：读取各组学的 `enrichment.parquet`，通路按名称匹配，每个（组织, 比较）内融合（组学内 Bonferroni、组学间 Fisher，BH 校正），融合方法与旧流程相同（回归测试：与旧版分析器逐值一致）；另列出各组学的效应方向与方向是否一致，并给出各组学显著通路的两两交集（ORA 用 padj < 0.05，GSEA 用 FDR < 0.25）。前提：至少两个组学有富集结果。
+- `flux_anchored` 随 2.8（拆分 `flux_omics_scorer`，证据提取并入证据画像）接入，`sample_level` 随后接入；此前可用旧命令 `omicsweave integration run`。
+
 ---
 
 ## 10. 现有代码整合清单
@@ -641,7 +652,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 |---|---|---|
 | 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表；KEGG ORA 与 GSEA）；转录组 ✅（计数矩阵 / kallisto 定量 → 基因计数数据集 → PyDESeq2 或秩和检验 → 差异结果表；本地 ORA 与 GSEA）；蛋白组 ✅（DIA-NN 报告 → 未插补的强度数据集 → limma 差异结果表；本地 ORA 与 GSEA）；`omicsweave export` ✅。未接入：蛋白组 ssGSEA（样本层面得分，属于数据集）；图件与报告见 2.6 |
 | 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），四个组学均已接入；旧命令保留 |
-| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | |
+| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | 部分：`omicsweave integrate` 框架 ✅（源结果包、新结果包、运行清单、模式参数）；`pathway_convergence` ✅；`flux_anchored`（随 2.8）、`sample_level` 待做 |
 | 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |
 | 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` | |
 | 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` | |
