@@ -134,6 +134,7 @@ src/omicsweave/
 │   ├── validate.py         # 结合样本表与文件系统的校验（omicsweave validate）✅
 │   ├── scaffold.py         # 项目模板（omicsweave init）✅
 │   ├── migrate.py          # 旧版各组学配置 → 统一模型（omicsweave migrate）✅
+│   ├── run.py              # 统一运行入口与结果包（omicsweave run）✅
 │   ├── provenance.py       # 文件指纹、run_provenance.json 读写与跨批次比对 ✅
 │   ├── statistics/         # nonparametric / meta_analysis / stability ✅
 │   ├── idmap/              # ID 映射（暂为原有字典，阶段 2 改为数据文件 + 解析器）
@@ -146,7 +147,8 @@ src/omicsweave/
 │   ├── metabolomics/       # msconvert、MS-DIAL/MZmine/Skyline 结果导入
 │   └── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
 ├── transcriptomics/  proteomics/  metabolomics/  mfa/
-│   └── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
+│   ├── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
+│   └── runner.py           # 接入 omicsweave run 的运行器（MFA ✅）
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
@@ -434,7 +436,8 @@ analysis_results/<experiment_id>/<run_id>/
 │   ├── tables/
 │   │   ├── differential.parquet      # 统一列名的差异结果（所有比较 × 所有组织）
 │   │   └── enrichment.parquet
-│   └── figures/                      # <图类型>_<组织>_<比较>.pdf/.svg/.png
+│   ├── figures/                      # <图类型>_<组织>_<比较>.pdf/.svg/.png
+│   └── details/                      # 过渡期：旧版格式的明细表（如 MFA 各比较的差异通量宽表）
 ├── integration/<mode>/               # 跨组学整合结果（启用整合时）
 ├── evidence/                         # 标准化实体、证据记录、实体关系、同源映射
 ├── hypotheses/                       # 候选通路与候选靶点（启用整合时）
@@ -443,7 +446,7 @@ analysis_results/<experiment_id>/<run_id>/
 └── provenance/                       # 软件版本、参数、RO-Crate 描述
 ```
 
-单组学运行时只生成对应的 `omics/<omics>/` 和 `manifest.json`。
+每次运行都会生成 `metadata/` 与 `manifest.json`；单组学运行只生成对应的 `omics/<omics>/`。运行清单登记全部输入文件（含 `experiment.yaml`、样本表与组学输入）和结果包内全部输出文件的校验值。
 
 ### 8.2 差异结果统一列名（`differential.parquet`）
 
@@ -509,6 +512,13 @@ omicsweave run --experiment 20250613_dio_glp1 --omics mfa
 omicsweave run --experiment 20250613_dio_glp1 --omics all        # 依次运行所有已启用的组学，彼此独立
 omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 ```
+
+**现状（阶段 2 进行中）**：
+
+- 运行框架已实现（`core/run.py`）：配置通过 `validate` 才开始运行；每次运行写入独立的 `<run_id>/` 目录；各组学由运行器实现，运行器不读写进程级全局状态，同一进程中可以并行运行多个实验。
+- 已接入的组学：MFA（步骤 `qc`、`differential`）。输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
+- `--omics all` 跳过尚未接入的组学并给出提示，这些组学暂用原有命令 `omicsweave <组学> run`。MFA 的图件、通路比较、MID 分析、解读报告与多批次整合暂时仍由 `omicsweave mfa run` 提供。
+- 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
 ### 9.2 多组学整合（可选，三种模式）
 
@@ -614,21 +624,21 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 ### 阶段 2：各组学接入 + 运行模式 + 证据层与交换契约 v1（约 6–8 周）→ v0.3
 
-| 任务 | 交付物 |
-|---|---|
-| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` |
-| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 |
-| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` |
-| 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` |
-| 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` |
-| 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` |
-| 2.7 交换契约 v1：发布 JSON Schema 与标准样例结果包，CI 中运行契约测试 | `schemas/evidence-exchange/v1/` |
-| 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 |
-| 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） |
+| 任务 | 交付物 | 状态（2026-10-31） |
+|---|---|---|
+| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；转录组、代谢组、蛋白组待做 |
+| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），已接入 MFA；旧命令保留 |
+| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | |
+| 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |
+| 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` | |
+| 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` | |
+| 2.7 交换契约 v1：发布 JSON Schema 与标准样例结果包，CI 中运行契约测试 | `schemas/evidence-exchange/v1/` | |
+| 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 | |
+| 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） | 部分：运行框架与 MFA 运行器不含模块级状态，两个实验在同一进程中并行运行与顺序运行的结果一致（测试覆盖）；其余组学随改写完成 |
 
 **验收标准**
 - 示例项目能在单组学和三种整合模式下端到端运行。
-- 用现有实验数据回归测试，主要结果与迁移前一致；如有差异，需能逐项说明原因。其中用 `migrate` 转换的实验，MFA 结果须与旧流程逐值一致。
+- 用现有实验数据回归测试，主要结果与迁移前一致；如有差异，需能逐项说明原因。其中用 `migrate` 转换的实验，MFA 结果须与旧流程逐值一致（合成数据的回归测试已覆盖，待在真实课题数据上核对）。
 - 任一候选通路/靶点可回溯到具体统计结果、输入样本和来源数据库。
 - 标准样例结果包能通过 JSON Schema 校验（TheraWeave 的 T1 以此为前置条件）。
 

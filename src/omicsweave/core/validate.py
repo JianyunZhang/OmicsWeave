@@ -128,7 +128,7 @@ def _is_biological(samples: pd.DataFrame) -> pd.Series:
     return samples["sample_type"].isin(["", "sample"])
 
 
-def _biological_samples(exp: Experiment) -> pd.DataFrame:
+def biological_samples(exp: Experiment) -> pd.DataFrame:
     """生物学样本（去掉 QC、空白等），并合并动物层面的因素列。"""
     samples = exp.samples[_is_biological(exp.samples)]
     subject_cols = [c for c in exp.subjects.columns if c not in samples.columns or c == "subject_id"]
@@ -162,7 +162,8 @@ def _check_factors(exp: Experiment, merged: pd.DataFrame, out: _Collector) -> No
             out.error(f"stratify_by / covariates 中的列 {column} 在样本表中不存在")
 
 
-def _matches(series: pd.Series, value: str, numeric: bool) -> pd.Series:
+def matches_level(series: pd.Series, value: str, numeric: bool) -> pd.Series:
+    """样本表中取值等于某个因素水平的行；数值因素按数值比较（"4" 与 "4.0" 相同）。"""
     if numeric:
         return pd.to_numeric(series, errors="coerce") == float(value)
     return series == value
@@ -183,7 +184,7 @@ def _check_contrasts(exp: Experiment, merged: pd.DataFrame, out: _Collector) -> 
                 out.error(f"比较 {contrast.id} 的 subset 列 {key} 在样本表中不存在")
                 selected = selected.iloc[0:0]
                 continue
-            selected = selected[_matches(selected[key], value, design.factors[key].type == "numeric")]
+            selected = selected[matches_level(selected[key], value, design.factors[key].type == "numeric")]
         for omics in exp.config.omics.enabled():
             part = selected[selected["omics"] == omics.value]
             if part.empty:
@@ -193,8 +194,8 @@ def _check_contrasts(exp: Experiment, merged: pd.DataFrame, out: _Collector) -> 
             too_few, underpowered = [], []
             for stratum, rows in groups:
                 label = "/".join(map(str, stratum if isinstance(stratum, tuple) else (stratum,))) or "全部"
-                n_num = rows.loc[_matches(rows[contrast.factor], contrast.numerator, numeric), "subject_id"].nunique()
-                n_den = rows.loc[_matches(rows[contrast.factor], contrast.denominator, numeric), "subject_id"].nunique()
+                n_num = rows.loc[matches_level(rows[contrast.factor], contrast.numerator, numeric), "subject_id"].nunique()
+                n_den = rows.loc[matches_level(rows[contrast.factor], contrast.denominator, numeric), "subject_id"].nunique()
                 if min(n_num, n_den) < MIN_REPLICATES:
                     too_few.append(f"{label}（{n_num} vs {n_den}）")
                 elif min_achievable_pvalue(n_num, n_den) >= alpha:
@@ -330,7 +331,7 @@ def validate_experiment(exp: Experiment) -> list[Issue]:
     if exp.root.name != exp.id:
         out.warning(f"experiment.id（{exp.id}）与目录名（{exp.root.name}）不一致")
     if _check_tables(exp, out):
-        merged = _biological_samples(exp)
+        merged = biological_samples(exp)
         _check_factors(exp, merged, out)
         _check_contrasts(exp, merged, out)
         _check_inputs(exp, out)
@@ -364,4 +365,5 @@ def validate_project(root: str | Path | None = None, experiments: list[str] | No
     return report
 
 
-__all__ = ["Issue", "ValidationReport", "validate_experiment", "validate_project"]
+__all__ = ["Issue", "ValidationReport", "biological_samples", "matches_level", "validate_experiment",
+           "validate_project"]

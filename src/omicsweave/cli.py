@@ -8,6 +8,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] init [--id 项目ID] [--species mus_musculus] [--experiment 实验ID]
     omicsweave [--project-dir DIR] validate [--experiment 实验ID ...]
     omicsweave [--project-dir DIR] migrate --experiment 实验ID [--dry-run] [--force]
+    omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
@@ -15,7 +16,8 @@ omicsweave 命令行入口。
     omicsweave --project-dir D:/lab_project init --id dio_mouse
     omicsweave --project-dir D:/lab_project validate
     omicsweave --project-dir D:/lab_project migrate --experiment 20250425_cimr_wt_mice_dio
-    omicsweave mfa run --experiment 20250425_cimr_wt_mice_dio
+    omicsweave --project-dir D:/lab_project run --experiment 20250425_cimr_wt_mice_dio --omics mfa
+    omicsweave mfa run --experiment 20250425_cimr_wt_mice_dio      # 旧版流程，读取旧版配置
     omicsweave mfa run --help          # 查看该动作自身的参数
 
 ``--project-dir`` 指定实验项目目录（包含 ``project.yaml``、``experiments/`` 与 ``analysis_results/``），
@@ -94,6 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--dry-run", action="store_true", help="只打印迁移结果，不写文件")
     migrate.add_argument("--force", action="store_true", help="覆盖实验目录中已有的 experiment.yaml 与样本表")
 
+    run = modules.add_parser("run", help="按 experiment.yaml 运行组学分析，生成结果包")
+    run.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
+    run.add_argument("--omics", action="append", default=None,
+                     help="要运行的组学，可重复或用逗号分隔；默认 all（全部已启用且已接入统一运行的组学）")
+    run.add_argument("--steps", action="append", default=None,
+                     help="只运行这些步骤，可重复或用逗号分隔，如 qc,differential；默认全部")
+
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
         action_parsers = module_parser.add_subparsers(dest="action", metavar="<动作>", required=True)
@@ -134,12 +143,32 @@ def _run_migrate(args: argparse.Namespace) -> int:
     return run(args.experiment, project_dir(), dry_run=args.dry_run, force=args.force)
 
 
-_HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate}
+def _split(values: list[str] | None) -> list[str]:
+    return [part.strip() for value in values or [] for part in value.split(",") if part.strip()]
+
+
+def _run_run(args: argparse.Namespace) -> int:
+    from omicsweave.core.run import ALL, RunError, run_experiment
+
+    try:
+        run_dir, notes = run_experiment(args.experiment, _split(args.omics) or [ALL], _split(args.steps) or None,
+                                        root=project_dir(), command=["omicsweave", *args.argv])
+    except RunError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    for note in notes:
+        print(f"[提示] {note}")
+    print(f"结果包：{run_dir}")
+    return 0
+
+
+_HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run}
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args, forwarded = parser.parse_known_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
 
     if args.module in _HANDLERS:
         if forwarded:

@@ -41,7 +41,7 @@ omicsweave mfa check --experiment <id>             # 检查实验声明的 MFA �
 ```
 
 保留全部拟合结果时行数通常超过 Excel 上限，`convert` 默认输出 Parquet 目录（`mfa_tables`）。
-目前 `omicsweave mfa run` 仍直接读取旧版 `flux_raw_data.xlsx` / `mid_raw_data.xlsx`；改为读取标准格式是阶段 2 的工作。
+按统一项目模型运行用 `omicsweave run --experiment <id> --omics mfa`：读取 `experiment.yaml` 声明的输入（标准 Excel、Parquet 目录或旧版导出均可），分组与比较来自样本表和 `design.contrasts`，输出每只动物的代表净通量数据集与统一差异结果表（`omics/mfa/tables/differential.parquet`）；同一份数据与旧流程的结果逐值一致。`omicsweave mfa run` 仍读取旧版配置，图件、通路比较、MID 分析、解读报告与多批次整合暂时只在旧流程中提供。
 
 ### 支持的数据类型
 

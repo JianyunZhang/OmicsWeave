@@ -87,3 +87,5 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "--import-mode=importlib"]
+# 测试之间共用的数据构造函数以 tests.<模块> 导入
+pythonpath = ["."]

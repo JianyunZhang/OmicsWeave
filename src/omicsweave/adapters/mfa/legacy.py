@@ -174,16 +174,36 @@ def convert_legacy_mfa(flux_path: str | Path, mid_path: str | Path | None = None
                             conditions=conditions, notes=notes)
 
 
+def _legacy_columns(table: pd.DataFrame) -> list[str]:
+    """旧版通量列名：``组织--反应``，逆向加 ``__R``；没有组织前缀的列保持原样。"""
+    return [(r.reaction_id if r.tissue == UNKNOWN_TISSUE else f"{r.tissue}--{r.reaction_id}")
+            + (REVERSE_SUFFIX if r.direction == "reverse" else "")
+            for r in table.itertuples()]
+
+
 def legacy_flux_matrix(results: MFAResults) -> pd.DataFrame:
     """还原旧版 ``MFAAnalyser.flux_df``：样本 × ``组织--反应[__R]``，取每个样本的代表值。"""
     best = results.best_estimates()
-
-    def column(row) -> str:
-        name = row.reaction_id if row.tissue == UNKNOWN_TISSUE else f"{row.tissue}--{row.reaction_id}"
-        return name + (REVERSE_SUFFIX if row.direction == "reverse" else "")
-
-    best["column"] = [column(r) for r in best.itertuples()]
+    best["column"] = _legacy_columns(best)
     return best.pivot(index="sample_id", columns="column", values="value")
+
+
+def legacy_all_fits(results: MFAResults) -> dict[str, pd.DataFrame]:
+    """还原旧版 ``MFAAnalyser.flux_all_fits``：样本 → 每次拟合一行、每个通量一列（有 loss 时另加 loss 列）。
+
+    行按拟合在结果中首次出现的顺序排列；旧版工作表中的 ``Index`` 与 ``MIX:`` 列不参与任何通量计算，不还原。
+    """
+    flux = results.flux.copy()
+    flux["column"] = _legacy_columns(flux)
+    losses = (results.fits.set_index(["sample_id", "fit_id"])["loss"]
+              if results.fits is not None and not results.fits.empty else None)
+    all_fits = {}
+    for sample_id, part in flux.groupby("sample_id", sort=False):
+        wide = part.pivot(index="fit_id", columns="column", values="value").reindex(pd.unique(part["fit_id"]))
+        if losses is not None and sample_id in losses.index.get_level_values(0):
+            wide["loss"] = losses.loc[sample_id].reindex(wide.index).to_numpy()
+        all_fits[str(sample_id)] = wide.rename_axis(index=None, columns=None).reset_index(drop=True)
+    return all_fits
 
 
 def legacy_mid_matrices(results: MFAResults) -> tuple[pd.DataFrame, pd.DataFrame]:

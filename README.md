@@ -67,7 +67,8 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 omicsweave --help
 omicsweave --project-dir D:/lab_project init --id dio_mouse
 omicsweave --project-dir D:/lab_project validate
-omicsweave mfa run --experiment <experiment_id>
+omicsweave --project-dir D:/lab_project run --experiment <experiment_id> --omics mfa
+omicsweave mfa run --experiment <experiment_id>      # 旧版流程，读取旧版配置
 omicsweave mfa run --help
 ```
 
@@ -77,6 +78,8 @@ omicsweave mfa run --help
 |---|---|
 | `init [--id 项目ID] [--species mus_musculus\|homo_sapiens] [--experiment 实验ID]` | 生成项目模板（不会覆盖已有文件，除非加 `--force`） |
 | `validate [--experiment 实验ID ...]` | 检查配置、样本表、因素取值、每个比较的生物学重复数、输入文件与整合前提；有错误时退出码为 1 |
+| `migrate --experiment 实验ID [--dry-run] [--force]` | 把旧版各组学配置转换为上述格式，待补充项写在 `MIGRATION.md` |
+| `run --experiment 实验ID [--omics 组学\|all] [--steps 步骤]` | 按 `experiment.yaml` 运行，结果包写到 `analysis_results/<实验ID>/<run_id>/`；目前已接入 MFA，其余组学暂用 `omicsweave <组学> run` |
 
 各组学流程的命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
 这些流程目前仍读取旧的各组学配置（`experiments/<id>/<组学>_data/`），阶段 2 改为读取上面的统一项目配置。
