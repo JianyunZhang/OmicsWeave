@@ -682,7 +682,7 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 - [x] 合并溯源记录（`core/provenance.py`）与绘图主题（`visualization/theme.py`）。
 - [ ] `omicsweave init / validate / migrate`；用 `migrate` 转换现有课题的旧配置：`init`、`validate` 已完成，`migrate` 等课题数据本地副本就位。
 - [ ] 删除废弃脚本（v2 第 10.5 节，已失效的已删除，其余按替代进度删除）；课题数据本地副本就位后，把课题专用脚本移到 `local/projects/<课题>/analysis/`（v2 第 10.4 节）。
-- [ ] 运行函数改为接受显式的项目上下文，逐步去除进程级全局状态（为 O5 预留）。
+- [ ] 运行函数改为接受显式的项目上下文，逐步去除进程级全局状态（为 O5 预留）：项目目录已改为上下文变量；旧流程的模块级状态随 O2 各组学改写去除（清单见 v2 第 4.1 节）。
 - [x] 合成示例项目（`examples/demo_project`，CI 中运行 validate）；补 CITATION.cff；修复 SSL 校验。
 
 **验收标准**：示例项目能通过 `validate`；迁移后的现有课题 MFA 结果与迁移前逐项一致。

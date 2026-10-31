@@ -8,10 +8,7 @@ import time
 
 from omicsweave.core.project import project_dir
 
-# 外部程序安装到项目目录，而不是安装后的包目录
-TOOLS_DIR = os.path.join(str(project_dir()), "tools")
 KALLISTO_URL = "https://github.com/pachterlab/kallisto/releases/download/v0.51.1/kallisto_windows-v0.51.1.zip"
-KALLISTO_EXE = os.path.join(TOOLS_DIR, "kallisto", "kallisto.exe")
 
 
 def download_file(url, dest, label=""):
@@ -54,17 +51,20 @@ def download_file(url, dest, label=""):
 
 
 def main():
+    # 外部程序安装到项目目录（运行时解析，以便 --project-dir 生效），而不是安装后的包目录
+    tools_dir = os.path.join(str(project_dir()), "tools")
+    kallisto_exe = os.path.join(tools_dir, "kallisto", "kallisto.exe")
     print("=" * 60, flush=True)
     print("  Setup kallisto for Windows", flush=True)
     print("=" * 60, flush=True)
     
-    os.makedirs(TOOLS_DIR, exist_ok=True)
+    os.makedirs(tools_dir, exist_ok=True)
     
     # 1. Download kallisto
-    if os.path.exists(KALLISTO_EXE):
-        print(f"kallisto already exists: {KALLISTO_EXE}", flush=True)
+    if os.path.exists(kallisto_exe):
+        print(f"kallisto already exists: {kallisto_exe}", flush=True)
     else:
-        zip_path = os.path.join(TOOLS_DIR, "kallisto.zip")
+        zip_path = os.path.join(tools_dir, "kallisto.zip")
         try:
             download_file(KALLISTO_URL, zip_path, "kallisto")
         except Exception as e:
@@ -76,11 +76,11 @@ def main():
         
         print("  Extracting...", flush=True)
         with zipfile.ZipFile(zip_path, 'r') as z:
-            z.extractall(TOOLS_DIR)
+            z.extractall(tools_dir)
         os.remove(zip_path)
         
         # Find the exe
-        for root, dirs, files in os.walk(TOOLS_DIR):
+        for root, dirs, files in os.walk(tools_dir):
             for f in files:
                 if f == "kallisto.exe":
                     found = os.path.join(root, f)
@@ -90,12 +90,12 @@ def main():
     # 2. Verify
     import subprocess
     try:
-        result = subprocess.run([KALLISTO_EXE, "version"], capture_output=True, text=True)
+        result = subprocess.run([kallisto_exe, "version"], capture_output=True, text=True)
         print(f"\nkallisto version: {result.stdout.strip()}", flush=True)
         print("Setup complete!", flush=True)
     except Exception as e:
         # Try to find it
-        for root, dirs, files in os.walk(TOOLS_DIR):
+        for root, dirs, files in os.walk(tools_dir):
             for f in files:
                 if f == "kallisto.exe":
                     exe = os.path.join(root, f)

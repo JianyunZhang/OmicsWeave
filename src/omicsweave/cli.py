@@ -29,7 +29,7 @@ from pathlib import Path
 
 from omicsweave import __version__
 from omicsweave.core.model import Species
-from omicsweave.core.project import project_dir, set_project_dir
+from omicsweave.core.project import project_context, project_dir
 
 # 模块 -> 动作 -> (入口 "包.模块:函数", 简介)
 COMMANDS: dict[str, dict[str, tuple[str, str]]] = {
@@ -123,21 +123,22 @@ def _run_validate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args, forwarded = parser.parse_known_args(argv)
-    if args.project_dir is not None:
-        set_project_dir(args.project_dir)
 
     if args.module in ("init", "validate"):
         if forwarded:
             parser.error(f"无法识别的参数：{' '.join(forwarded)}")
         handler = _run_init if args.module == "init" else _run_validate
-        sys.exit(handler(args))
+        with project_context(args.project_dir):
+            code = handler(args)
+        sys.exit(code)
 
     target, _ = COMMANDS[args.module][args.action]
     module_name, func_name = target.split(":")
-    entry = getattr(importlib.import_module(module_name), func_name)
-
-    sys.argv = [f"omicsweave {args.module} {args.action}", *forwarded]
-    entry()
+    # 在项目上下文内导入：个别旧模块在导入时就读取项目目录
+    with project_context(args.project_dir):
+        entry = getattr(importlib.import_module(module_name), func_name)
+        sys.argv = [f"omicsweave {args.module} {args.action}", *forwarded]
+        entry()
 
 
 if __name__ == "__main__":

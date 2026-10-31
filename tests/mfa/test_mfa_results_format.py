@@ -25,7 +25,6 @@ from omicsweave.adapters.mfa import convert_legacy_mfa, legacy_flux_matrix, lega
 from omicsweave.contract import ContractError
 from omicsweave.contract import mfa as mfa_contract
 from omicsweave.contract.mfa import MFAInfo, MFAResults, read_mfa, validate_mfa, write_mfa, write_template
-from omicsweave.core import project
 from omicsweave.mfa.df_analysis import _paired_net_fits
 from omicsweave.mfa.mfa_analysis import MFAAnalyser
 
@@ -196,13 +195,6 @@ class ValidationTest(unittest.TestCase):
 
 
 class MfaCliTest(unittest.TestCase):
-    # cli.main 会设置全局项目目录；测试后恢复，以免影响 pytest --project-dir 指定的真实数据测试
-    def setUp(self) -> None:
-        self._saved_project_dir = project._explicit_project_dir
-
-    def tearDown(self) -> None:
-        project._explicit_project_dir = self._saved_project_dir
-
     def run_cli(self, argv: list[str]) -> tuple[int, str]:
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):

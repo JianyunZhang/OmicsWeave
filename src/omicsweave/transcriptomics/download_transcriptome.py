@@ -10,9 +10,7 @@ import ssl
 
 from omicsweave.core.project import project_dir
 
-# 参考数据下载到项目目录，而不是安装后的包目录
-OUTPUT_DIR = os.path.join(str(project_dir()), "reference")
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "Mus_musculus.GRCm39.cdna.all.fa.gz")
+OUTPUT_NAME = "Mus_musculus.GRCm39.cdna.all.fa.gz"
 
 # Multiple download sources, ordered by reliability
 URLS = [
@@ -91,25 +89,28 @@ def download_with_progress(url, output_path, timeout=600):
 
 
 def main():
+    # 参考数据下载到项目目录（运行时解析，以便 --project-dir 生效），而不是安装后的包目录
+    output_dir = os.path.join(str(project_dir()), "reference")
+    output_file = os.path.join(output_dir, OUTPUT_NAME)
     print("=" * 60, flush=True)
     print("  Download Mouse Transcriptome (GRCm39)", flush=True)
     print("=" * 60, flush=True)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Check if already exists
-    if os.path.exists(OUTPUT_FILE):
-        size_mb = os.path.getsize(OUTPUT_FILE) / (1024 * 1024)
+    if os.path.exists(output_file):
+        size_mb = os.path.getsize(output_file) / (1024 * 1024)
         if size_mb > 30:
-            print(f"File already exists: {OUTPUT_FILE} ({size_mb:.1f} MB)", flush=True)
-            return OUTPUT_FILE
+            print(f"File already exists: {output_file} ({size_mb:.1f} MB)", flush=True)
+            return output_file
 
     for name, url in URLS:
         print(f"\nTrying {name}:", flush=True)
         print(f"  URL: {url}", flush=True)
 
         # For GENCODE, save with a different name then rename
-        temp_file = OUTPUT_FILE + ".downloading"
+        temp_file = output_file + ".downloading"
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
@@ -119,11 +120,11 @@ def main():
             size_mb = os.path.getsize(temp_file) / (1024 * 1024)
             if size_mb > 30:
                 # Rename to final name
-                if os.path.exists(OUTPUT_FILE):
-                    os.remove(OUTPUT_FILE)
-                os.rename(temp_file, OUTPUT_FILE)
-                print(f"\nSaved to: {OUTPUT_FILE} ({size_mb:.1f} MB)", flush=True)
-                return OUTPUT_FILE
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+                os.rename(temp_file, output_file)
+                print(f"\nSaved to: {output_file} ({size_mb:.1f} MB)", flush=True)
+                return output_file
             else:
                 print(f"    File too small ({size_mb:.1f} MB), trying next source...", flush=True)
                 os.remove(temp_file)
@@ -134,7 +135,7 @@ def main():
 
     print("\nAll sources failed. Please download manually:", flush=True)
     print("  https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M35/", flush=True)
-    print(f"  Save to: {OUTPUT_FILE}", flush=True)
+    print(f"  Save to: {output_file}", flush=True)
     return None
 
 

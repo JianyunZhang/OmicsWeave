@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 
 from omicsweave import cli
-from omicsweave.core import project
 
 DEMO = Path(__file__).resolve().parents[2] / "examples" / "demo_project"
 
@@ -27,13 +26,6 @@ def run(argv: list[str]) -> tuple[int, str]:
 
 
 class CliTest(unittest.TestCase):
-    # cli.main 会设置全局项目目录；测试后恢复原值，以免影响 pytest --project-dir 指定的真实数据测试
-    def setUp(self) -> None:
-        self._saved = project._explicit_project_dir
-
-    def tearDown(self) -> None:
-        project._explicit_project_dir = self._saved
-
     def test_validate_demo_project(self) -> None:
         code, output = run(["--project-dir", str(DEMO), "validate"])
         self.assertEqual(code, 0, output)

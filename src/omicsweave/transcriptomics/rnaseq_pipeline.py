@@ -902,7 +902,7 @@ def run_all_batches(experiment_id: str, outdir: str | None = None) -> list[tuple
                    "--config", str(config_path)]
             if outdir:
                 cmd.extend(["--outdir", outdir])
-            # 子进程无法继承 set_project_dir() 的设置，经环境变量传递
+            # 子进程不继承上下文中显式指定的项目目录（--project-dir），经环境变量传递
             child_env = {**os.environ, PROJECT_DIR_ENV: str(project_dir())}
 
             flush_print(f"\n{'=' * 70}")

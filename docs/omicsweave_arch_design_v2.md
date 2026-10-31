@@ -109,7 +109,16 @@
 - `integration` 只读取各组学按数据契约输出的结果，不导入各组学的内部实现。
 
 **为集群部署和多客户端联网预留的约束**（当前只实现 Windows/Linux 单机运行，见第 13 节）：
-- 运行函数接受显式的项目上下文（项目目录、配置对象），不依赖进程级全局状态。现有的 `set_project_dir()` 和各模块的全局变量（如 `rnaseq_pipeline` 中的 `KALLISTO_EXE`、`plot_results` 中的 `PLOT_DIR`）在阶段 1–2 逐步改为参数传递。
+- 运行函数接受显式的项目上下文（项目目录、配置对象），不依赖进程级全局状态。
+  - **项目目录（阶段 1 已完成）**：`--project-dir` 的设置保存在上下文变量中，每个线程、每个异步任务各自独立；`project_context()` 临时切换并自动恢复，命令行运行结束后不残留设置。子进程经环境变量 `OMICSWEAVE_PROJECT_DIR` 传递。
+  - **新代码**（`core`、`contract`、`adapters`、`visualization`）不含进程级可变状态；唯一的模块级变量是代谢物名称索引的只读懒加载缓存。
+  - **旧流程中的模块级状态（阶段 2 随各组学改写去除）**：由 `apply_config()` 一次写入、各步骤读取的全局变量，分布在
+    - 转录组：`rnaseq_pipeline`、`run_wilcoxon_de`、`generate_interpretation_report`、`enrichment/_run`、`gsea/_run`、`plotting/_config`，以及 `check_markers`、`finish_gsea`、`summarize_gsea`、`rerun_de_analysis`、`qc_one_sample`；
+    - 蛋白组：`plotting/_config`、`generate_interpretation_report`；
+    - 整合：`plotting/_config`；
+    - MFA：`plotting/_config`。
+
+    在此之前的约束：同一进程中按顺序运行是安全的（每次 `apply_config()` 重设全部变量），但不能在同一进程中并行运行多个实验或批次；转录组多批次运行已为此改用子进程。
 - 每次运行写入独立的 `<run_id>/` 目录，不同运行之间互不覆盖。
 - 单个步骤可以单独调用，输入输出都是文件，便于以后交给作业调度器或工作流引擎拆分执行。
 - 文件读写都经过 `core` 的路径接口，以后可以换成共享存储或对象存储。
@@ -568,7 +577,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 1.7 按第 10.5 节删除废弃代码；课题数据本地副本就位后，按第 10.4 节把课题专用脚本移到 `local/projects/<课题>/analysis/` | 代码量明显下降 | 部分：已失效的脚本与兼容模块已删除，其余见第 10.5 节 |
 | 1.8 合成示例项目（小型、可公开） | `examples/demo_project/`，CI 中端到端运行 | ✅ CI 中运行 `validate` |
 | 1.9 修复 SSL 校验；补 CITATION.cff（LICENSE 已于阶段 0 加入） | | ✅ |
-| 1.10 运行函数改为接受显式项目上下文，逐步去除进程级全局状态 | 为阶段 5 预留 | 未开始 |
+| 1.10 运行函数改为接受显式项目上下文，逐步去除进程级全局状态 | 为阶段 5 预留 | 部分：项目目录改为上下文变量（线程 / 任务隔离、自动恢复），下载脚本改为运行时解析项目目录；旧流程的模块级状态已逐项列出（第 4.1 节），随阶段 2 各组学改写去除 |
 
 **验收标准**
 - 示例项目能通过 `validate`。
@@ -587,6 +596,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` |
 | 2.7 交换契约 v1：发布 JSON Schema 与标准样例结果包，CI 中运行契约测试 | `schemas/evidence-exchange/v1/` |
 | 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 |
+| 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） |
 
 **验收标准**
 - 示例项目能在单组学和三种整合模式下端到端运行。
