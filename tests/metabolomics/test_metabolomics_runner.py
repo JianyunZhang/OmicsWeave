@@ -85,7 +85,7 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         build_legacy_experiment(root)
         with project_context(root):
             cfg = load_metabolomics_config(experiment_id=EXP)
-            _quiet(run_pipeline, cfg, steps=[1, 2, 3, 5])
+            _quiet(run_pipeline, cfg, steps=[1, 2, 3, 5, 6])
         cls.legacy_dir = Path(cfg.output_dir)
 
         write_migration(_quiet(migrate_experiment, EXP, root), root)
@@ -124,15 +124,30 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
             self.assertTrue((new["n_numerator"] == 5).all() and (new["n_denominator"] == 5).all())
             self.assertNotIn("MW0031", new.index)
 
-    def test_enrichment_matches_legacy_pipeline(self) -> None:
+    def test_ora_matches_legacy_pipeline(self) -> None:
+        ora = self.enrichment[self.enrichment["method"] == "ora"]
         for tissue in ("liver", "heart"):
             legacy = pd.read_csv(self.legacy_dir / "05_pathway_enrichment" / tissue
                                  / "Pathway_HFD_vs_LFD.csv").set_index("ID")
-            new = self.enrichment[self.enrichment["tissue"] == tissue].set_index("term_id").loc[legacy.index]
+            new = ora[ora["tissue"] == tissue].set_index("term_id").loc[legacy.index]
             np.testing.assert_allclose(new["pvalue"], legacy["P-value"], rtol=1e-12)
             np.testing.assert_allclose(new["padj"], legacy["FDR"], rtol=1e-12)
             self.assertEqual(list(new["overlap_size"]), list(legacy["SigCount"]))
             self.assertLess(new.loc["ko00010", "padj"], 0.05)
+
+    def test_gsea_matches_legacy_pipeline(self) -> None:
+        gsea = self.enrichment[self.enrichment["method"] == "gsea_prerank"]
+        for tissue in ("liver", "heart"):
+            legacy = pd.read_csv(self.legacy_dir / "06_gsea" / tissue / "gsea_HFD_vs_LFD_results.csv")
+            legacy["term_id"] = legacy["Term"].str.split(" | ", n=1, regex=False).str[0]
+            legacy = legacy.set_index("term_id")
+            new = gsea[gsea["tissue"] == tissue].set_index("term_id").loc[legacy.index]
+            for legacy_column, column in (("NES", "nes"), ("NOM p-val", "pvalue"), ("FDR q-val", "padj")):
+                np.testing.assert_allclose(new[column].to_numpy(dtype=float),
+                                           legacy[legacy_column].to_numpy(dtype=float), rtol=1e-12,
+                                           err_msg=f"{tissue} {column}")
+            self.assertGreater(new.loc["ko00010", "nes"], 0)
+            self.assertNotIn(" | ", "".join(new["term_name"]))
 
     def test_dataset_qc_and_column_mapping(self) -> None:
         met = self.run_dir / "omics" / "metabolomics"

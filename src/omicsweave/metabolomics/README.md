@@ -38,7 +38,7 @@ input:
 ```
 
 数据表中的样本列名即 `sample_id`，不同时在 samples.tsv 的 `data_column` 列中写出；`sample_type` 为 `qc` / `pool` 的列参与 QC 过滤，`blank` / `standard` 不进入分析。
-预处理、PLS-DA、差异检验与 ORA 沿用本模块的函数，同一份数据与下面的旧流程结果逐值一致；图件、GSEA 与解读报告暂时只在旧流程中提供。
+预处理、PLS-DA、差异检验、KEGG ORA 与代谢物集 GSEA 沿用本模块的函数，同一份数据与下面的旧流程结果逐值一致；图件与解读报告暂时只在旧流程中提供。
 结果写入结果包的 `omics/metabolomics/`：`data/<组织>/`（预处理后的数据集）、`qc/<组织>/`、`tables/differential.parquet`、`tables/enrichment.parquet`。
 
 旧版 `--input/--output/--legacy-mode` 已移除。旧实现硬编码小鼠编号与分组，且重复了一套不完整统计逻辑；调用者应迁移到 `config.yaml + groups.yaml`。

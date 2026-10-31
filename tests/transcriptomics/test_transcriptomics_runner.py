@@ -3,7 +3,7 @@
 
 核心回归：同一个旧版转录组实验（两个组织、两个批次），旧流程从基因计数矩阵补跑差异表达
 （rerun_de_analysis，PyDESeq2 ~batch + condition）与“omicsweave migrate → omicsweave run --omics transcriptomics”
-的结果逐值一致。
+的结果逐值一致；用同一个本地基因集库时，预排序 GSEA 也与旧流程（gsea/_run.py）逐值一致。
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ import pandas as pd
 import yaml
 
 from omicsweave.contract.dataset import read_dataset
-from omicsweave.contract.tables import read_differential
+from omicsweave.contract.tables import read_differential, read_enrichment
+from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
 from omicsweave.core.project import project_context
 from omicsweave.core.run import RunError, run_experiment
@@ -89,11 +90,19 @@ def _quiet(func, *args, **kwargs):
         return func(*args, **kwargs)
 
 
-def _set_input(root: Path, value: dict) -> None:
+def _set_input(root: Path, value: dict, **analysis) -> None:
     path = root / "experiments" / EXP / "experiment.yaml"
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     doc["omics"]["transcriptomics"]["input"] = value
+    doc["omics"]["transcriptomics"]["analysis"].update(analysis)
     path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def write_gene_sets(path: Path) -> Path:
+    """DE_SET 为上调的 20 个基因；其余为无差异的基因块。"""
+    genes = [f"Gene{i:04d}" for i in range(200)]
+    return write_gmt({"DE_SET": genes[:20], "MIXED": genes[10:40], "BLOCK_A": genes[50:80],
+                      "BLOCK_B": genes[80:110], "BLOCK_C": genes[110:140]}, path)
 
 
 @unittest.skipIf(pydeseq2 is None, "pydeseq2 not installed")
@@ -101,14 +110,21 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         from omicsweave.transcriptomics import rerun_de_analysis
+        from omicsweave.transcriptomics.gsea import _run as legacy_gsea
 
         cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.root = root = Path(cls._tmp.name).resolve()
         build_legacy_experiment(root)
+        cls.gmt = write_gene_sets(root / "gene_sets.gmt")
         # 旧流程：从基因计数矩阵补跑差异表达（与主流程共用 run_pydeseq2_analysis）
         with project_context(root), mock.patch.dict(os.environ), \
                 mock.patch.object(sys, "argv", ["rerun_de_analysis", "--experiment", EXP]):
             _quiet(rerun_de_analysis.main)
+            # 旧流程的 GSEA：库名换成同一个本地 GMT，其余参数不变
+            with mock.patch.object(legacy_gsea, "GENE_SET_LIBS", str(cls.gmt)):
+                _quiet(legacy_gsea.apply_config, experiment=EXP)
+                _quiet(legacy_gsea._generate_gsea_plots)
+            cls.legacy_gsea_dir = Path(legacy_gsea.PLOT_DIR) / "5_gsea"
 
         write_migration(_quiet(migrate_experiment, EXP, root), root)
         # 迁移结果仍是原始层输入（FASTQ），统一运行尚不支持，应给出改用定量结果的提示
@@ -117,9 +133,11 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
             run_experiment(EXP, ["transcriptomics"], root=root)
         except RunError as exc:
             cls.raw_error = str(exc)
-        _set_input(root, {"level": "table", "format": "counts_matrix", "files": [COUNTS]})
+        _set_input(root, {"level": "table", "format": "counts_matrix", "files": [COUNTS]}, gene_sets=[str(cls.gmt)])
         cls.run_dir, cls.notes = _quiet(run_experiment, EXP, ["transcriptomics"], root=root)
-        cls.table = read_differential(cls.run_dir / "omics" / "transcriptomics" / "tables" / "differential.parquet")
+        tables = cls.run_dir / "omics" / "transcriptomics" / "tables"
+        cls.table = read_differential(tables / "differential.parquet")
+        cls.enrichment = read_enrichment(tables / "enrichment.parquet")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -147,6 +165,25 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
             self.assertEqual(set(new["method"]), {"deseq2"})
             self.assertTrue(new.loc["Gene0000", "selected"])
             self.assertTrue((new["n_numerator"] == 4).all() and (new["n_denominator"] == 4).all())
+
+    def test_gsea_matches_legacy_and_ora_finds_the_up_set(self) -> None:
+        gsea = self.enrichment[self.enrichment["method"] == "gsea_prerank"]
+        for tissue in TISSUES:
+            legacy = pd.read_csv(self.legacy_gsea_dir / f"gsea_{tissue}_HFD_vs_LFD_results.csv").set_index("Term")
+            new = gsea[gsea["tissue"] == tissue].set_index("term_name").loc[legacy.index]
+            for legacy_column, column in (("NES", "nes"), ("ES", "es"), ("NOM p-val", "pvalue"),
+                                          ("FDR q-val", "padj")):
+                np.testing.assert_allclose(new[column].to_numpy(dtype=float),
+                                           legacy[legacy_column].to_numpy(dtype=float), rtol=1e-12,
+                                           err_msg=f"{tissue} {column}")
+            self.assertGreater(new.loc["DE_SET", "nes"], 0)
+            self.assertEqual(set(new["gene_set_library"]), {"gene_sets"})
+        ora = self.enrichment[(self.enrichment["method"] == "ora") & (self.enrichment["query"] == "up")]
+        de_set = ora[ora["term_name"] == "DE_SET"]
+        self.assertEqual(sorted(de_set["tissue"]), sorted(TISSUES))
+        self.assertTrue((de_set["padj"] < 0.05).all())
+        # 背景为有 p 值的基因，而不是基因集库中的全部基因
+        self.assertTrue((de_set["universe_size"] <= 200).all())
 
     def test_bundle_contents(self) -> None:
         tx = self.run_dir / "omics" / "transcriptomics"
@@ -200,7 +237,7 @@ class KallistoInputTest(unittest.TestCase):
                           "omics": "transcriptomics", "tissue": "liver", "data_column": ["Q1", "Q2", "Q3"]}).to_csv(
                 exp_dir / "samples.tsv", sep="\t", index=False)
 
-            run_dir, _ = _quiet(run_experiment, EXP, ["transcriptomics"], root=root)
+            run_dir, _ = _quiet(run_experiment, EXP, ["transcriptomics"], steps=["qc", "differential"], root=root)
             tx = run_dir / "omics" / "transcriptomics"
             table = read_differential(tx / "tables" / "differential.parquet")
             dataset = read_dataset(tx / "data" / "liver")

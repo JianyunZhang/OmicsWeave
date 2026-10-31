@@ -136,16 +136,18 @@ src/omicsweave/
 │   ├── migrate.py          # 旧版各组学配置 → 统一模型（omicsweave migrate）✅
 │   ├── run.py              # 统一运行入口与结果包（omicsweave run）✅
 │   ├── provenance.py       # 文件指纹、run_provenance.json 读写与跨批次比对 ✅
-│   ├── statistics/         # nonparametric / meta_analysis / stability ✅
+│   ├── statistics/         # nonparametric / meta_analysis / stability / ora（本地 ORA 与多重检验校正）✅
+│   ├── genesets.py         # 基因集库：本地 GMT，或按 Enrichr 库名下载并缓存到 references/gene_sets/ ✅
 │   ├── idmap/              # ID 映射（暂为原有字典，阶段 2 改为数据文件 + 解析器）
 │   └── safety.py           # pandas 数值安全检查 ✅
-├── contract/               # 分析层数据集、结果表与结果包的 Pydantic 模型、读写和校验；导出 JSON Schema（草案 ✅）
+├── contract/               # 分析层数据集、结果表与结果包的 Pydantic 模型、读写和校验；导出 JSON Schema（草案 ✅）；结果表导出为 Excel / TSV（omicsweave export）✅
 ├── adapters/
 │   ├── base.py             # 适配器接口：检查工具、运行或导入、产出数据契约
 │   ├── rnaseq/             # kallisto、salmon、计数矩阵导入
 │   ├── proteomics/         # DIA-NN、MaxQuant/FragPipe 结果导入、raw→mzML
 │   ├── metabolomics/       # msconvert、MS-DIAL/MZmine/Skyline 结果导入
-│   └── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
+│   ├── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
+│   └── enrichment.py       # 基于差异结果的 ORA 与预排序 GSEA（转录组、蛋白组共用）✅
 ├── transcriptomics/  proteomics/  metabolomics/  mfa/
 │   ├── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
 │   └── runner.py           # 接入 omicsweave run 的运行器（四个组学均已接入 ✅）
@@ -486,7 +488,9 @@ analysis_results/<experiment_id>/<run_id>/
 | `es`、`nes` | GSEA；`nes` 必填 |
 | `hit_features`、`tool`、`flags` | 以分号分隔的命中特征；产生结果的工具 |
 
-**从现有输出转换**（阶段 2 各组学改为直接写出统一表之前使用）：
+统一运行（`omicsweave run`）直接写出这两张表；`omicsweave export --experiment <ID> [--run <运行ID>] [--format xlsx|tsv]` 把结果包中的结果表导出为 Excel（附运行信息工作表）或 TSV，便于查看与共享。Parquet 仍是正式格式，导出文件是派生副本，默认写在结果包的 `exports/` 下，不登记在运行清单中。
+
+**从现有输出转换**（旧流程的输出文件）：
 - `omicsweave.mfa.export.differential_flux_to_contract`：MFA 差异通量宽表；
 - `omicsweave.adapters.gseapy_results.enrichr_to_contract` / `prerank_to_contract`：转录组、蛋白组的 gseapy 结果；
 - `omicsweave.metabolomics.export.ora_to_contract`：代谢组 ORA。
@@ -517,12 +521,16 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 **现状（阶段 2 进行中）**：
 
 - 运行框架已实现（`core/run.py`）：配置通过 `validate` 才开始运行；每次运行写入独立的 `<run_id>/` 目录；各组学由运行器实现，运行器不读写进程级全局状态，同一进程中可以并行运行多个实验。
-- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）、转录组（步骤 `qc`、`differential`）、蛋白组（步骤 `qc`、`differential`）。
+- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）、转录组（步骤 `qc`、`differential`、`enrichment`）、蛋白组（步骤 `qc`、`differential`、`enrichment`）。
 - MFA：输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
-- 代谢组：读取峰面积表（`format: peak_table`；`tissue_files` 每个组织一张表，或 `files` 中一张表含多个组织，组织由 samples.tsv 给出；样本列名不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本预处理（按组判断检出率、插补、归一化、log2），再按各比较做 Welch t 检验与 PLS-DA VIP，用显著代谢物做 KEGG ORA；输出预处理后的数据集、QC 表、统一差异结果表与富集结果表。与旧流程（`omicsweave metabolomics run`）的差异结果、VIP 与 ORA 逐值一致（回归测试）。
+- 代谢组：读取峰面积表（`format: peak_table`；`tissue_files` 每个组织一张表，或 `files` 中一张表含多个组织，组织由 samples.tsv 给出；样本列名不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本预处理（按组判断检出率、插补、归一化、log2），再按各比较做 Welch t 检验与 PLS-DA VIP，用显著代谢物做 KEGG ORA；输出预处理后的数据集、QC 表、统一差异结果表与富集结果表。与旧流程（`omicsweave metabolomics run`）的差异结果、VIP 与 ORA 逐值一致（回归测试）。富集还包括代谢物集预排序 GSEA（沿用旧流程，结果逐值一致）。
 - 转录组：表格层输入，`counts_matrix`（基因 × 样本计数）或 `kallisto`（每个样本的 `abundance.tsv`，经 `input.tx2gene` 或 `adapter.transcriptome_fasta` 聚合到基因，默认 lengthScaledTPM）。按组织、按比较做差异表达：每组至少 2 个生物学重复时用 PyDESeq2（apeGLM 收缩 log2FC），设计为 `~[协变量 +] condition`，协变量取 `design.covariates` 中在该比较的样本间取值不同的列；样本量不足或拟合失败时退回秩和检验，有协变量时不退回。输出基因计数数据集、文库大小与 kallisto 比对率、统一差异结果表。与旧流程从基因计数补跑的差异结果逐值一致（回归测试）。原始层 FASTQ 的质控、修剪与定量在阶段 3 接入，迁移得到的原始层输入运行时会提示改用定量结果。
+- 转录组与蛋白组的富集（`enrichment` 步骤，`omicsweave.adapters.enrichment`）：
+  - 预排序 GSEA 与旧流程相同。转录组按 log2FC × −log10 p 排序，多个库合并检验；蛋白组按调节 t 排序，每个库分别检验。用同一个基因集库时结果与旧流程逐值一致（回归测试）。
+  - ORA 改为本地计算：入选特征按方向（上调 / 下调）分别做单侧 Fisher 检验，背景为该比较中有 p 值的特征，BH 校正。旧流程的转录组 ORA 把基因列表上传到 Enrichr 在线服务、以库中全部基因为背景，这一差异是有意的。
+  - 基因集库由 `analysis.gene_sets` 指定：本地 GMT 文件，或 Enrichr 库名（默认与旧流程相同）。按库名时只下载库本身，首次下载后缓存为 `<paths.references>/gene_sets/<库名>.gmt`，运行清单登记其校验值；下载失败时跳过富集并给出提示，差异结果照常写出。
 - 蛋白组：表格层输入 `diann_report`（`tissue_files` 每个组织一份报告，或 `files` 中一份报告含多个组织；样本名由 `Run` 列按旧流程的规则提取，不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本做 log2 与样本中位数居中（不插补，按总观测数过滤），再按各比较只取该比较的样本，用 limma 方差压缩的线性模型检验，协变量取 `design.covariates` 与 `analysis.design_covariates`；输出未插补的强度数据集、QC 表与图、统一差异结果表。与旧流程（`omicsweave proteomics run`）的差异结果逐值一致（回归测试）。
-- 以下内容暂时仍由各组学原有的命令（`omicsweave <组学> run`）提供：MFA 的图件、通路比较、MID 分析、解读报告与多批次整合；代谢组的图件、GSEA 与解读报告；转录组的 FASTQ 处理、富集分析、GSEA、图件与多批次联合模型；蛋白组的 `.raw` 搜库、图件、ssGSEA 与预排序 GSEA。`--omics all` 遇到尚未接入的组学时跳过并给出提示。
+- 以下内容暂时仍由各组学原有的命令（`omicsweave <组学> run`）提供：MFA 的图件、通路比较、MID 分析、解读报告与多批次整合；代谢组的图件与解读报告；转录组的 FASTQ 处理、图件与多批次联合模型；蛋白组的 `.raw` 搜库、图件与 ssGSEA（样本层面的通路得分）。`--omics all` 遇到尚未接入的组学时跳过并给出提示。
 - 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
 ### 9.2 多组学整合（可选，三种模式）
@@ -631,7 +639,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 | 任务 | 交付物 | 状态（2026-10-31） |
 |---|---|---|
-| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表与 KEGG ORA；GSEA 待接入）；转录组 ✅（计数矩阵 / kallisto 定量 → 基因计数数据集 → PyDESeq2 或秩和检验 → 差异结果表；富集与 GSEA 待接入）；蛋白组 ✅（DIA-NN 报告 → 未插补的强度数据集 → limma 差异结果表；GSEA 待接入）。待做：转录组与蛋白组的富集结果表、代谢组 GSEA、`omicsweave export` |
+| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表；KEGG ORA 与 GSEA）；转录组 ✅（计数矩阵 / kallisto 定量 → 基因计数数据集 → PyDESeq2 或秩和检验 → 差异结果表；本地 ORA 与 GSEA）；蛋白组 ✅（DIA-NN 报告 → 未插补的强度数据集 → limma 差异结果表；本地 ORA 与 GSEA）；`omicsweave export` ✅。未接入：蛋白组 ssGSEA（样本层面得分，属于数据集）；图件与报告见 2.6 |
 | 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），四个组学均已接入；旧命令保留 |
 | 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | |
 | 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |

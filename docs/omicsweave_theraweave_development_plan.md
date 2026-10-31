@@ -689,7 +689,7 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 
 ### Phase O2 — OmicsWeave：各组学接入、证据整合与报告
 
-- [ ] RNA-seq、代谢组、MFA、蛋白组改为读取分析层数据、输出统一结果表（Parquet）：四个组学（转录组、蛋白组为表格层输入）均已完成差异结果表，与旧流程逐值一致；富集结果表与 GSEA 部分待接入。
+- [ ] RNA-seq、代谢组、MFA、蛋白组改为读取分析层数据、输出统一结果表（Parquet）：四个组学（转录组、蛋白组为表格层输入）均已写出差异结果表与富集结果表，与旧流程逐值一致（转录组 ORA 有意改为本地计算）；`omicsweave export` 已完成。
 - [ ] 单组学独立运行与三种整合模式（v2 第 9 节）：`omicsweave run` 运行框架已完成并接入四个组学；整合模式待做。
 - [ ] 引入 `BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`。
 - [ ] 接入通路数据库和标准实体 ID 映射；ID 映射改为数据文件 + 解析器；加入小鼠→人同源映射。

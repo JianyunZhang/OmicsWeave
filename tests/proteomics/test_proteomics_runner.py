@@ -18,7 +18,8 @@ import pandas as pd
 import yaml
 
 from omicsweave.contract.dataset import read_dataset
-from omicsweave.contract.tables import read_differential
+from omicsweave.contract.tables import read_differential, read_enrichment
+from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
 from omicsweave.core.project import project_context
 from omicsweave.core.run import RunError, run_experiment
@@ -44,6 +45,12 @@ def diann_report(runs: dict[str, tuple[str, str]], seed: int, n_proteins: int = 
     return pd.DataFrame(rows)
 
 
+def write_protein_sets(path: Path) -> Path:
+    """UP_SET 含 10 个上调蛋白；其余为无差异的蛋白块。"""
+    proteins = [f"Prot{i:03d}" for i in range(60)]
+    return write_gmt({"UP_SET": proteins[:15], "BLOCK_A": proteins[20:35], "BLOCK_B": proteins[35:50]}, path)
+
+
 def _run_name(tissue: str, animal: str) -> str:
     return f"MSF250153_zzk_23min_100ng_{tissue.capitalize()}_{animal}"
 
@@ -59,7 +66,8 @@ def build_legacy_experiment(root: Path) -> None:
         "experiment_id": EXP,
         "paths": {"output_dir": f"analysis_results/{EXP}/proteomics_results",
                   "data_dirs": {"liver": "diann/liver", "heart": "diann/heart"}},
-        "params": {"tissues": ["liver", "heart"], "run_ssgsea": False, "run_prerank_gsea": False,
+        "params": {"tissues": ["liver", "heart"], "run_ssgsea": False, "run_prerank_gsea": True,
+                   "gene_sets": [str(write_protein_sets(root / "protein_sets.gmt"))],
                    "differential_design": {"covariates": ["batch"]}},
         "groups_file": "groups.yaml",
     }), encoding="utf-8")
@@ -87,12 +95,15 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         with project_context(root):
             cfg = load_proteomics_config(experiment_id=EXP)
             for tissue in cfg.tissues:
-                _quiet(analyze_tissue, tissue, cfg, force=True, skip_gsea=True)
+                _quiet(analyze_tissue, tissue, cfg, force=True, skip_gsea=False)
         cls.legacy_dir = Path(cfg.output_dir) / "01_dp_results"
+        cls.legacy_plots = Path(cfg.output_dir) / "02_result_plot"
 
         write_migration(_quiet(migrate_experiment, EXP, root), root)
         cls.run_dir, cls.notes = _quiet(run_experiment, EXP, ["proteomics"], root=root)
-        cls.table = read_differential(cls.run_dir / "omics" / "proteomics" / "tables" / "differential.parquet")
+        tables = cls.run_dir / "omics" / "proteomics" / "tables"
+        cls.table = read_differential(tables / "differential.parquet")
+        cls.enrichment = read_enrichment(tables / "enrichment.parquet")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -117,6 +128,22 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
             self.assertTrue(new.loc["Prot000", "selected"])
             np.testing.assert_allclose((new["mean_numerator"] - new["mean_denominator"]).loc["Prot001"],
                                        new.loc["Prot001", "log2fc"], atol=0.5)
+
+    def test_gsea_matches_legacy_pipeline(self) -> None:
+        from omicsweave.proteomics.enrichment.gsea import find_prerank_report
+
+        gsea = self.enrichment[self.enrichment["method"] == "gsea_prerank"]
+        self.assertEqual(set(gsea["gene_set_library"]), {"protein_sets"})
+        for tissue in ("liver", "heart"):
+            report = find_prerank_report(self.legacy_plots / tissue / "gsea_prerank" / "HFD_vs_LFD" / "protein_sets")
+            legacy = pd.read_csv(report).set_index("Term")
+            new = gsea[gsea["tissue"] == tissue].set_index("term_name").loc[legacy.index]
+            # gseapy 写出的报告文件只保留 6 位小数
+            for legacy_column, column in (("NES", "nes"), ("NOM p-val", "pvalue"), ("FDR q-val", "padj")):
+                np.testing.assert_allclose(new[column].to_numpy(dtype=float),
+                                           legacy[legacy_column].to_numpy(dtype=float), rtol=0, atol=1e-6,
+                                           err_msg=f"{tissue} {column}")
+            self.assertGreater(new.loc["UP_SET", "nes"], 0)
 
     def test_dataset_and_qc(self) -> None:
         prot = self.run_dir / "omics" / "proteomics"

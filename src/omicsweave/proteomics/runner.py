@@ -8,8 +8,8 @@
 （不插补，按总观测数过滤）；每个比较只取该比较的样本，用 limma 方差压缩的线性模型检验
 （``analysis.dp_method: wilcoxon`` 时用旧版秩和检验），协变量取 ``design.covariates`` 与
 ``analysis.design_covariates``。样本按矩阵中的列顺序参与计算，所以同一份报告与旧流程
-（``omicsweave proteomics run``）的结果逐值一致。原始 ``.raw`` 的 DIA-NN 搜库、图件、ssGSEA 与
-预排序 GSEA 暂未接入。
+（``omicsweave proteomics run``）的结果逐值一致。
+富集分析（``enrichment`` 步骤）：预排序 GSEA 与旧流程相同（按调节 t 排序，每个基因集库分别检验，默认 KEGG_2019_Mouse）；另做按方向的 ORA（本地计算，背景为有 p 值的蛋白，见 :mod:`omicsweave.adapters.enrichment`）。原始 ``.raw`` 的 DIA-NN 搜库、图件与 ssGSEA 暂未接入。
 
 输入（``omics.proteomics.input``，``format: diann_report``）::
 
@@ -24,34 +24,40 @@
     data/<组织>/                   log2、中位数居中、未插补的强度（分析层数据集；行 = 蛋白，列 = 样本）
     qc/<组织>/                     样本 QC 指标、蛋白缺失率、重复相关性、PCA 得分与 QC 图
     tables/differential.parquet    统一差异结果表
+    tables/enrichment.parquet      ORA 与预排序 GSEA
     details/<组织>/<比较>/          旧版格式的差异蛋白表与设计报告
 """
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
-from omicsweave.contract.tables import write_differential
+from omicsweave.contract.tables import write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
+from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 from omicsweave.core.validate import biological_samples
 
 from .differential_analysis import run_differential_analysis
+from .enrichment.gsea import DEFAULT_GENE_SETS, build_ranked_list
 from .experiment_config import normalize_fdr_method
 from .export import dp_to_contract
 from .proteomics_qc import generate_qc_outputs
 from .run_proteomics_pipeline import load_and_clean_data, preprocess_data
 
-STEPS = ("qc", "differential")
+STEPS = ("qc", "differential", "enrichment")
 # 与旧版配置加载器的默认值相同
 _DEFAULTS: dict[str, Any] = {
     "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "fdr_method": "fdr_bh", "dp_method": "limma",
     "min_total_observations": 2, "min_observations_per_group": 2, "imputation_seed": 42,
     "protein_aggregation": "log2_mean", "design_covariates": [],
+    "gene_sets": [DEFAULT_GENE_SETS["kegg"]], "run_prerank_gsea": True, "gsea_ranking_metric": "moderated_t",
 }
 
 
@@ -138,7 +144,7 @@ def run(ctx: RunContext) -> OmicsRun:
     if not blocks:
         raise RunError("DIA-NN 报告中没有找到 samples.tsv 声明的样本")
 
-    tables, contrasts_run = [], []
+    tables, contrasts_run, enrichment_inputs = [], [], []
     for tissue, raw, to_uniprot in blocks:
         normalized = preprocess_data(raw, min_total_observations=int(settings["min_total_observations"]))
         if normalized.empty:
@@ -158,7 +164,7 @@ def run(ctx: RunContext) -> OmicsRun:
                 condition=[labels[s] for s in normalized.columns])
             generate_qc_outputs(raw.loc[:, normalized.columns], normalized, qc_meta, out / "qc" / tissue,
                                 seed=int(settings["imputation_seed"]))
-        if not ctx.wants("differential"):
+        if not (ctx.wants("differential") or ctx.wants("enrichment")):
             continue
         for contrast in experiment.config.design.contrasts:
             assigned = contrast_groups(experiment, contrast, Omics.PROTEOMICS)
@@ -171,7 +177,7 @@ def run(ctx: RunContext) -> OmicsRun:
             samples = list(groups)
             details = out / "details" / tissue / contrast.id
             metadata = covariate_table.loc[samples].assign(condition=[groups[s] for s in samples])
-            run_differential_analysis(
+            combined = run_differential_analysis(
                 normalized[samples], groups, [(*levels, contrast.id)], str(details), tissue,
                 pval_cutoff, log2fc_cutoff, fdr_method, str(settings["dp_method"]),
                 feature_to_uniprot=to_uniprot, sample_metadata=metadata, design_covariates=covariates,
@@ -179,13 +185,50 @@ def run(ctx: RunContext) -> OmicsRun:
             result = pd.read_csv(details / f"dp_{tissue}_{contrast.id}.csv", dtype={"Protein": str, "uniprot_id": str})
             means = {level: normalized[[s for s in samples if groups[s] == level]].mean(axis=1, skipna=True)
                      for level in levels}
-            tables.append(dp_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
-                                         tissue=tissue, mean_numerator=means[contrast.numerator],
-                                         mean_denominator=means[contrast.denominator], selection_rule=rule))
+            contract = dp_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
+                                      tissue=tissue, mean_numerator=means[contrast.numerator],
+                                      mean_denominator=means[contrast.denominator], selection_rule=rule)
+            tables.append(contract)
+            enrichment_inputs.append((contrast, tissue, combined, contract))
             contrasts_run.append(contrast.id)
 
     if tables:
         write_differential(pd.concat(tables, ignore_index=True), out / "tables" / "differential.parquet")
-    record.parameters = {"tissues": [t for t, _, _ in blocks], "covariates": covariates,
+    if ctx.wants("enrichment") and enrichment_inputs:
+        _enrichment(ctx, settings, enrichment_inputs, record)
+    record.parameters = {**record.parameters, "tissues": [t for t, _, _ in blocks], "covariates": covariates,
                          "contrasts": list(dict.fromkeys(contrasts_run)), "analysis": settings}
     return record
+
+
+def _enrichment(ctx: RunContext, settings: dict[str, Any], inputs: list, record: OmicsRun) -> None:
+    # 与旧流程（enrichment/gsea.py）相同：每个库分别检验；排序蛋白不少于基因集最小大小
+    min_size = int(settings.get("gsea_min_set_size", 10))
+    defaults = {"gsea_min_ranked": min_size, "gsea_min_set_size": min_size,
+                "gsea_seed": int(settings.get("imputation_seed", 42)), "gsea_threads": 1,
+                "gsea_joint_libraries": False, "fdr_method": "fdr_bh"}
+    enrichment = EnrichmentSettings(**{**defaults, **{f.name: settings[f.name] for f in fields(EnrichmentSettings)
+                                                      if f.name in settings}})
+    try:
+        libraries, files = load_libraries(ctx.project, [str(s) for s in settings["gene_sets"]])
+    except GeneSetError as exc:
+        record.notes.append(f"蛋白组富集分析未执行：{exc}")
+        return
+    record.inputs += files
+    if settings.get("run_ssgsea"):
+        record.notes.append("ssGSEA（样本层面的通路得分）暂未接入统一运行，可用 omicsweave proteomics run")
+    parts = []
+    for contrast, tissue, combined, contract in inputs:
+        keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
+                    omics=Omics.PROTEOMICS.value)
+        parts.append(ora_rows(contract, libraries, enrichment, **keys))
+        if settings["run_prerank_gsea"]:
+            ranked = build_ranked_list(combined, contrast.id, metric=str(settings["gsea_ranking_metric"]))
+            parts.append(prerank_rows(ranked.set_index("Protein")["ranking_score"], libraries, enrichment, **keys))
+    parts = [p for p in parts if not p.empty]
+    if parts:
+        write_enrichment(pd.concat(parts, ignore_index=True),
+                         ctx.omics_dir(Omics.PROTEOMICS) / "tables" / "enrichment.parquet")
+    else:
+        record.notes.append("蛋白组富集分析没有可报告的结果（入选或排序蛋白过少，或基因集与蛋白名不匹配）")
+    record.parameters["enrichment"] = {"gene_sets": list(libraries), **enrichment.__dict__}

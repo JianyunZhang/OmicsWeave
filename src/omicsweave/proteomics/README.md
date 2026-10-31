@@ -5,7 +5,7 @@
 ## 按统一项目模型运行（阶段 2）
 
 ```bash
-omicsweave run --experiment <id> --omics proteomics      # 步骤 qc、differential
+omicsweave run --experiment <id> --omics proteomics      # 步骤 qc、differential、enrichment
 ```
 
 读取 `experiment.yaml` 中 `omics.proteomics.input` 声明的 DIA-NN 报告，分组、协变量与比较来自 `subjects.tsv` / `samples.tsv` 和 `design`：
@@ -18,8 +18,8 @@ input:
 ```
 
 样本名由报告 `Run` 列按本模块的规则提取（如 `..._Liver_86` → `Liver86`），即 `sample_id`；不同时在 samples.tsv 的 `data_column` 列写出。
-预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致；`.raw` 搜库、图件、ssGSEA 与预排序 GSEA 暂时仍用下文的旧流程。
-结果写入结果包的 `omics/proteomics/`。
+预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致。富集（`enrichment`）：预排序 GSEA 与旧流程相同（按调节 t 排序，每个库分别检验，库由 `analysis.gene_sets` 指定，默认 KEGG_2019_Mouse），另做按方向的本地 ORA。`.raw` 搜库、图件与 ssGSEA 暂时仍用下文的旧流程。
+结果写入结果包的 `omics/proteomics/`，可用 `omicsweave export` 导出为 Excel。
 
 ## 统计契约
 

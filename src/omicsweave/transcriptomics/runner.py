@@ -9,7 +9,8 @@
 （旧流程的 ``~batch + condition`` 即其特例）；样本量不足或拟合失败时退回秩和检验，有协变量时不退回，
 不做未校正的检验。样本按计数矩阵的列顺序参与计算，所以同一份计数与旧流程
 （``omicsweave transcriptomics run``）的差异结果逐值一致。
-原始层 FASTQ 的质控、修剪与 kallisto 定量在阶段 3 接入；富集分析与 GSEA 暂未接入。
+富集分析（``enrichment`` 步骤）对每个比较做 ORA 与预排序 GSEA（见 :mod:`omicsweave.adapters.enrichment`）：GSEA 的排序指标、参数与默认基因集库与旧流程相同（log2FC × −log10 p，多个库合并检验）；ORA 改为本地计算，背景为该比较中有 p 值的基因，不再把基因列表上传到 Enrichr。基因集库由 ``analysis.gene_sets`` 指定（本地 GMT 或 Enrichr 库名，见 :mod:`omicsweave.core.genesets`）。
+原始层 FASTQ 的质控、修剪与 kallisto 定量在阶段 3 接入。
 
 输入（``omics.transcriptomics.input``）::
 
@@ -27,17 +28,22 @@
     qc/library_sizes.parquet      每个样本的总计数与检出基因数
     qc/quant_summary.parquet      kallisto 的比对率（kallisto 输入时）
     tables/differential.parquet   统一差异结果表
+    tables/enrichment.parquet     ORA 与预排序 GSEA
     details/<组织>/                原工具的差异结果表（含 baseMean、lfcSE、未收缩的 log2FC 等）
 """
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
+from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, empty_features, write_dataset
-from omicsweave.contract.tables import write_differential
+from omicsweave.contract.tables import write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
+from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups
 from omicsweave.core.validate import biological_samples
@@ -53,7 +59,12 @@ from .rnaseq_pipeline import (
 )
 from .run_wilcoxon_de import run_wilcoxon_analysis
 
-STEPS = ("qc", "differential")
+STEPS = ("qc", "differential", "enrichment")
+# 与旧流程（enrichment/_run.py、gsea/_run.py）使用的 Enrichr 库相同
+DEFAULT_GENE_SETS = [
+    "GO_Biological_Process_2025", "GO_Molecular_Function_2025", "GO_Cellular_Component_2025",
+    "KEGG_2019_Mouse", "WikiPathways_2024_Mouse", "Reactome_Pathways_2024",
+]
 
 
 def _preview(values, limit: int = 5) -> str:
@@ -148,7 +159,9 @@ def _load_counts(ctx: RunContext, rows: pd.DataFrame, record: OmicsRun) -> tuple
     return counts.rename(columns=columns), quant
 
 
-def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame, record: OmicsRun) -> list[pd.DataFrame]:
+def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
+                  record: OmicsRun) -> list[tuple[object, str, pd.DataFrame, pd.DataFrame]]:
+    """返回每个比较、每个组织的 (比较, 组织, 原工具结果, 统一差异结果行)。"""
     experiment = ctx.experiment
     design = experiment.config.design
     covariates = [c for c in design.covariates if c in rows.columns]
@@ -193,8 +206,9 @@ def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame, rec
             designs[f"{contrast.id}/{tissue}"] = f"~{formula}" if "pydeseq2" in set(result["test_method"]) \
                 else str(result["test_method"].iloc[0])
             result.rename_axis("gene").to_csv(details / f"de_{contrast.id}.csv")
-            tables.append(de_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
-                                         tissue=tissue))
+            tables.append((contrast, tissue, result,
+                           de_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
+                                          tissue=tissue)))
     record.parameters["designs"] = designs
     return tables
 
@@ -227,9 +241,44 @@ def run(ctx: RunContext) -> OmicsRun:
         if quant is not None:
             quant.to_parquet(out / "qc" / "quant_summary.parquet", index=False)
 
-    if ctx.wants("differential"):
-        tables = _differential(ctx, counts, rows, record)
-        if tables:
-            write_differential(pd.concat(tables, ignore_index=True), out / "tables" / "differential.parquet")
-        record.parameters["contrasts"] = list(dict.fromkeys(t["contrast_id"].iloc[0] for t in tables))
+    if ctx.wants("differential") or ctx.wants("enrichment"):
+        results = _differential(ctx, counts, rows, record)
+        if results:
+            write_differential(pd.concat([r[3] for r in results], ignore_index=True),
+                               out / "tables" / "differential.parquet")
+        record.parameters["contrasts"] = list(dict.fromkeys(r[0].id for r in results))
+        if ctx.wants("enrichment") and results:
+            _enrichment(ctx, results, record)
     return record
+
+
+def _ranking(result: pd.DataFrame) -> pd.Series:
+    """与旧流程（gsea/_run.py）相同：log2FC × −log10(p) 降序，重复基因保留第一个，去掉 0。"""
+    table = result[["log2FoldChange", "pvalue"]].dropna()
+    metric = (table["log2FoldChange"] * -np.log10(table["pvalue"].clip(lower=1e-300))).sort_values(ascending=False)
+    metric = metric[~metric.index.duplicated(keep="first")]
+    return metric[metric != 0]
+
+
+def _enrichment(ctx: RunContext, results: list, record: OmicsRun) -> None:
+    analysis = ctx.experiment.config.omics.transcriptomics.analysis
+    settings = EnrichmentSettings(**{f.name: analysis[f.name] for f in fields(EnrichmentSettings) if f.name in analysis})
+    try:
+        libraries, files = load_libraries(ctx.project, list(analysis.get("gene_sets", DEFAULT_GENE_SETS)))
+    except GeneSetError as exc:
+        record.notes.append(f"转录组富集分析未执行：{exc}")
+        return
+    record.inputs += files
+    parts = []
+    for contrast, tissue, raw, contract in results:
+        keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
+                    omics=Omics.TRANSCRIPTOMICS.value)
+        parts += [ora_rows(contract, libraries, settings, **keys),
+                  prerank_rows(_ranking(raw), libraries, settings, **keys)]
+    parts = [p for p in parts if not p.empty]
+    if parts:
+        write_enrichment(pd.concat(parts, ignore_index=True),
+                         ctx.omics_dir(Omics.TRANSCRIPTOMICS) / "tables" / "enrichment.parquet")
+    else:
+        record.notes.append("转录组富集分析没有可报告的结果（入选基因或排序基因过少，或基因集与数据的基因名不匹配）")
+    record.parameters["enrichment"] = {"gene_sets": list(libraries), **settings.__dict__}

@@ -9,6 +9,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] validate [--experiment 实验ID ...]
     omicsweave [--project-dir DIR] migrate --experiment 实验ID [--dry-run] [--force]
     omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
+    omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
@@ -103,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--steps", action="append", default=None,
                      help="只运行这些步骤，可重复或用逗号分隔，如 qc,differential；默认全部")
 
+    export = modules.add_parser("export", help="把结果包中的统一结果表导出为 Excel 或 TSV")
+    export.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
+    export.add_argument("--run", default=None, help="运行 ID，默认最近一次")
+    export.add_argument("--format", choices=["xlsx", "tsv"], default="xlsx", help="导出格式，默认 xlsx")
+    export.add_argument("--output", default=None, help="输出文件（xlsx）或目录（tsv），默认写在结果包的 exports/ 下")
+
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
         action_parsers = module_parser.add_subparsers(dest="action", metavar="<动作>", required=True)
@@ -162,7 +169,24 @@ def _run_run(args: argparse.Namespace) -> int:
     return 0
 
 
-_HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run}
+def _run_export(args: argparse.Namespace) -> int:
+    from omicsweave.contract.dataset import ContractError
+    from omicsweave.contract.export import export_bundle, find_run
+    from omicsweave.core.config import ConfigError, load_project
+
+    try:
+        project = load_project(project_dir())
+        run_dir = find_run(project.path("results"), args.experiment, args.run)
+        path = export_bundle(run_dir, args.format, args.output)
+    except (ConfigError, ContractError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    print(f"已导出：{path}")
+    return 0
+
+
+_HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
+             "export": _run_export}
 
 
 def main(argv: list[str] | None = None) -> None:

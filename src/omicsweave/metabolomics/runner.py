@@ -6,7 +6,7 @@
 
 计算沿用旧流程的函数（预处理、PLS-DA、Welch t 检验、ORA），只是分组与比较改由样本表和
 ``design.contrasts`` 给出。样本按数据表中的列顺序参与计算，所以同一份数据与旧流程
-（``omicsweave metabolomics run``）的结果逐值一致。旧流程的图件与 GSEA 暂未接入。
+（``omicsweave metabolomics run``）的结果逐值一致。富集分析包括 KEGG ORA 与代谢物集预排序 GSEA（``gsea_rank_metric`` 默认 Welch t，种子固定为 42，与旧流程相同）。旧流程的图件暂未接入。
 
 输入（``omics.metabolomics.input``，``format: peak_table``）::
 
@@ -23,7 +23,7 @@
     data/<组织>/                  预处理后的 log2 归一化峰面积（分析层数据集；只含生物学样本）
     qc/<组织>/                    逐代谢物 QC 指标、样本总信号与归一化因子、预处理摘要
     tables/differential.parquet   统一差异结果表
-    tables/enrichment.parquet     KEGG 通路 ORA（显著代谢物，不分上下调）
+    tables/enrichment.parquet     KEGG 通路 ORA（显著代谢物，不分上下调）与预排序 GSEA
     details/<组织>/               旧版格式的差异分析宽表与 PLS-DA 验证摘要
 """
 from __future__ import annotations
@@ -36,6 +36,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from omicsweave.adapters.gseapy_results import prerank_to_contract
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
 from omicsweave.contract.tables import write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
@@ -53,6 +54,7 @@ from .differential_analysis import DifferentialAnalysisOptions, analyze_differen
 from .enrichment._run import calculate_pathway_enrichment
 from .experiment_config import MetabolomicsConfig
 from .export import differential_to_contract, ora_to_contract
+from .gsea._run import run_gsea
 from .plotting.qc_plots import fit_plsda
 
 STEPS = ("qc", "differential", "enrichment")
@@ -172,6 +174,24 @@ def _features(processed: pd.DataFrame, annotations: list[str], ids: pd.Index) ->
     return features
 
 
+def _gsea(combined: pd.DataFrame, feature_id: str, contrast_id: str, tissue: str, details: Path,
+          settings: dict[str, Any]) -> pd.DataFrame | None:
+    """旧流程的代谢物集预排序 GSEA；它以 Index 列为代谢物 ID，特征 ID 列不同时先补上。"""
+    table = combined if feature_id == "Index" else combined.assign(Index=combined[feature_id].astype(str))
+    result = run_gsea(table, contrast_id, tissue, str(details / "gsea"),
+                      min_set_size=int(settings["gsea_min_set_size"]), max_set_size=int(settings["gsea_max_set_size"]),
+                      permutation_num=int(settings["gsea_permutation_num"]),
+                      rank_metric=str(settings["gsea_rank_metric"]), pathway_scope=str(settings["pathway_scope"]),
+                      exclude_overview=bool(settings["exclude_overview_pathways"]))
+    return None if result is None or result.empty else result
+
+
+def _split_kegg_terms(rows: pd.DataFrame) -> pd.DataFrame:
+    """旧流程的 GSEA 条目名为 ``ko00010 | 通路名``，拆成 term_id 与 term_name。"""
+    parts = rows["term_name"].str.split(" | ", n=1, regex=False)
+    return rows.assign(term_id=parts.str[0], term_name=parts.str[1].fillna(rows["term_name"]))
+
+
 def run(ctx: RunContext) -> OmicsRun:
     experiment = ctx.experiment
     spec = experiment.config.omics.metabolomics.input
@@ -278,6 +298,11 @@ def run(ctx: RunContext) -> OmicsRun:
                     enrichment.append(ora_to_contract(ora, contrast_id=contrast.id, contrast_role=contrast.role.value,
                                                       tissue=tissue, query="all", gene_set_library="KEGG",
                                                       padj_method=normalize_fdr_method(fdr_method)))
+                gsea = _gsea(result.combined, feature_id, contrast.id, tissue, details, settings)
+                if gsea is not None:
+                    enrichment.append(prerank_to_contract(
+                        gsea, contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
+                        omics=Omics.METABOLOMICS.value, gene_set_library="KEGG").pipe(_split_kegg_terms))
         pd.DataFrame(validation).to_csv(details / "plsda_validation.csv", index=False, encoding="utf-8-sig")
 
     if differential:
@@ -285,7 +310,7 @@ def run(ctx: RunContext) -> OmicsRun:
     if enrichment:
         write_enrichment(pd.concat(enrichment, ignore_index=True), out / "tables" / "enrichment.parquet")
     elif ctx.wants("enrichment") and differential:
-        record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA")
+        record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA 与 GSEA")
     record.parameters = {
         "tissues": [b.tissue for b in blocks],
         "contrasts": list(dict.fromkeys(contrasts_run)),
