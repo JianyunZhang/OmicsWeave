@@ -5,6 +5,24 @@
 > **运行环境**：Python ≥ 3.10，安装方式见仓库根目录 README
 > **配置驱动**：按 experiment 复用，只改 YAML 配置文件，不改代码
 
+## 按统一项目模型运行（阶段 2）
+
+```bash
+omicsweave run --experiment <id> --omics transcriptomics      # 步骤 qc、differential
+```
+
+读取 `experiment.yaml` 中 `omics.transcriptomics.input` 声明的表格层输入，分组、协变量与比较来自 `subjects.tsv` / `samples.tsv` 和 `design`：
+
+```yaml
+input: {level: table, format: counts_matrix, files: [experiments/<id>/gene_counts.tsv]}   # 基因 × 样本计数
+# 或已有的 kallisto 定量结果：quant/<样本>/abundance.tsv
+input: {level: table, format: kallisto, files: [experiments/<id>/quant], tx2gene: experiments/<id>/tx2gene.tsv}
+```
+
+数据中的样本名即 `sample_id`，不同时在 samples.tsv 的 `data_column` 列写出。差异表达沿用本模块的 PyDESeq2（apeGLM 收缩）与秩和检验，
+设计为 `~[协变量 +] condition`；同一份计数与旧流程的结果逐值一致。FASTQ 的质控、修剪与 kallisto 定量（阶段 3）、富集分析、GSEA、
+图件与多批次联合模型，暂时仍用下文的旧流程。结果写入结果包的 `omics/transcriptomics/`。
+
 ---
 
 ## 版本更新说明（2026-08）

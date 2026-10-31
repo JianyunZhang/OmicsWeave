@@ -31,6 +31,7 @@ from .validate import biological_samples, matches_level, validate_experiment
 RUNNERS: dict[Omics, str] = {
     Omics.MFA: "omicsweave.mfa.runner:run",
     Omics.METABOLOMICS: "omicsweave.metabolomics.runner:run",
+    Omics.TRANSCRIPTOMICS: "omicsweave.transcriptomics.runner:run",
 }
 ALL = "all"
 METADATA_DIR = "metadata"

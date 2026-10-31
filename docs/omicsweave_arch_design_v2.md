@@ -148,7 +148,7 @@ src/omicsweave/
 │   └── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
 ├── transcriptomics/  proteomics/  metabolomics/  mfa/
 │   ├── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
-│   └── runner.py           # 接入 omicsweave run 的运行器（MFA、代谢组 ✅）
+│   └── runner.py           # 接入 omicsweave run 的运行器（MFA、代谢组、转录组 ✅）
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
@@ -517,10 +517,11 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 **现状（阶段 2 进行中）**：
 
 - 运行框架已实现（`core/run.py`）：配置通过 `validate` 才开始运行；每次运行写入独立的 `<run_id>/` 目录；各组学由运行器实现，运行器不读写进程级全局状态，同一进程中可以并行运行多个实验。
-- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）。
+- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）、转录组（步骤 `qc`、`differential`）。
 - MFA：输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
 - 代谢组：读取峰面积表（`format: peak_table`；`tissue_files` 每个组织一张表，或 `files` 中一张表含多个组织，组织由 samples.tsv 给出；样本列名不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本预处理（按组判断检出率、插补、归一化、log2），再按各比较做 Welch t 检验与 PLS-DA VIP，用显著代谢物做 KEGG ORA；输出预处理后的数据集、QC 表、统一差异结果表与富集结果表。与旧流程（`omicsweave metabolomics run`）的差异结果、VIP 与 ORA 逐值一致（回归测试）。
-- `--omics all` 跳过尚未接入的组学并给出提示，这些组学暂用原有命令 `omicsweave <组学> run`。MFA 的图件、通路比较、MID 分析、解读报告与多批次整合，代谢组的图件、GSEA 与解读报告，暂时仍由各组学原有的命令提供。
+- 转录组：表格层输入，`counts_matrix`（基因 × 样本计数）或 `kallisto`（每个样本的 `abundance.tsv`，经 `input.tx2gene` 或 `adapter.transcriptome_fasta` 聚合到基因，默认 lengthScaledTPM）。按组织、按比较做差异表达：每组至少 2 个生物学重复时用 PyDESeq2（apeGLM 收缩 log2FC），设计为 `~[协变量 +] condition`，协变量取 `design.covariates` 中在该比较的样本间取值不同的列；样本量不足或拟合失败时退回秩和检验，有协变量时不退回。输出基因计数数据集、文库大小与 kallisto 比对率、统一差异结果表。与旧流程从基因计数补跑的差异结果逐值一致（回归测试）。原始层 FASTQ 的质控、修剪与定量在阶段 3 接入，迁移得到的原始层输入运行时会提示改用定量结果。
+- `--omics all` 跳过尚未接入的组学并给出提示，这些组学暂用原有命令 `omicsweave <组学> run`。MFA 的图件、通路比较、MID 分析、解读报告与多批次整合，代谢组的图件、GSEA 与解读报告，转录组的 FASTQ 处理、富集分析、GSEA、图件与多批次联合模型，暂时仍由各组学原有的命令提供。
 - 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
 ### 9.2 多组学整合（可选，三种模式）
@@ -629,15 +630,15 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 | 任务 | 交付物 | 状态（2026-10-31） |
 |---|---|---|
-| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表与 KEGG ORA；GSEA 待接入）；转录组、蛋白组待做 |
-| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），已接入 MFA、代谢组；旧命令保留 |
+| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表与 KEGG ORA；GSEA 待接入）；转录组 ✅（计数矩阵 / kallisto 定量 → 基因计数数据集 → PyDESeq2 或秩和检验 → 差异结果表；富集与 GSEA 待接入）；蛋白组待做 |
+| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），已接入 MFA、代谢组、转录组；旧命令保留 |
 | 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | |
 | 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |
 | 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` | |
 | 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` | |
 | 2.7 交换契约 v1：发布 JSON Schema 与标准样例结果包，CI 中运行契约测试 | `schemas/evidence-exchange/v1/` | |
 | 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 | |
-| 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） | 部分：运行框架与 MFA 运行器不含模块级状态，两个实验在同一进程中并行运行与顺序运行的结果一致（测试覆盖）；其余组学随改写完成 |
+| 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） | 部分：运行框架与已接入的 MFA、代谢组、转录组运行器只调用不读写模块级状态的函数；两个实验在同一进程中并行运行与顺序运行的结果一致（MFA，测试覆盖）；旧流程入口的全局变量随各组学其余部分改写去除 |
 
 **验收标准**
 - 示例项目能在单组学和三种整合模式下端到端运行。

@@ -504,8 +504,9 @@ def run_pydeseq2_analysis(counts_df, metadata_df, design_formula='condition',
     if contrast:
         flush_print(f"  Contrast: {contrast[1]} vs {contrast[2]}")
 
-    # Ensure sample order matches
-    common_samples = list(set(counts_df.columns) & set(metadata_df.index))
+    # 按计数矩阵的列顺序取共同样本：用集合求交集时顺序随进程而变，结果在浮点末位上不可复现
+    in_metadata = set(metadata_df.index)
+    common_samples = [s for s in counts_df.columns if s in in_metadata]
     if len(common_samples) == 0:
         flush_print("  ERROR: No common samples between counts and metadata.")
         return None
