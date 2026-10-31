@@ -41,15 +41,15 @@ class RunFrameworkTest(unittest.TestCase):
         change(doc)
         path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
-    def enable_metabolomics(self) -> None:
+    def enable_proteomics(self) -> None:
         """再启用一个尚未接入统一运行的组学（表格层输入，样本齐全，可以通过校验）。"""
-        peaks = self.exp_dir / "peaks.tsv"
-        peaks.write_text("feature\n", encoding="utf-8")
-        self.edit_experiment(lambda doc: doc["omics"].update(metabolomics={
+        report = self.exp_dir / "report.tsv"
+        report.write_text("Run\n", encoding="utf-8")
+        self.edit_experiment(lambda doc: doc["omics"].update(proteomics={
             "enabled": True,
-            "input": {"level": "table", "format": "peak_table", "files": [f"experiments/{EXP}/peaks.tsv"]}}))
+            "input": {"level": "table", "format": "diann_report", "files": [f"experiments/{EXP}/report.tsv"]}}))
         samples = pd.read_csv(self.exp_dir / "samples.tsv", sep="\t", dtype=str)
-        extra = samples.assign(sample_id="met_" + samples["sample_id"], omics="metabolomics", tissue="liver")
+        extra = samples.assign(sample_id="prot_" + samples["sample_id"], omics="proteomics", tissue="liver")
         pd.concat([samples, extra]).to_csv(self.exp_dir / "samples.tsv", sep="\t", index=False)
 
     def test_validation_errors_stop_before_anything_is_written(self) -> None:
@@ -76,11 +76,11 @@ class RunFrameworkTest(unittest.TestCase):
                 run_experiment(EXP, ["mfa"], root=self.root)
 
     def test_all_runs_connected_omics_and_reports_the_rest(self) -> None:
-        self.enable_metabolomics()
+        self.enable_proteomics()
         run_dir, notes = _quiet(run_experiment, EXP, root=self.root)
         self.assertTrue((run_dir / "omics" / "mfa" / "tables" / "differential.parquet").is_file())
-        self.assertFalse((run_dir / "omics" / "metabolomics").exists())
-        self.assertTrue(any("metabolomics" in n and "尚未接入" in n for n in notes))
+        self.assertFalse((run_dir / "omics" / "proteomics").exists())
+        self.assertTrue(any("proteomics" in n and "尚未接入" in n for n in notes))
         self.assertEqual([o.value for o in read_manifest(run_dir).omics], ["mfa"])
 
     def test_steps(self) -> None:

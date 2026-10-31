@@ -30,6 +30,7 @@ from .validate import biological_samples, matches_level, validate_experiment
 # 已接入统一运行的组学：组学 → "模块:函数"。模块另以 STEPS 声明可选步骤
 RUNNERS: dict[Omics, str] = {
     Omics.MFA: "omicsweave.mfa.runner:run",
+    Omics.METABOLOMICS: "omicsweave.metabolomics.runner:run",
 }
 ALL = "all"
 METADATA_DIR = "metadata"
@@ -77,6 +78,21 @@ def contrast_groups(experiment: Experiment, contrast: Contrast, omics: Omics) ->
         selected = table[matches_level(table[contrast.factor], level, numeric)]
         groups.update(dict.fromkeys(selected["sample_id"], level))
     return groups
+
+
+def sample_labels(experiment: Experiment, samples: list[str]) -> dict[str, str]:
+    """样本 → 动物层因素水平的组合（如 HFD/GLP1），用作实验分组：
+
+    预处理中按组判断检出率、全局 PLS-DA 等需要“全部样本的一种分组”的地方使用它；
+    只有一个因素时就是该因素的水平。没有动物层因素时所有样本为同一组 ``all``。
+    """
+    factors = [name for name, f in experiment.config.design.factors.items() if f.level == "subject"]
+    table = biological_samples(experiment).drop_duplicates("sample_id").set_index("sample_id")
+    labels = {}
+    for sample in samples:
+        values = [str(table.at[sample, f]) for f in factors if sample in table.index and f in table.columns]
+        labels[sample] = "/".join(v for v in values if v) or "all"
+    return labels
 
 
 def _load_runner(omics: Omics) -> tuple[Callable[[RunContext], OmicsRun], tuple[str, ...]]:

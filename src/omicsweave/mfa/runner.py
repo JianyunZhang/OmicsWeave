@@ -34,8 +34,7 @@ from omicsweave.contract.mfa import MFAResults, read_mfa, validate_mfa
 from omicsweave.contract.tables import write_differential
 from omicsweave.core.config import Project
 from omicsweave.core.model import Omics
-from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups
-from omicsweave.core.validate import biological_samples
+from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 
 from .df_analysis import differential_flux, mid_fit_residuals, quality_control, sample_flux_matrix
 from .export import differential_flux_to_contract
@@ -65,17 +64,6 @@ def load_results(project: Project, spec) -> tuple[MFAResults, list[Path], list[s
         return read_mfa(files[0]), files[:1], []
     except ContractError as exc:
         raise RunError(str(exc)) from exc
-
-
-def _sample_labels(ctx: RunContext, samples: list[str]) -> dict[str, str]:
-    """样本 → 动物层因素水平的组合（如 HFD/GLP1），只用于明细表与 QC 表中的标注。"""
-    factors = [name for name, f in ctx.experiment.config.design.factors.items() if f.level == "subject"]
-    table = biological_samples(ctx.experiment).set_index("sample_id")
-    labels = {}
-    for sample in samples:
-        values = [str(table.at[sample, f]) for f in factors if sample in table.index and f in table.columns]
-        labels[sample] = "/".join(v for v in values if v) or "all"
-    return labels
 
 
 def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -> None:
@@ -121,7 +109,8 @@ def run(ctx: RunContext) -> OmicsRun:
     flux_df = legacy_flux_matrix(results).loc[used]
     all_fits = {s: fits for s, fits in legacy_all_fits(results).items() if s in used}
     tissues = sorted(results.flux["tissue"].unique())
-    labels = _sample_labels(ctx, used)
+    # 只用于明细表与 QC 表中的标注；差异分析按各比较的分组进行
+    labels = sample_labels(experiment, used)
 
     if ctx.wants("qc"):
         (out / "qc").mkdir(parents=True, exist_ok=True)

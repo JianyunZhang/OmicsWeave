@@ -42,7 +42,8 @@ REPORT_FILE = "MIGRATION.md"
 OUTPUT_FILES = (EXPERIMENT_FILE, "subjects.tsv", "samples.tsv", REPORT_FILE)
 
 # samples.tsv 的列顺序：必填列在前，其余按出现顺序排在后面
-_LEADING_COLUMNS = ["sample_id", "subject_id", "omics", "tissue", "protocol", "batch", "sample_type", "files"]
+_LEADING_COLUMNS = ["sample_id", "subject_id", "omics", "tissue", "protocol", "batch", "sample_type", "files",
+                    "data_column"]
 
 
 class MigrationError(Exception):
@@ -484,15 +485,18 @@ def _merge_samples(parts: list[_Part], canon: dict[str, str], notes: list[str]) 
                                  f"subjects.tsv 中保留了前者")
                 subject_groups.setdefault(subject, group)
             if row["sample_id"] in seen:
+                # 数据表中的列名不变，写在 data_column 中供运行器对应
                 renamed.append(row["sample_id"])
+                row["data_column"] = row["sample_id"]
                 row["sample_id"] = f"{part.omics.value}_{row['sample_id']}"
             seen.add(row["sample_id"])
             records.append({"omics": part.omics.value, **row})
     if renamed:
-        notes.append(f"{len(renamed)} 个样本名在不同组学中重复，后出现的已加上组学前缀：{'、'.join(renamed[:5])}")
+        notes.append(f"{len(renamed)} 个样本名在不同组学中重复，后出现的已加上组学前缀（数据表中的列名写在 data_column 列）："
+                     f"{'、'.join(renamed[:5])}")
 
     samples = pd.DataFrame(records, columns=None if records else _LEADING_COLUMNS[:4]).fillna("")
-    for column in ("protocol", "batch", "sample_type", "files"):
+    for column in ("protocol", "batch", "sample_type", "files", "data_column"):
         if column in samples.columns and (samples[column] == "").all():
             samples = samples.drop(columns=column)
     leading = [c for c in _LEADING_COLUMNS if c in samples.columns]

@@ -197,6 +197,8 @@ class MigrateExperimentTest(unittest.TestCase):
         met = self.samples("metabolomics")
         # 与转录组同名的样本加上组学前缀
         self.assertEqual(set(met.index), {f"metabolomics_{a}_liver" for a in ANIMALS} | {"QC1", "Blank1"})
+        self.assertEqual(met.loc["metabolomics_86_liver", "data_column"], "86_liver")
+        self.assertEqual(met.loc["QC1", "data_column"], "")
         self.assertEqual(met.loc["QC1", "sample_type"], "qc")
         self.assertEqual(met.loc["QC1", "subject_id"], "")
 

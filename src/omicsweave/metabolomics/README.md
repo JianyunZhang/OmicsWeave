@@ -20,6 +20,27 @@ python -m omicsweave.metabolomics.metabolomics_pipeline --experiment PROJECT
 
 未指定 `--steps` 时，流程根据输入文件、配置参数和各步骤 manifest 增量执行；显式传入 `--steps` 会强制重跑所选步骤，并在必要时自动补齐缺失依赖。
 
+### 按统一项目模型运行
+
+```powershell
+omicsweave run --experiment <id> --omics metabolomics            # 步骤 qc、differential、enrichment
+```
+
+读取 `experiment.yaml` 中 `omics.metabolomics.input` 声明的峰面积表，分组与比较来自 `subjects.tsv` / `samples.tsv` 和 `design.contrasts`：
+
+```yaml
+input:
+  level: table
+  format: peak_table
+  tissue_files: {liver: experiments/<id>/data/liver.xlsx}   # 每个组织一张表；或用 files 列出含多个组织的表
+  feature_id_column: Index          # 可选，默认 Index，没有时用名称列
+  feature_name_column: Compounds    # 可选，用于 KEGG / HMDB 注释
+```
+
+数据表中的样本列名即 `sample_id`，不同时在 samples.tsv 的 `data_column` 列中写出；`sample_type` 为 `qc` / `pool` 的列参与 QC 过滤，`blank` / `standard` 不进入分析。
+预处理、PLS-DA、差异检验与 ORA 沿用本模块的函数，同一份数据与下面的旧流程结果逐值一致；图件、GSEA 与解读报告暂时只在旧流程中提供。
+结果写入结果包的 `omics/metabolomics/`：`data/<组织>/`（预处理后的数据集）、`qc/<组织>/`、`tables/differential.parquet`、`tables/enrichment.parquet`。
+
 旧版 `--input/--output/--legacy-mode` 已移除。旧实现硬编码小鼠编号与分组，且重复了一套不完整统计逻辑；调用者应迁移到 `config.yaml + groups.yaml`。
 
 ## 六个分析步骤

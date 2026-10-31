@@ -148,7 +148,7 @@ src/omicsweave/
 │   └── mfa/                # 标准 Excel 模板、自研软件格式、INCA 等转换
 ├── transcriptomics/  proteomics/  metabolomics/  mfa/
 │   ├── 各自包含 qc.py / preprocess.py / differential.py / enrichment.py / plots.py / report.py（报告章节）
-│   └── runner.py           # 接入 omicsweave run 的运行器（MFA ✅）
+│   └── runner.py           # 接入 omicsweave run 的运行器（MFA、代谢组 ✅）
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
@@ -314,6 +314,7 @@ integration:
 | `run_order` | 否 | 质谱进样顺序，用于 QC 漂移校正 |
 | `specimen_id` | 否 | 同一组织块被多个组学测量时用于关联 |
 | `files` | 原始层必填 | 相对项目目录的路径，多个文件以 `;` 分隔（如 R1;R2） |
+| `data_column` | 否 | 表格层输入中该样本的列名，与 `sample_id` 不同时填写（如仪器导出的 `L-1`） |
 | `md5` | 否 | 原始文件校验值，用于溯源 |
 
 ### 5.6 校验规则（`omicsweave validate`）
@@ -346,7 +347,7 @@ omicsweave --project-dir <项目目录> migrate --experiment <实验ID> [--dry-r
 | MFA 的 protocol / batch 目录 | `protocol`、`batch` 列；各批次的文件、示踪剂、血糖 QC 设置记在 `omics.mfa.adapter.batches`。`input.files` 目前只能写一个批次（默认批次），多批次输入在阶段 2 解决 |
 | 各组学的分析参数 | `omics.<组学>.analysis`，为合并内置默认值与各层覆盖后的生效值 |
 
-无法从旧配置推断、写进 `MIGRATION.md` 待补充的内容：比较的 `role` 与 `reversal_pairs`；是否把 `group` 拆成饮食、处理等多个因素；MFA 的 `model_id` 与 `flux_units`；整合模式；样本对应不到动物、不同组学样本重名（后出现的加组学前缀）等问题。
+无法从旧配置推断、写进 `MIGRATION.md` 待补充的内容：比较的 `role` 与 `reversal_pairs`；是否把 `group` 拆成饮食、处理等多个因素；MFA 的 `model_id` 与 `flux_units`；整合模式；样本对应不到动物、不同组学样本重名（后出现的加组学前缀，数据表中的原列名写在 `data_column`）等问题。
 
 旧版各组学流程目前仍读取旧配置。阶段 2 各组学改为读取统一模型后，再用迁移得到的配置重跑，与旧结果逐值比对（阶段 2 验收标准）。
 
@@ -516,8 +517,10 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 **现状（阶段 2 进行中）**：
 
 - 运行框架已实现（`core/run.py`）：配置通过 `validate` 才开始运行；每次运行写入独立的 `<run_id>/` 目录；各组学由运行器实现，运行器不读写进程级全局状态，同一进程中可以并行运行多个实验。
-- 已接入的组学：MFA（步骤 `qc`、`differential`）。输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
-- `--omics all` 跳过尚未接入的组学并给出提示，这些组学暂用原有命令 `omicsweave <组学> run`。MFA 的图件、通路比较、MID 分析、解读报告与多批次整合暂时仍由 `omicsweave mfa run` 提供。
+- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）。
+- MFA：输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
+- 代谢组：读取峰面积表（`format: peak_table`；`tissue_files` 每个组织一张表，或 `files` 中一张表含多个组织，组织由 samples.tsv 给出；样本列名不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本预处理（按组判断检出率、插补、归一化、log2），再按各比较做 Welch t 检验与 PLS-DA VIP，用显著代谢物做 KEGG ORA；输出预处理后的数据集、QC 表、统一差异结果表与富集结果表。与旧流程（`omicsweave metabolomics run`）的差异结果、VIP 与 ORA 逐值一致（回归测试）。
+- `--omics all` 跳过尚未接入的组学并给出提示，这些组学暂用原有命令 `omicsweave <组学> run`。MFA 的图件、通路比较、MID 分析、解读报告与多批次整合，代谢组的图件、GSEA 与解读报告，暂时仍由各组学原有的命令提供。
 - 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
 ### 9.2 多组学整合（可选，三种模式）
@@ -626,8 +629,8 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 | 任务 | 交付物 | 状态（2026-10-31） |
 |---|---|---|
-| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；转录组、代谢组、蛋白组待做 |
-| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），已接入 MFA；旧命令保留 |
+| 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表与 KEGG ORA；GSEA 待接入）；转录组、蛋白组待做 |
+| 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），已接入 MFA、代谢组；旧命令保留 |
 | 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | |
 | 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |
 | 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` | |
