@@ -32,6 +32,7 @@ RUNNERS: dict[Omics, str] = {
     Omics.MFA: "omicsweave.mfa.runner:run",
     Omics.METABOLOMICS: "omicsweave.metabolomics.runner:run",
     Omics.TRANSCRIPTOMICS: "omicsweave.transcriptomics.runner:run",
+    Omics.PROTEOMICS: "omicsweave.proteomics.runner:run",
 }
 ALL = "all"
 METADATA_DIR = "metadata"

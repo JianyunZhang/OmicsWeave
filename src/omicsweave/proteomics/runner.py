@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+蛋白组的统一运行器（``omicsweave run --omics proteomics``）：读取 ``experiment.yaml`` 声明的 DIA-NN 报告，
+按组织预处理，再按其中的比较做差异蛋白分析，写出统一结果表。
+
+计算沿用旧流程：报告按 q 值过滤、聚合为蛋白 × 样本矩阵后，按组织用全部样本做 log2 与样本中位数居中
+（不插补，按总观测数过滤）；每个比较只取该比较的样本，用 limma 方差压缩的线性模型检验
+（``analysis.dp_method: wilcoxon`` 时用旧版秩和检验），协变量取 ``design.covariates`` 与
+``analysis.design_covariates``。样本按矩阵中的列顺序参与计算，所以同一份报告与旧流程
+（``omicsweave proteomics run``）的结果逐值一致。原始 ``.raw`` 的 DIA-NN 搜库、图件、ssGSEA 与
+预排序 GSEA 暂未接入。
+
+输入（``omics.proteomics.input``，``format: diann_report``）::
+
+    tissue_files: {liver: diann/liver/report.tsv}   # 每个组织一份报告（旧版布局）；没有时读取 files，
+    files: [diann/report.tsv]                       #   一份报告中可以有多个组织的样本，组织由 samples.tsv 给出
+
+样本名由报告 ``Run`` 列按旧流程的规则提取（如 ``..._Liver_86`` → ``Liver86``），即 samples.tsv 的 ``sample_id``；
+不同时在 ``data_column`` 中写出提取后的名称。
+
+输出（``omics/proteomics/``）::
+
+    data/<组织>/                   log2、中位数居中、未插补的强度（分析层数据集；行 = 蛋白，列 = 样本）
+    qc/<组织>/                     样本 QC 指标、蛋白缺失率、重复相关性、PCA 得分与 QC 图
+    tables/differential.parquet    统一差异结果表
+    details/<组织>/<比较>/          旧版格式的差异蛋白表与设计报告
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
+from omicsweave.contract.tables import write_differential
+from omicsweave.core.config import Experiment, Project
+from omicsweave.core.model import Omics
+from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.core.validate import biological_samples
+
+from .differential_analysis import run_differential_analysis
+from .experiment_config import normalize_fdr_method
+from .export import dp_to_contract
+from .proteomics_qc import generate_qc_outputs
+from .run_proteomics_pipeline import load_and_clean_data, preprocess_data
+
+STEPS = ("qc", "differential")
+# 与旧版配置加载器的默认值相同
+_DEFAULTS: dict[str, Any] = {
+    "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "fdr_method": "fdr_bh", "dp_method": "limma",
+    "min_total_observations": 2, "min_observations_per_group": 2, "imputation_seed": 42,
+    "protein_aggregation": "log2_mean", "design_covariates": [],
+}
+
+
+def _preview(values, limit: int = 5) -> str:
+    values = list(map(str, values))
+    return "、".join(values[:limit]) + (f" 等 {len(values)} 个" if len(values) > limit else "")
+
+
+def _samples(experiment: Experiment) -> pd.DataFrame:
+    rows = biological_samples(experiment)
+    rows = rows[rows["omics"] == Omics.PROTEOMICS.value].drop_duplicates("sample_id").copy()
+    rows["column"] = rows["data_column"].where(rows["data_column"] != "", rows["sample_id"]) \
+        if "data_column" in rows.columns else rows["sample_id"]
+    return rows
+
+
+def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
+              record: OmicsRun) -> list[tuple[str, pd.DataFrame, dict[str, str]]]:
+    """按组织返回 (组织, 蛋白 × sample_id 的原始强度, 蛋白 → UniProt)。列顺序与旧流程的矩阵相同。"""
+    tissue_files = getattr(spec, "tissue_files", None) or {}
+    jobs = ([(str(t), project.resolve(p)) for t, p in tissue_files.items()] if tissue_files
+            else [(None, project.resolve(f)) for f in spec.files])
+    blocks: dict[str, tuple[pd.DataFrame, dict[str, str]]] = {}
+    for tissue, path in jobs:
+        if not path.is_file():
+            raise RunError(f"找不到 DIA-NN 报告 {path}")
+        record.inputs.append(path)
+        matrix, to_uniprot = load_and_clean_data(str(path), protein_aggregation=aggregation)
+        if matrix is None or matrix.empty:
+            record.notes.append(f"{path.name} 中没有通过过滤的蛋白定量，已跳过")
+            continue
+        candidates = rows if tissue is None else rows[rows["tissue"] == tissue]
+        declared = dict(zip(candidates["column"], candidates["sample_id"]))
+        undeclared = [c for c in matrix.columns if c not in declared]
+        if undeclared:
+            record.notes.append(f"{path.name} 中有 {len(undeclared)} 个样本不在 samples.tsv 中，未参与分析："
+                                f"{_preview(undeclared)}")
+        present = [c for c in matrix.columns if c in declared]
+        by_tissue = candidates.set_index("column")["tissue"]
+        for block_tissue in dict.fromkeys(by_tissue[present]):
+            if block_tissue in blocks:
+                raise RunError(f"蛋白组 {block_tissue} 的样本分布在多份报告中")
+            columns = [c for c in present if by_tissue[c] == block_tissue]
+            blocks[block_tissue] = (matrix[columns].rename(columns=declared), to_uniprot)
+    found = {s for m, _ in blocks.values() for s in m.columns}
+    missing = [s for s in rows["sample_id"] if s not in found]
+    if missing:
+        record.notes.append(f"DIA-NN 报告中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
+    return [(t, m, u) for t, (m, u) in blocks.items()]
+
+
+def _covariate_table(experiment: Experiment, rows: pd.DataFrame, covariates: list[str]) -> pd.DataFrame:
+    """协变量：声明为因素时按其类型；未声明的列全部能解析为数值时按连续变量，否则按分类变量。"""
+    factors = experiment.config.design.factors
+    table = rows.set_index("sample_id")[covariates].copy()
+    for column in covariates:
+        numeric = pd.to_numeric(table[column], errors="coerce")
+        declared = factors.get(column)
+        if (declared is not None and declared.type == "numeric") or (declared is None and numeric.notna().all()):
+            table[column] = numeric
+    return table
+
+
+def run(ctx: RunContext) -> OmicsRun:
+    experiment = ctx.experiment
+    settings_block = experiment.config.omics.proteomics
+    spec = settings_block.input
+    if spec.level == "raw":
+        raise RunError("原始 .raw 的 DIA-NN 搜库尚未接入统一运行；已有 DIA-NN 报告时把 omics.proteomics.input 改为 "
+                       "{level: table, format: diann_report, files: [报告]}，或暂用 omicsweave proteomics run")
+    if spec.format != "diann_report":
+        raise RunError(f"蛋白组输入格式 {spec.format} 尚未接入统一运行（可用 diann_report）")
+    settings = {**_DEFAULTS, **settings_block.analysis}
+    fdr_method = normalize_fdr_method(str(settings["fdr_method"]))
+    pval_cutoff, log2fc_cutoff = float(settings["pval_cutoff"]), float(settings["log2fc_cutoff"])
+    rule = f"padj<{pval_cutoff} and |log2FC|>{log2fc_cutoff}"
+    out = ctx.omics_dir(Omics.PROTEOMICS)
+    record = OmicsRun(Omics.PROTEOMICS)
+    rows = _samples(experiment)
+    covariates = [c for c in dict.fromkeys([*experiment.config.design.covariates, *settings["design_covariates"]])
+                  if c in rows.columns]
+    covariate_table = _covariate_table(experiment, rows, covariates)
+    blocks = _matrices(ctx.project, spec, rows, str(settings["protein_aggregation"]), record)
+    if not blocks:
+        raise RunError("DIA-NN 报告中没有找到 samples.tsv 声明的样本")
+
+    tables, contrasts_run = [], []
+    for tissue, raw, to_uniprot in blocks:
+        normalized = preprocess_data(raw, min_total_observations=int(settings["min_total_observations"]))
+        if normalized.empty:
+            record.notes.append(f"蛋白组 {tissue} 的蛋白都没有达到最少观测数，已跳过")
+            continue
+        features = pd.DataFrame({"uniprot_id": [to_uniprot.get(p, "") for p in normalized.index]},
+                                index=normalized.index)
+        meta = DatasetMeta(omics=Omics.PROTEOMICS, tissue=tissue, value_type=ValueType.INTENSITY, scale="log2",
+                           normalization="median_centering", feature_id_type="gene_or_protein_group",
+                           source={"protein_aggregation": settings["protein_aggregation"],
+                                   "differential_input": "log2_normalized_unimputed"})
+        write_dataset(out / "data" / tissue, Dataset(normalized, features, meta))
+
+        if ctx.wants("qc"):
+            labels = sample_labels(experiment, list(normalized.columns))
+            qc_meta = covariate_table.loc[normalized.columns].assign(
+                condition=[labels[s] for s in normalized.columns])
+            generate_qc_outputs(raw.loc[:, normalized.columns], normalized, qc_meta, out / "qc" / tissue,
+                                seed=int(settings["imputation_seed"]))
+        if not ctx.wants("differential"):
+            continue
+        for contrast in experiment.config.design.contrasts:
+            assigned = contrast_groups(experiment, contrast, Omics.PROTEOMICS)
+            groups = {s: assigned[s] for s in normalized.columns if s in assigned}
+            levels = (contrast.numerator, contrast.denominator)
+            if not all(level in groups.values() for level in levels):
+                if groups:
+                    record.notes.append(f"比较 {contrast.id} 在蛋白组 {tissue} 中有一组没有样本，已跳过")
+                continue
+            samples = list(groups)
+            details = out / "details" / tissue / contrast.id
+            metadata = covariate_table.loc[samples].assign(condition=[groups[s] for s in samples])
+            run_differential_analysis(
+                normalized[samples], groups, [(*levels, contrast.id)], str(details), tissue,
+                pval_cutoff, log2fc_cutoff, fdr_method, str(settings["dp_method"]),
+                feature_to_uniprot=to_uniprot, sample_metadata=metadata, design_covariates=covariates,
+                min_observations_per_group=int(settings["min_observations_per_group"]), flush=lambda _m: None)
+            result = pd.read_csv(details / f"dp_{tissue}_{contrast.id}.csv", dtype={"Protein": str, "uniprot_id": str})
+            means = {level: normalized[[s for s in samples if groups[s] == level]].mean(axis=1, skipna=True)
+                     for level in levels}
+            tables.append(dp_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
+                                         tissue=tissue, mean_numerator=means[contrast.numerator],
+                                         mean_denominator=means[contrast.denominator], selection_rule=rule))
+            contrasts_run.append(contrast.id)
+
+    if tables:
+        write_differential(pd.concat(tables, ignore_index=True), out / "tables" / "differential.parquet")
+    record.parameters = {"tissues": [t for t, _, _ in blocks], "covariates": covariates,
+                         "contrasts": list(dict.fromkeys(contrasts_run)), "analysis": settings}
+    return record

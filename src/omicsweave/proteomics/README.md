@@ -2,6 +2,25 @@
 
 本模块面向 DIA-NN/Spectronaut 蛋白定量报告，提供配置驱动的质量控制、差异丰度分析、可视化、ssGSEA、pre-ranked GSEA 和证据感知报告。v6.0 修复了旧版 FDR 校正静默失效、n=1 仍产出无效 p 值、火山图用原始 p 值判定显著性、报告/ssGSEA 文件名不一致等问题，并加入协变量设计与完整 QC。
 
+## 按统一项目模型运行（阶段 2）
+
+```bash
+omicsweave run --experiment <id> --omics proteomics      # 步骤 qc、differential
+```
+
+读取 `experiment.yaml` 中 `omics.proteomics.input` 声明的 DIA-NN 报告，分组、协变量与比较来自 `subjects.tsv` / `samples.tsv` 和 `design`：
+
+```yaml
+input:
+  level: table
+  format: diann_report
+  tissue_files: {liver: experiments/<id>/diann/liver/report.tsv}   # 每个组织一份报告；或用 files 列出含多个组织的报告
+```
+
+样本名由报告 `Run` 列按本模块的规则提取（如 `..._Liver_86` → `Liver86`），即 `sample_id`；不同时在 samples.tsv 的 `data_column` 列写出。
+预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致；`.raw` 搜库、图件、ssGSEA 与预排序 GSEA 暂时仍用下文的旧流程。
+结果写入结果包的 `omics/proteomics/`。
+
 ## 统计契约
 
 流程对“用于统计推断的数据”和“用于展示的数据”作严格区分：

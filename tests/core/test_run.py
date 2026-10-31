@@ -16,6 +16,7 @@ import yaml
 from omicsweave import cli
 from omicsweave.contract.manifest import read_manifest
 from omicsweave.core import run as run_module
+from omicsweave.core.model import Omics
 from omicsweave.core.run import RunError, run_experiment
 from tests.mfa.test_mfa_runner import EXP, build_two_factor_project
 
@@ -77,7 +78,10 @@ class RunFrameworkTest(unittest.TestCase):
 
     def test_all_runs_connected_omics_and_reports_the_rest(self) -> None:
         self.enable_proteomics()
-        run_dir, notes = _quiet(run_experiment, EXP, root=self.root)
+        # 四个组学都已接入；临时去掉蛋白组的运行器，模拟尚未接入的组学
+        with mock.patch.dict(run_module.RUNNERS):
+            del run_module.RUNNERS[Omics.PROTEOMICS]
+            run_dir, notes = _quiet(run_experiment, EXP, root=self.root)
         self.assertTrue((run_dir / "omics" / "mfa" / "tables" / "differential.parquet").is_file())
         self.assertFalse((run_dir / "omics" / "proteomics").exists())
         self.assertTrue(any("proteomics" in n and "尚未接入" in n for n in notes))
