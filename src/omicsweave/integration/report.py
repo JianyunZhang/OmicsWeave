@@ -42,7 +42,7 @@ def generate_report(
     experiment_id : str
         Experiment identifier.
     scored_df : DataFrame, optional
-        Scored reactions from FluxOmicsScorer.
+        Reaction evidence profiles from FluxEvidenceBuilder.
     pathway_df : DataFrame, optional
         Pathway-aggregated scores.
     convergence_df : DataFrame, optional
@@ -169,27 +169,17 @@ def generate_report(
                     lines.append(f"| {grade} | {n_grade} | {n_grade / total * 100:.1f}% |\n")
             lines.append("\n")
 
-        # 旧评分仅保留用于历史结果复现和现有图表兼容。
-        lines.append("### Legacy 0-4 Score Distribution\n\n")
-        lines.append("![Score Distribution](02_result_plot/score_distribution.png)\n\n")
-        lines.append("![Confidence Pie](02_result_plot/confidence_pie.png)\n\n")
-
-        conf_counts = scored_df["confidence"].value_counts()
-        lines.append("| Confidence | Count | Percentage |\n|---|---|---|\n")
-        for conf in ["High", "Medium", "Low", "Insufficient"]:
-            n = conf_counts.get(conf, 0)
-            pct = n / total * 100 if total > 0 else 0
-            lines.append(f"| {conf} | {n} | {pct:.1f}% |\n")
-        lines.append("\n")
+        lines.append("![Evidence Grades](02_result_plot/evidence_grades.png)\n\n")
+        lines.append("![Support vs Conflict](02_result_plot/support_conflict.png)\n\n")
 
         # Top hits
         lines.append("### Top Multi-Omics Evidence Profiles\n\n")
         lines.append(
             "| Flux ID | Tissue | Comparison | Support | Conflict | Coverage "
-            "| Design | Evidence grade | Legacy score |\n"
+            "| Design | Evidence grade |\n"
         )
         lines.append(
-            "|---|---|---|---:|---:|---:|---|---|---:|\n"
+            "|---|---|---|---:|---:|---:|---|---|\n"
         )
         for _, row in scored_df.head(20).iterrows():
             lines.append(
@@ -200,8 +190,7 @@ def generate_report(
                 f"| {row.get('conflict_score', 0):.3f} "
                 f"| {row.get('coverage_score', 0):.3f} "
                 f"| {row.get('design_grade', '')} "
-                f"| {row.get('evidence_grade', '')} "
-                f"| {row.get('legacy_total_score', row.get('total_score', 0)):.3f} |\n"
+                f"| {row.get('evidence_grade', '')} |\n"
             )
         lines.append("\n")
 
@@ -271,9 +260,9 @@ def generate_report(
         "pseudo-replicate evidence and cannot receive a confirmatory design grade.\n\n"
     )
     lines.append(
-        "The former score matrix remains in `legacy_*` columns solely for backward "
-        "compatibility. Its MFA gate and High/Medium/Low labels are not used as the new "
-        "cross-experiment confidence claim.\n\n"
+        "The former additive 0-4 score and its High/Medium/Low labels have been removed; "
+        "the evidence profile is the only integration result. The MFA significance rule "
+        "only decides whether MFA serves as the direction anchor.\n\n"
     )
     lines.append(
         "Pathway integration additionally writes exact-name overlaps for compatibility and "

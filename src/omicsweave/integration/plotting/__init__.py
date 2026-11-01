@@ -9,7 +9,7 @@ from .heatmap_plots import (
     plot_convergence_heatmap,
     plot_tissue_flux_overview,
 )
-from .scoring_plots import plot_score_distribution
+from .scoring_plots import plot_evidence_profile
 
 __all__ = [
     "apply_config",
@@ -21,5 +21,5 @@ __all__ = [
     "plot_tca_cycle",
     "plot_convergence_heatmap",
     "plot_tissue_flux_overview",
-    "plot_score_distribution",
+    "plot_evidence_profile",
 ]

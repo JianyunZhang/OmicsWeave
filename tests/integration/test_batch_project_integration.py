@@ -17,7 +17,7 @@ from omicsweave.core.statistics.meta_analysis import random_effects_meta
 from omicsweave.integration.methods.batch_effect_meta import (
     meta_analyze_feature_batches,
 )
-from omicsweave.integration.methods.flux_omics_scorer import FluxOmicsScorer
+from omicsweave.integration.methods.flux_evidence import FluxEvidenceBuilder
 from omicsweave.integration.loaders import (
     MFALoader,
     MetabolomicsLoader,
@@ -395,7 +395,7 @@ class WithinOmicsBatchMetaTest(unittest.TestCase):
             estimand={"id": "diet_14w"},
             scoring={},
         )
-        scorer = FluxOmicsScorer(cfg)
+        builder = FluxEvidenceBuilder(cfg)
         flux_row = pd.Series({"flux_id": "G6Pase_c", "flux_log2fc": 1.0})
         proteins = pd.DataFrame({
             "protein": ["G6pc"],
@@ -411,7 +411,7 @@ class WithinOmicsBatchMetaTest(unittest.TestCase):
             "protocol_id_case_vs_control": ["dia_v1"],
         })
 
-        _, details = scorer.score_proteomics(
+        details = builder.proteomics_evidence(
             flux_row, proteins, "case_vs_control"
         )
 
@@ -422,8 +422,8 @@ class WithinOmicsBatchMetaTest(unittest.TestCase):
         self.assertEqual(details["source_mode"], "within_omics_batch_meta")
         self.assertEqual(details["protocol_id"], "dia_v1")
 
-    def test_proteomics_scoring_prefers_fdr_over_raw_pvalue(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(
+    def test_proteomics_evidence_prefers_fdr_over_raw_pvalue(self) -> None:
+        builder = FluxEvidenceBuilder(SimpleNamespace(
             experiment_id="experiment_a", estimand={"id": "diet_14w"}, scoring={},
         ))
         flux_row = pd.Series({"flux_id": "G6Pase_c", "flux_log2fc": 1.0})
@@ -435,11 +435,10 @@ class WithinOmicsBatchMetaTest(unittest.TestCase):
             "evidence_case_vs_control": ["inferential"],
         })
 
-        score, details = scorer.score_proteomics(
+        details = builder.proteomics_evidence(
             flux_row, proteins, "case_vs_control",
         )
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["n_sig"], 0)
         self.assertEqual(details["evidence_mode"], "no_significant")
 
@@ -860,7 +859,7 @@ class EvidenceProvenanceTest(unittest.TestCase):
             integration={},
             scoring={"evidence_profile": {"mfa_inference_unit": "biological_replicate"}},
         )
-        scorer = FluxOmicsScorer(config)
+        builder = FluxEvidenceBuilder(config)
         mfa = pd.DataFrame({
             "flux_id": [flux_id],
             "tissue": ["liver"],
@@ -888,13 +887,13 @@ class EvidenceProvenanceTest(unittest.TestCase):
             "heterogeneity_i2": [4.0],
         })
 
-        scorer.score_all(
+        builder.build_all(
             {"case_vs_control": mfa},
             {"case_vs_control": {"liver": tx}},
             {},
             {},
         )
-        evidence = scorer.get_evidence_table()
+        evidence = builder.get_evidence_table()
         tx_row = evidence[evidence["layer"] == "transcriptomics"].iloc[0]
 
         self.assertEqual(tx_row["experiment_id"], "experiment_a")

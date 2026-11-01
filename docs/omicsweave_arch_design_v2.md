@@ -153,7 +153,7 @@ src/omicsweave/
 │   └── runner.py           # 接入 omicsweave run 的运行器（四个组学均已接入 ✅）
 ├── integration/            # 跨组学统计整合（已由 multiomics/ 改名 ✅；原 integration/ 子包改名为 methods/）
 │   ├── integrate.py        # 整合入口（omicsweave integrate）：读取源结果包的统一结果表，写出新的结果包 ✅
-│   └── modes/              # 整合模式：pathway_convergence ✅；flux_anchored、sample_level 待接入
+│   └── modes/              # 整合模式：flux_anchored ✅、pathway_convergence ✅；sample_level 待接入
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
 ├── visualization/          # theme.py：统一绘图主题 ✅；通用图形阶段 2 迁入
@@ -292,6 +292,7 @@ integration:
   enabled: true
   modes: [flux_anchored, pathway_convergence]
   parameters:                     # 可选：各模式的参数
+    flux_anchored: {tissue_map: {muscle: gast_muscle}}   # MFA 组织名 → 其他组学的组织名
     pathway_convergence: {ora_padj_cutoff: 0.05, gsea_padj_cutoff: 0.25}
 ```
 
@@ -542,7 +543,7 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 
 | 模式 | 前提条件 | 内容 | 现有代码基础 |
 |---|---|---|---|
-| `flux_anchored` | MFA + 至少 1 个其他组学；有 MFA 反应→基因/蛋白/代谢物映射 | 以差异通量为锚点，汇总其他组学的方向一致性证据（多维证据画像） | `evidence_profile.py`、`mappings/`、`stability.py` |
+| `flux_anchored` | MFA + 至少 1 个其他组学；有 MFA 反应→基因/蛋白/代谢物映射 | 以差异通量为锚点，汇总其他组学的方向一致性证据（多维证据画像） | `flux_evidence.py`、`evidence_profile.py`、`mappings/`、`stability.py` |
 | `pathway_convergence` | 任意 ≥2 个组学；不要求 MFA | 通路层面的跨组学、跨组织收敛分析 | `pathway_convergence.py`、`cross_tissue_pathway_scorer.py` |
 | `sample_level` | ≥2 个组学测自同一批 `subject_id`（配对） | 样本级协调、残余批次诊断，以及潜变量/网络等补充分析 | `harmonization.py` |
 
@@ -559,7 +560,8 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 - `omicsweave integrate --experiment <ID> [--mode ...] [--source <运行ID>]`：默认读取最近一次含统一结果表的运行，模式默认取 `integration.modes`，参数写在 `integration.parameters.<模式>`。
 - `pathway_convergence` 已接入：读取各组学的 `enrichment.parquet`，通路按名称匹配，每个（组织, 比较）内融合（组学内 Bonferroni、组学间 Fisher，BH 校正），融合方法与旧流程相同（回归测试：与旧版分析器逐值一致）；另列出各组学的效应方向与方向是否一致，并给出各组学显著通路的两两交集（ORA 用 padj < 0.05，GSEA 用 FDR < 0.25）。前提：至少两个组学有富集结果。
-- `flux_anchored` 随 2.8（拆分 `flux_omics_scorer`，证据提取并入证据画像）接入，`sample_level` 随后接入；此前可用旧命令 `omicsweave integration run`。
+- `flux_anchored` 已接入（随 2.8）：读取各组学的 `differential.parquet`，整理为证据构建器 `FluxEvidenceBuilder` 的输入（MFA 每个比较一张表；转录组每个（比较, 组织）一张表；蛋白组、代谢组每个组织一张宽表），输出多维证据画像 `flux_evidence_profile`、证据长表 `flux_evidence_table` 与通路汇总 `flux_pathway_profile`。前提：MFA 与至少一个其他组学有差异结果。MFA 的 p 值与 FDR 取主检验路径，推断单位取自差异结果（以动物为单位时不再降为 `pseudo_replicate`）；蛋白组、代谢组的有效样本量取自 `n_numerator + n_denominator`。回归测试：统一结果表整理后的输入与旧加载器形状的输入给出相同的证据画像与证据长表。
+- `sample_level` 待接入；此前可用旧命令 `omicsweave integration harmonize`。
 
 ---
 
@@ -591,7 +593,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 |---|---|
 | ID 映射字典：`metabolite_id_mapping`（2,094 行）、`mouse_gene_id_mapping`（522）、`mouse_protein_id_mapping`（273）、`reaction_pathway_mapping`（1,374） | 带版本和来源说明的数据文件（TSV）+ 解析器接口；按 `project.species` 选择；MFA 反应注册表改为网络模型定义文件 |
 | 4 份解读报告生成器 | 基于模板的报告，只写统计事实，删除课题专用的叙述 |
-| `multiomics/integration/flux_omics_scorer.py`（1,632 行） | 拆成两部分（第 13 节已定）：**删除**旧的加和总分（0–4.0 分、固定权重、High/Medium/Low 置信度及全部 `legacy_*` 输出）；**保留并重构**各组学的证据提取（反应→基因/蛋白/代谢物映射、方向与效应量提取），改名为 flux-anchored 证据构建器，只为多维证据画像提供输入 |
+| `multiomics/integration/flux_omics_scorer.py`（1,632 行） | 拆成两部分（第 13 节已定）：**删除**旧的加和总分（0–4.0 分、固定权重、High/Medium/Low 置信度及全部 `legacy_*` 输出）；**保留并重构**各组学的证据提取（反应→基因/蛋白/代谢物映射、方向与效应量提取），改名为 flux-anchored 证据构建器，只为多维证据画像提供输入。✅ 阶段 2.8：`integration/methods/flux_evidence.py` 的 `FluxEvidenceBuilder` |
 
 ### 10.4 移出到本地课题工作区（课题专用）
 
@@ -652,12 +654,12 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 |---|---|---|
 | 2.1 四个组学改为“读取数据契约 → 统一结果表”，分析层导入器：kallisto/salmon 定量、DIA-NN 报告、峰面积表/MS-DIAL 输出、MFA 模板 | 统一的 `differential.parquet` / `enrichment.parquet`；`omicsweave export` | 部分：MFA ✅（输入读为标准格式 → 每只动物的代表净通量数据集 → 统一差异结果表）；代谢组 ✅（峰面积表 → 预处理后的数据集 → 差异结果表；KEGG ORA 与 GSEA）；转录组 ✅（计数矩阵 / kallisto 定量 → 基因计数数据集 → PyDESeq2 或秩和检验 → 差异结果表；本地 ORA 与 GSEA）；蛋白组 ✅（DIA-NN 报告 → 未插补的强度数据集 → limma 差异结果表；本地 ORA 与 GSEA）；`omicsweave export` ✅。未接入：蛋白组 ssGSEA（样本层面得分，属于数据集）；图件与报告见 2.6 |
 | 2.2 `omicsweave run --omics ... --steps ...`；旧命令保留为别名 | 单组学独立运行 | 部分：运行框架 ✅（校验、结果包、`metadata/`、运行清单、`--steps`），四个组学均已接入；旧命令保留 |
-| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | 部分：`omicsweave integrate` 框架 ✅（源结果包、新结果包、运行清单、模式参数）；`pathway_convergence` ✅；`flux_anchored`（随 2.8）、`sample_level` 待做 |
+| 2.3 整合模块只读取契约；实现三种整合模式及前提检查 | `omicsweave integrate --mode ...` | 部分：`omicsweave integrate` 框架 ✅（源结果包、新结果包、运行清单、模式参数）；`pathway_convergence` ✅；`flux_anchored` ✅（随 2.8）；`sample_level` 待做 |
 | 2.4 ID 映射改为数据文件 + 解析器；物种可配置；加入小鼠→人同源映射 | `core/idmap/`、`evidence/orthologs.parquet` | |
 | 2.5 证据层：`BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`；候选清单含逆转标记与证据等级 | `evidence/`、`hypotheses/` | |
 | 2.6 报告改为由结果包生成的 HTML（含自动方法学段落）；按需 PDF | `reports/analysis_report.html` | |
 | 2.7 交换契约 v1：发布 JSON Schema 与标准样例结果包，CI 中运行契约测试 | `schemas/evidence-exchange/v1/` | |
-| 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 | |
+| 2.8 删除旧加和总分，`flux_omics_scorer` 的证据提取并入证据画像（第 10.3 节）；需要排序时，使用可配置、写明依据的排序规则，并做权重敏感性分析 | 证据画像为唯一整合结果 | 部分：`FluxEvidenceBuilder` ✅（删除加和总分、置信度与 `legacy_*` 字段，报告、图件与旧命令改用证据画像；证据画像、证据长表与通路汇总与拆分前逐值一致）；反应按支持度降序、冲突度升序、覆盖度降序排列；可配置的排序规则与权重敏感性分析待做 |
 | 2.9 各组学改写时去除旧流程的模块级状态（清单见第 4.1 节；接续 1.10），转录组多批次改为同一进程内运行 | 同一进程中可并行运行两个实验，结果互不影响（测试覆盖） | 部分：运行框架与四个组学的运行器只调用不读写模块级状态的函数；两个实验在同一进程中并行运行与顺序运行的结果一致（MFA，测试覆盖）；旧流程入口的全局变量随各组学其余部分改写去除 |
 
 **验收标准**
@@ -718,7 +720,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 首批支持的物种 | 小鼠（`mus_musculus`，taxon 10090）+ 人（`homo_sapiens`，taxon 9606）；ID 映射数据文件与小鼠→人同源映射都按这两个物种准备，其他物种以后通过数据文件扩展 | 已定 |
 | 开源许可证 | **BSD-3-Clause**（OmicsWeave 与 TheraWeave 相同）：与主要依赖兼容，并含“未经许可不得用作者或单位名义为衍生产品背书”条款，与 scverse 生态（scanpy、anndata）一致。版权方为 “The OmicsWeave Developers”（集体署名；贡献者名单在 `CITATION.cff` 中维护） | 已定；`LICENSE` 与 `pyproject.toml` 许可证字段已加入 |
 | 运行环境 | 当前实现 Windows/Linux 单机运行；以后扩展多节点集群部署与多客户端联网使用（阶段 5）。从阶段 1 起遵守第 4.1 节的预留约束 | 已定 |
-| 旧打分矩阵 `flux_omics_scorer` | 尚未发表，且加和总分的策略过于粗糙：**删除加和总分及 `legacy_*` 输出，不保留 `--legacy`**。不另起一套新的总分：多维证据画像（`evidence_profile`，现已是主结果）作为唯一整合结果，按维度给出证据等级，并用 `stability` 做生物学稳定性校准；各组学的证据提取部分保留并重构（第 10.3 节） | 已定，阶段 2 实施 |
+| 旧打分矩阵 `flux_omics_scorer` | 尚未发表，且加和总分的策略过于粗糙：**删除加和总分及 `legacy_*` 输出，不保留 `--legacy`**。不另起一套新的总分：多维证据画像（`evidence_profile`，现已是主结果）作为唯一整合结果，按维度给出证据等级，并用 `stability` 做生物学稳定性校准；各组学的证据提取部分保留并重构（第 10.3 节） | 已定，阶段 2.8 已实施 |
 | 课题专用脚本与数据 | 暂不移动外部项目的原始数据。本仓库预留 `local/` 本地课题工作区（不提交，已建立）：课题数据副本放 `local/projects/<课题>/`，课题专用脚本放其中的 `analysis/`；通过 `--project-dir`、环境变量 `OMICSWEAVE_PROJECT_DIR` 或 `pytest --project-dir` 指定。包内的课题专用脚本已移到 `local/projects/dio_mouse/analysis/`（第 10.4 节） | 已定，工作区已就绪 |
 | 阶段 2 之后先做阶段 3 还是 TheraWeave MVP | 见总纲第 11 节；现有课题数据已处理成表格，倾向先做 TheraWeave MVP | 待定 |
 | 文档语言 | 中文先行，阶段 4 补英文 | 已定 |

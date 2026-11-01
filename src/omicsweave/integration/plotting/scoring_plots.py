@@ -1,135 +1,107 @@
 #!/usr/bin/env python3
 """
-Scoring visualization: score distributions, confidence pie charts.
+证据画像的图：证据等级分布、支持度与冲突度散点、各组织的支持度分布。
 
-Adapted from flux_multiomics_integration.py lines 515-576 (concordance analysis).
-
-Author: Claude Code
+旧版的 0–4 总分直方图与置信度饼图已随加和总分一并删除（阶段 2.8）。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 from . import _config as cfg
 
+GRADE_ORDER = ["Replicated", "Convergent", "Single-layer", "Exploratory", "Conflicting", "No-signal",
+               "Not-assessable"]
+_DEFAULT_GRADE_COLORS = {
+    "Replicated": "#1B7837", "Convergent": "#5AAE61", "Single-layer": "#A6DBA0", "Exploratory": "#F4A582",
+    "Conflicting": "#B2182B", "No-signal": "#D9D9D9", "Not-assessable": "#F0F0F0",
+}
 
-def plot_score_distribution(
+
+def plot_evidence_profile(
     scored_df: pd.DataFrame,
     output_dir: Path | None = None,
 ) -> list[Path]:
-    """Histogram and boxplot of total multi-omics scores.
+    """证据画像的汇总图。
 
     Parameters
     ----------
     scored_df : DataFrame
-        Output from FluxOmicsScorer.score_all() with columns
-        total_score, confidence, comparison, tissue.
+        :meth:`FluxEvidenceBuilder.build_all` 的输出，含 evidence_grade、support_score、conflict_score、tissue。
     output_dir : Path, optional
 
     Returns
     -------
     list[Path]
-        Saved file paths.
+        写出的图件。
     """
     if scored_df.empty:
         return []
 
     out = output_dir or cfg.PLOTS_DIR
     out.mkdir(parents=True, exist_ok=True)
-
-    confidence_colors = cfg.PLOT_COLORS.get("confidence", {
-        "High": "#1B7837",
-        "Medium": "#762A83",
-        "Low": "#F4A582",
-        "Insufficient": "#D9D9D9",
-    })
+    colors = {**_DEFAULT_GRADE_COLORS, **cfg.PLOT_COLORS.get("evidence_grade", {})}
     saved: list[Path] = []
 
-    # 1. Overall score histogram with confidence bands
-    fig, ax = plt.subplots(figsize=(10, 6))
-    scores = scored_df["total_score"].values
-    ax.hist(scores, bins=30, color="#4C72B0", alpha=0.7, edgecolor="white")
-
-    # Add confidence threshold lines
-    thresholds = cfg.PLOT_COLORS  # not ideal but use scoring thresholds
-    for label, color in confidence_colors.items():
-        pass  # thresholds are in config.scoring, not easily accessible here
-
-    ax.axvline(3.0, color="#1B7837", linestyle="--", alpha=0.7, label="High (3.0)")
-    ax.axvline(2.0, color="#762A83", linestyle="--", alpha=0.7, label="Medium (2.0)")
-    ax.axvline(1.0, color="#F4A582", linestyle="--", alpha=0.7, label="Low (1.0)")
-    ax.set_xlabel("Total Multi-Omics Score")
-    ax.set_ylabel("Count")
-    ax.set_title("Distribution of Multi-Omics Integration Scores", fontweight="bold")
-    ax.legend()
-    ax.grid(alpha=0.3)
+    # 1. 证据等级分布
+    counts = scored_df["evidence_grade"].value_counts()
+    grades = [g for g in GRADE_ORDER if g in counts.index] + [g for g in counts.index if g not in GRADE_ORDER]
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.bar(grades, [counts[g] for g in grades], color=[colors.get(g, "#999999") for g in grades],
+           edgecolor="#555555", linewidth=0.5)
+    ax.set_ylabel("Reactions")
+    ax.set_title("Evidence Grade Distribution", fontweight="bold")
+    ax.grid(axis="y", alpha=0.3)
+    plt.xticks(rotation=30, ha="right")
     plt.tight_layout()
-    p = out / "score_distribution.png"
-    fig.savefig(p, dpi=300)
+    path = out / "evidence_grades.png"
+    fig.savefig(path, dpi=300)
     plt.close(fig)
-    saved.append(p)
+    saved.append(path)
 
-    # 2. Confidence level pie chart
-    fig2, ax2 = plt.subplots(figsize=(7, 7))
-    counts = scored_df["confidence"].value_counts()
-    colors = [confidence_colors.get(c, "#999999") for c in counts.index]
-    wedges, texts, autotexts = ax2.pie(
-        counts.values, labels=counts.index, colors=colors,
-        autopct="%1.1f%%", startangle=90, textprops={"fontsize": 11},
-    )
-    ax2.set_title("Confidence Level Distribution", fontweight="bold")
-    fig2.savefig(out / "confidence_pie.png", dpi=300)
+    # 2. 支持度与冲突度
+    fig2, ax2 = plt.subplots(figsize=(7, 6))
+    for grade in grades:
+        rows = scored_df[scored_df["evidence_grade"] == grade]
+        ax2.scatter(rows["support_score"], rows["conflict_score"], s=18, alpha=0.75,
+                    color=colors.get(grade, "#999999"), label=grade, edgecolor="none")
+    ax2.set_xlabel("Support score")
+    ax2.set_ylabel("Conflict score")
+    ax2.set_xlim(-0.02, 1.02)
+    ax2.set_ylim(-0.02, 1.02)
+    ax2.set_title("Support vs Conflict per Reaction", fontweight="bold")
+    ax2.legend(fontsize=8, frameon=False)
+    ax2.grid(alpha=0.3)
+    plt.tight_layout()
+    path = out / "support_conflict.png"
+    fig2.savefig(path, dpi=300)
     plt.close(fig2)
-    saved.append(out / "confidence_pie.png")
+    saved.append(path)
 
-    # 3. Score by tissue (boxplot)
-    if "tissue" in scored_df.columns:
-        tissues = sorted(scored_df["tissue"].unique())
-        if len(tissues) > 1:
-            fig3, ax3 = plt.subplots(figsize=(max(8, len(tissues) * 1.5), 6))
-            data_by_tissue = [
-                scored_df.loc[scored_df["tissue"] == t, "total_score"].values
-                for t in tissues
-            ]
-            bp = ax3.boxplot(data_by_tissue, labels=tissues, patch_artist=True)
-            tissue_colors = cfg.PLOT_COLORS.get("tissue", {})
-            for patch, tissue in zip(bp["boxes"], tissues):
-                patch.set_facecolor(tissue_colors.get(tissue, "#4C72B0"))
-                patch.set_alpha(0.6)
-            ax3.set_ylabel("Total Score")
-            ax3.set_title("Score Distribution by Tissue", fontweight="bold")
-            ax3.grid(axis="y", alpha=0.3)
-            plt.xticks(rotation=30, ha="right")
-            plt.tight_layout()
-            fig3.savefig(out / "score_by_tissue.png", dpi=300)
-            plt.close(fig3)
-            saved.append(out / "score_by_tissue.png")
+    # 3. 各组织的支持度
+    tissues = sorted(scored_df["tissue"].unique()) if "tissue" in scored_df.columns else []
+    if len(tissues) > 1:
+        fig3, ax3 = plt.subplots(figsize=(max(8, len(tissues) * 1.5), 6))
+        bp = ax3.boxplot([scored_df.loc[scored_df["tissue"] == t, "support_score"].values for t in tissues],
+                         patch_artist=True)
+        ax3.set_xticks(range(1, len(tissues) + 1), [cfg.TISSUE_LABELS.get(t, t) for t in tissues])
+        tissue_colors = cfg.PLOT_COLORS.get("tissue", {})
+        for patch, tissue in zip(bp["boxes"], tissues):
+            patch.set_facecolor(tissue_colors.get(tissue, "#4C72B0"))
+            patch.set_alpha(0.6)
+        ax3.set_ylabel("Support score")
+        ax3.set_title("Support Score by Tissue", fontweight="bold")
+        ax3.grid(axis="y", alpha=0.3)
+        plt.xticks(rotation=30, ha="right")
+        plt.tight_layout()
+        path = out / "support_by_tissue.png"
+        fig3.savefig(path, dpi=300)
+        plt.close(fig3)
+        saved.append(path)
 
-    # 4. Score by comparison (boxplot)
-    if "comparison" in scored_df.columns:
-        comparisons = sorted(scored_df["comparison"].unique())
-        if len(comparisons) > 1:
-            fig4, ax4 = plt.subplots(figsize=(max(8, len(comparisons) * 2), 6))
-            data_by_comp = [
-                scored_df.loc[scored_df["comparison"] == c, "total_score"].values
-                for c in comparisons
-            ]
-            labels = [cfg.COMP_LABELS.get(c, c) for c in comparisons]
-            ax4.boxplot(data_by_comp, labels=labels)
-            ax4.set_ylabel("Total Score")
-            ax4.set_title("Score Distribution by Comparison", fontweight="bold")
-            ax4.grid(axis="y", alpha=0.3)
-            plt.xticks(rotation=30, ha="right")
-            plt.tight_layout()
-            fig4.savefig(out / "score_by_comparison.png", dpi=300)
-            plt.close(fig4)
-            saved.append(out / "score_by_comparison.png")
-
-    print(f"  [scoring] Saved {len(saved)} scoring plots")
+    print(f"  [evidence] Saved {len(saved)} evidence profile plots")
     return saved

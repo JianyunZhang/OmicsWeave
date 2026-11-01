@@ -42,7 +42,7 @@ from omicsweave.integration.loaders import (
     MetabolomicsLoader,
 )
 from omicsweave.integration.methods import (
-    FluxOmicsScorer,
+    FluxEvidenceBuilder,
     PathwayConvergenceAnalyzer,
 )
 from omicsweave.integration.plotting import (
@@ -55,7 +55,7 @@ from omicsweave.integration.plotting import (
     plot_tca_cycle,
     plot_convergence_heatmap,
     plot_tissue_flux_overview,
-    plot_score_distribution,
+    plot_evidence_profile,
 )
 from omicsweave.integration.report import generate_report
 from omicsweave.integration.input_audit import build_input_audit
@@ -191,9 +191,9 @@ def run_pipeline(
 
     # ---- 3. Scoring ----
     print("--- Scoring Reactions ---")
-    scorer = FluxOmicsScorer(cfg)
+    scorer = FluxEvidenceBuilder(cfg)
 
-    scored_df = scorer.score_all(
+    scored_df = scorer.build_all(
         mfa_diff=mfa_data["diff"],
         tx_data=tx_data["de"],
         prot_data=prot_data["diff"],
@@ -202,8 +202,8 @@ def run_pipeline(
 
     if not scored_df.empty:
         # Merged table → common/
-        scored_df.to_csv(common_dir / "flux_omics_scores.csv", index=False, encoding="utf-8-sig")
-        print(f"  Saved: common/flux_omics_scores.csv ({len(scored_df)} reactions)")
+        scored_df.to_csv(common_dir / "flux_evidence_profile.csv", index=False, encoding="utf-8-sig")
+        print(f"  Saved: common/flux_evidence_profile.csv ({len(scored_df)} reactions)")
 
         evidence_df = scorer.get_evidence_table()
         if not evidence_df.empty:
@@ -223,8 +223,8 @@ def run_pipeline(
         # Pathway aggregation
         pathway_df = scorer.aggregate_by_pathway(scored_df)
         if not pathway_df.empty:
-            pathway_df.to_csv(common_dir / "pathway_scores.csv", index=False, encoding="utf-8-sig")
-            print(f"  Saved: common/pathway_scores.csv ({len(pathway_df)} entries)")
+            pathway_df.to_csv(common_dir / "pathway_evidence_profile.csv", index=False, encoding="utf-8-sig")
+            print(f"  Saved: common/pathway_evidence_profile.csv ({len(pathway_df)} entries)")
 
             n_path = _save_tissue_csvs(
                 pathway_df, cfg.output_dir, "01_do_results",
@@ -321,7 +321,7 @@ def run_pipeline(
 
     # Scoring plots (global)
     if not scored_df.empty:
-        plot_score_distribution(
+        plot_evidence_profile(
             scored_df=scored_df,
             output_dir=plots_dir,
         )

@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+通量锚定（``flux_anchored``）：以 MFA 差异通量为锚点，对每个（反应, 组织, 比较），按反应 → 基因 / 蛋白 /
+代谢物的策展映射，从其他组学的差异结果中提取证据，汇总为多维证据画像（支持、冲突、覆盖、稳定性、设计等级、
+证据等级），见 :class:`omicsweave.integration.methods.flux_evidence.FluxEvidenceBuilder`。
+
+读取源结果包中各组学的 ``differential.parquet``，前提：MFA 与至少一个其他组学有差异结果。统一差异结果表按
+证据构建器的输入整理，比较按 ``contrast_id`` 对应：
+
+- MFA：每个比较一张表，``feature_id`` 为反应 ID；p 值与 FDR 取主检验路径，Cohen's d 取附加列 ``cohen_d``
+  （没有该列时用 ``effect_size``），标准误取附加列 ``log2fc_se``；任一组生物学重复少于 2 个或只给效应量时，
+  MFA 显著性判定允许改用效应量（与旧流程的 ``stat_note`` 相同）；
+- 转录组：每个（比较, 组织）一张表，基因按 ``feature_id``（类型见数据集的 ``feature_id_type``）匹配；
+- 蛋白组、代谢组：每个组织一张宽表，统计量列带比较后缀（``log2fc_<比较>`` 等）。蛋白按 ``feature_id`` 与
+  附加列 ``uniprot_id`` 匹配；代谢物按名称（``feature_name``，没有时用 ``feature_id``）与 HMDB / KEGG /
+  ChEBI 附加列匹配；
+- 各层的有效样本量取 ``n_numerator + n_denominator``。
+
+参数（``integration.parameters.flux_anchored``）：``pval_cutoff`` / ``log2fc_cutoff``（特征显著的阈值）、
+``omics_cutoffs``（按组学覆盖阈值）、``fallback_mode``（样本量不足时的效应量判定）、``evidence_profile``
+（证据画像的阈值与权重；``mfa_inference_unit`` 默认取 MFA 结果的推断单位），含义同旧流程配置中的
+``scoring``；``tissue_map`` 把 MFA 的组织名映射到其他组学的组织名。
+
+输出（``integration/flux_anchored/tables/``）：
+
+- ``flux_evidence_profile.parquet``：每个（反应, 组织, 比较）一行的证据画像，另列出各层与通量方向一致的特征；
+- ``flux_evidence_table.parquet``：每个（反应, 组织, 比较, 层）一行的证据长表；
+- ``flux_pathway_profile.parquet``：按（比较, 组织, 通路）汇总的证据画像。
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+from omicsweave.contract.dataset import META_FILE
+from omicsweave.contract.tables import read_differential
+from omicsweave.core.model import IntegrationMode, Omics
+from omicsweave.core.run import RunContext, RunError
+
+from ..integrate import IntegrationRun, mode_dir
+from ..methods.flux_evidence import FluxEvidenceBuilder
+
+MODE = IntegrationMode.FLUX_ANCHORED
+DEFAULTS: dict[str, Any] = {
+    "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "omics_cutoffs": {}, "fallback_mode": {},
+    "evidence_profile": {}, "tissue_map": {},
+}
+# 转录组 feature_id_type → 证据构建器按 ID 匹配基因的列；其余类型按基因符号匹配
+_GENE_ID_COLUMNS = {"ensembl_gene_id": "ensembl_gene_id", "ensembl_id": "ensembl_gene_id",
+                    "ncbi_gene_id": "ncbi_gene_id", "entrez_id": "ncbi_gene_id"}
+# 统一结果表中的附加列 → 证据构建器的列
+_PROTEIN_IDS = {"uniprot_id": "uniprot_id"}
+_METABOLITE_IDS = {"hmdb": "hmdb_id", "kegg_compound": "kegg_compound", "chebi": "chebi_id"}
+_MFA_ANNOTATIONS = ("kegg_pathway", "ec_number", "kegg_reaction", "reactome_id")
+# 证据画像中各层与通量方向一致的特征
+_CONCORDANT = {"tx_details": ("concordant_genes", "tx_concordant_features"),
+               "prot_details": ("concordant_proteins", "prot_concordant_features"),
+               "metab_details": ("concordant_metabolites", "metab_concordant_features")}
+
+
+def _numeric(rows: pd.DataFrame, column: str) -> pd.Series:
+    if column not in rows.columns:
+        return pd.Series(np.nan, index=rows.index)
+    return pd.to_numeric(rows[column], errors="coerce")
+
+
+def _n_eff(rows: pd.DataFrame) -> pd.Series:
+    return _numeric(rows, "n_numerator") + _numeric(rows, "n_denominator")
+
+
+def mfa_frames(diff: pd.DataFrame, tissue_map: dict[str, str] | None = None) -> dict[str, pd.DataFrame]:
+    """MFA 差异结果 → ``{比较: 每行一个（反应, 组织）}``，列名同旧流程的 MFA 差异通量表。"""
+    tissue_map = tissue_map or {}
+    frames: dict[str, pd.DataFrame] = {}
+    for contrast, rows in diff.groupby("contrast_id", sort=True):
+        effect_only = rows["method"].astype(str).eq("effect_size_only").to_numpy()
+        low_n = (rows[["n_numerator", "n_denominator"]].min(axis=1) < 2).to_numpy()
+        frame = pd.DataFrame({
+            "flux_id": rows["feature_id"].astype(str),
+            "tissue": rows["tissue"].astype(str).map(lambda t: tissue_map.get(t, t)),
+            "flux_log2fc": _numeric(rows, "log2fc"),
+            "flux_pvalue": _numeric(rows, "pvalue"),
+            "flux_fdr": _numeric(rows, "padj"),
+            "cohen_d": _numeric(rows, "cohen_d" if "cohen_d" in rows.columns else "effect_size"),
+            "stat_note": np.select([low_n & ~effect_only, effect_only],
+                                   ["low_n_configured_statistical_test", "fitting_variance_only"],
+                                   "biological_replicates"),
+            "flux_se": _numeric(rows, "log2fc_se"),
+            "n_eff": _n_eff(rows),
+            "selection_probability": _numeric(rows, "selection_probability"),
+            "direction_stability": _numeric(rows, "direction_stability"),
+        })
+        for column in _MFA_ANNOTATIONS:
+            if column in rows.columns:
+                frame[column] = rows[column]
+        frames[str(contrast)] = frame.reset_index(drop=True)
+    return frames
+
+
+def transcriptomics_frames(diff: pd.DataFrame, id_types: dict[str, str] | None = None,
+                           ) -> dict[str, dict[str, pd.DataFrame]]:
+    """转录组差异结果 → ``{比较: {组织: 每行一个基因}}``。``id_types`` 为各组织数据集的 ``feature_id_type``。"""
+    id_types = id_types or {}
+    frames: dict[str, dict[str, pd.DataFrame]] = {}
+    for (contrast, tissue), rows in diff.groupby(["contrast_id", "tissue"], sort=True):
+        ids = rows["feature_id"].astype(str)
+        names = rows["feature_name"].fillna(ids) if "feature_name" in rows.columns else ids
+        frame = pd.DataFrame({
+            "gene": names.astype(str),
+            "log2fc": _numeric(rows, "log2fc"),
+            "pvalue": _numeric(rows, "pvalue"),
+            "padj": _numeric(rows, "padj"),
+            "evidence_level": rows["evidence_level"] if "evidence_level" in rows.columns else "",
+            "lfcSE": _numeric(rows, "lfc_se"),
+            "n_eff": _n_eff(rows),
+        })
+        id_column = _GENE_ID_COLUMNS.get(id_types.get(str(tissue), ""))
+        if id_column:
+            frame[id_column] = ids
+        for column in ("n_batches", "batch_ids"):
+            if column in rows.columns:
+                frame[column] = rows[column]
+        frames.setdefault(str(contrast), {})[str(tissue)] = frame.reset_index(drop=True)
+    return frames
+
+
+def _wide_frames(diff: pd.DataFrame, identity: dict[str, str], stats: dict[str, str]) -> dict[str, pd.DataFrame]:
+    """每个组织一张宽表：``identity``（源列 → 列名）每个特征一个值，``stats``（源列 → 列名前缀）按比较加后缀。"""
+    frames: dict[str, pd.DataFrame] = {}
+    for tissue, rows in diff.groupby("tissue", sort=True):
+        features = rows.drop_duplicates("feature_id").set_index("feature_id", drop=False)
+        frame = pd.DataFrame({target: features[source] for source, target in identity.items()
+                              if source in features.columns}, index=features.index)
+        for contrast, part in rows.groupby("contrast_id", sort=True):
+            part = part.set_index("feature_id")
+            for source, prefix in stats.items():
+                if source in part.columns:
+                    frame[f"{prefix}_{contrast}"] = part[source].reindex(frame.index).to_numpy()
+        frames[str(tissue)] = frame.reset_index(drop=True)
+    return frames
+
+
+def proteomics_frames(diff: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """蛋白组差异结果 → ``{组织: 每行一个蛋白}``，列同旧流程的蛋白组宽表（``log2fc_<比较>`` 等）。"""
+    diff = diff.assign(n_eff=_n_eff(diff))
+    if "evidence_level" in diff.columns:
+        # 旧流程的蛋白组宽表中，经过检验的蛋白记为 inferential
+        diff["evidence"] = np.where(diff["evidence_level"].eq("statistical_test"), "inferential",
+                                    diff["evidence_level"].astype(str))
+    return _wide_frames(diff, {"feature_id": "protein", **_PROTEIN_IDS},
+                        {"log2fc": "log2fc", "pvalue": "pval", "padj": "padj", "lfc_se": "se", "n_eff": "n_eff",
+                         "evidence": "evidence"})
+
+
+def metabolomics_frames(diff: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """代谢组差异结果 → ``{组织: 每行一个代谢物}``，列同旧流程的代谢组宽表（``log2fc_<比较>`` 等）。"""
+    ids = diff["feature_id"].astype(str)
+    names = diff["feature_name"].fillna(ids) if "feature_name" in diff.columns else ids
+    diff = diff.assign(compound=names.astype(str), n_eff=_n_eff(diff))
+    return _wide_frames(diff, {"compound": "compound", **_METABOLITE_IDS},
+                        {"log2fc": "log2fc", "pvalue": "pval", "padj": "fdr", "n_eff": "n_eff"})
+
+
+def _transcriptomics_id_types(source: Path) -> dict[str, str]:
+    types = {}
+    for path in sorted(source.glob(f"omics/{Omics.TRANSCRIPTOMICS.value}/data/*/{META_FILE}")):
+        types[path.parent.name] = str(json.loads(path.read_text(encoding="utf-8")).get("feature_id_type", ""))
+    return types
+
+
+def profile_table(profile: pd.DataFrame, roles: dict[str, str]) -> pd.DataFrame:
+    """证据画像 → 可写入 parquet 的表：去掉各层明细（字典），补上比较角色与各层方向一致的特征。"""
+    if profile.empty:
+        return pd.DataFrame(columns=["flux_id", "tissue", "comparison", "contrast_role"])
+    out = profile.drop(columns=[c for c in profile.columns if c.endswith("_details")])
+    out.insert(int(out.columns.get_loc("comparison")) + 1, "contrast_role", out["comparison"].map(roles))
+    for details, (key, column) in _CONCORDANT.items():
+        out[column] = profile[details].map(lambda d: ";".join(str(f) for f in (d or {}).get(key, [])))
+    return out
+
+
+def scoring_config(params: dict[str, Any], mfa: pd.DataFrame) -> dict[str, Any]:
+    """证据构建器的 ``scoring``；MFA 推断单位默认取差异结果中的 ``inference_unit``（各行一致时）。"""
+    scoring = {k: v for k, v in params.items() if k != "tissue_map"}
+    profile = dict(scoring.get("evidence_profile") or {})
+    units = mfa["inference_unit"].dropna().unique() if "inference_unit" in mfa.columns else []
+    if "mfa_inference_unit" not in profile and len(units) == 1:
+        profile["mfa_inference_unit"] = str(units[0])
+    scoring["evidence_profile"] = profile
+    return scoring
+
+
+def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> IntegrationRun:
+    params = {**DEFAULTS, **parameters}
+    unknown = sorted(set(parameters) - set(DEFAULTS))
+    if unknown:
+        raise RunError(f"integration.parameters.{MODE.value} 中有无法识别的参数：{'、'.join(unknown)}"
+                       f"（可用：{'、'.join(DEFAULTS)}）")
+    paths = {p.parent.parent.name: p for p in sorted(source.glob("omics/*/tables/differential.parquet"))}
+    if Omics.MFA.value not in paths or len(paths) < 2:
+        found = "、".join(paths) or "没有"
+        raise RunError(f"{MODE.value} 需要 MFA 与至少 1 个其他组学的差异结果；结果包 {source.name} 中有：{found}。"
+                       f"请先对启用的组学运行 omicsweave run（含 differential 步骤）")
+    tables = {omics: read_differential(path) for omics, path in paths.items()}
+    empty = pd.DataFrame(columns=["contrast_id", "tissue", "feature_id", "evidence_level"])
+
+    tissue_map = {str(k): str(v) for k, v in (params["tissue_map"] or {}).items()}
+    mfa = mfa_frames(tables[Omics.MFA.value], tissue_map)
+    tx = transcriptomics_frames(tables.get(Omics.TRANSCRIPTOMICS.value, empty), _transcriptomics_id_types(source))
+    prot = proteomics_frames(tables.get(Omics.PROTEOMICS.value, empty))
+    metab = metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty))
+
+    builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={},
+                                                  scoring=scoring_config(params, tables[Omics.MFA.value])))
+    profile = builder.build_all(mfa, tx, prot, metab)
+    roles = dict(zip(tables[Omics.MFA.value]["contrast_id"].astype(str),
+                     tables[Omics.MFA.value]["contrast_role"].astype(str)))
+    out = mode_dir(ctx, MODE) / "tables"
+    out.mkdir(parents=True)
+    profile_table(profile, roles).to_parquet(out / "flux_evidence_profile.parquet", index=False)
+    builder.get_evidence_table().to_parquet(out / "flux_evidence_table.parquet", index=False)
+    builder.aggregate_by_pathway(profile).to_parquet(out / "flux_pathway_profile.parquet", index=False)
+
+    record = IntegrationRun(MODE, inputs=list(paths.values()),
+                            parameters={**params, "omics": sorted(paths)})
+    other_tissues = {t for frames in tx.values() for t in frames} | set(prot) | set(metab)
+    unmatched = sorted({t for frame in mfa.values() for t in frame["tissue"]} - other_tissues)
+    if unmatched:
+        record.notes.append(f"MFA 组织 {'、'.join(unmatched)} 在其他组学中没有同名组织，只有 MFA 层证据；"
+                            f"名称不同时用 integration.parameters.{MODE.value}.tissue_map 对应")
+    contrasts = {c for omics, t in tables.items() if omics != Omics.MFA.value for c in t["contrast_id"].astype(str)}
+    missing = sorted(set(mfa) - contrasts)
+    if missing:
+        record.notes.append(f"比较 {'、'.join(missing)} 只有 MFA 差异结果，其他组学没有对应比较")
+    return record

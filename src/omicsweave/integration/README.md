@@ -2,7 +2,7 @@
 
 ## 概述
 
-本模块提供一套**解耦合、YAML 配置驱动的多组学联合分析框架**。MFA 反应仍作为生物学锚点，但主要结论由连续的多维证据画像表达；旧 0–4 分矩阵仅作为 `legacy_*` 兼容结果保留，不再承担跨实验置信度解释。
+本模块提供一套**解耦合、YAML 配置驱动的多组学联合分析框架**。MFA 反应作为生物学锚点，结论由连续的多维证据画像表达，这是唯一的整合结果；旧版的 0–4 加和总分与 High/Medium/Low 置信度已删除（阶段 2.8）。
 
 旧版（v2 打分矩阵）技术文档已归档到 [`docs/history/integration_pipeline_evaluation_v2.md`](../../../docs/history/integration_pipeline_evaluation_v2.md)，仅供追溯。
 
@@ -19,7 +19,7 @@
 
 1. **反应级多维证据画像** — 输出 support、conflict、coverage、stability、design grade 和 evidence grade
 2. **统一 EvidenceTable** — 区分 no_data/no_mapping/no_match/no_signal/opposite，并保留 effect、SE、qvalue、n_eff、映射质量和证据模式
-3. **旧评分兼容层** — 原 MFA gate + 0–4 分继续写入 `legacy_*` 字段，用于历史结果复现
+3. **MFA 显著性判定** — 通过判定的反应作为方向锚点；判定只影响 MFA 层，不影响其他组学的证据评估
 4. **跨组学通路融合** — 保留通路名称交集，并新增 Fisher 统计融合与 RRA 排名融合
 5. **数据可用性热图** — 各组织 × 各组学数据覆盖
 6. **差异特征汇总** — 各组织各组学上调/下调特征数
@@ -52,13 +52,17 @@ omicsweave/integration/
     transcriptomics_loader.py            # DE + GSEA + Enrichr
     proteomics_loader.py                 # 蛋白质 DE + 通路（含比较名翻转）
     metabolomics_loader.py               # 代谢物 DE + 通路
-  integration/
+  methods/
     __init__.py
     batch_effect_meta.py                 # 蛋白/代谢组结果级批次 Meta
     evidence_profile.py                  # EvidenceTable + support/conflict/coverage + 证据分级
-    stability.py                         # 生物学重复 bootstrap + 标签置换校准
-    flux_omics_scorer.py                 # 新证据画像接入 + 旧矩阵兼容层
+    flux_evidence.py                     # flux-anchored 证据构建器：反应 → 基因/蛋白/代谢物的证据提取
     pathway_convergence.py               # 名称交集 + Fisher/RRA 融合 + BH FDR
+    cross_tissue_pathway_scorer.py       # 跨组织策展通路评分
+  modes/
+    flux_anchored.py                     # omicsweave integrate：统一差异结果表 → 证据画像
+    pathway_convergence.py               # omicsweave integrate：统一富集结果表 → 通路融合
+  integrate.py                           # omicsweave integrate 入口
   plotting/
     __init__.py
     _config.py                           # 绑图全局状态（统一阈值、颜色、标签）
@@ -66,7 +70,7 @@ omicsweave/integration/
     volcano_plots.py                     # MFA 火山图
     heatmap_plots.py                     # 通路热图 + TCA + 收敛 + 通量概览
     pca_plots.py                         # PCA 散点图 + scree plot
-    scoring_plots.py                     # 评分分布 + 置信度饼图
+    scoring_plots.py                     # 证据等级分布 + 支持度/冲突度 + 各组织支持度
   report.py                              # Markdown 报告生成
   run_multiomics_analysis.py             # CLI 入口
   run_multiomics_harmonization.py        # 样本级协调 CLI
@@ -104,7 +108,7 @@ analysis_results/{project_id}/
 
 ```bash
 omicsweave run --experiment <id>                                   # 各组学写出统一结果表
-omicsweave integrate --experiment <id> --mode pathway_convergence  # 读取最近一次运行的结果表
+omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最近一次运行的结果表
 ```
 
 `omicsweave integrate` 只读取结果包中的统一结果表，结果写入新的结果包（`integration/<模式>/`），运行清单记录源结果包。
@@ -112,7 +116,13 @@ omicsweave integrate --experiment <id> --mode pathway_convergence  # 读取最�
 
 - `pathway_convergence`（已接入）：同一组织、同一比较下各组学通路富集结果的融合（组学内 Bonferroni、组学间 Fisher、BH 校正，
   与本模块 `PathwayConvergenceAnalyzer` 相同），附各组学的效应方向与方向一致性，以及显著通路的两两交集。
-- `flux_anchored`、`sample_level`：待接入，暂用下文的旧命令。
+- `flux_anchored`（已接入）：以 MFA 差异通量为锚点，读取各组学的统一差异结果表（`differential.parquet`），
+  按反应 → 基因/蛋白/代谢物映射提取证据，输出多维证据画像 `flux_evidence_profile`、证据长表 `flux_evidence_table`
+  与通路汇总 `flux_pathway_profile`。需要 MFA 与至少 1 个其他组学。参数 `pval_cutoff`、`log2fc_cutoff`、`omics_cutoffs`、
+  `fallback_mode`、`evidence_profile` 与旧配置的 `scoring` 同义（`evidence_profile.mfa_inference_unit` 默认取 MFA 结果的推断单位），
+  `tissue_map` 把 MFA 的组织名对应到其他组学。与旧命令的差别：MFA 的 p 值与 FDR 取差异分析的主检验路径
+  （旧加载器总是优先取 Mann-Whitney）；蛋白组、代谢组的有效样本量取自统一结果表的 `n_numerator + n_denominator`。
+- `sample_level`：待接入，暂用下文的旧命令。
 
 ---
 
@@ -281,11 +291,11 @@ layer_evidence =
 | `design_grade` | A/B/C/D | 独立于生物学一致性的实验设计质量 |
 | `evidence_grade` | 分类 | Convergent、Single-layer、Exploratory、Conflicting、No-signal 或 Not-assessable |
 
-`Replicated` 只应在至少两个 estimand 可比的实验完成跨实验复现后赋值；单实验反应评分器不会自行产生该标签。
+`Replicated` 只应在至少两个 estimand 可比的实验完成跨实验复现后赋值；单实验的证据构建器不会自行产生该标签。
 
 ### 当前实施边界
 
-- 已实现：EvidenceTable、多维画像、旧分兼容、MFA gate 与新画像解耦、通路 Fisher/RRA 融合、comparison 隔离、跨组织策展评分降级和输入来源审计。
+- 已实现：EvidenceTable、多维画像（唯一整合结果）、MFA 显著性判定与其他组学的证据评估解耦、通路 Fisher/RRA 融合、comparison 隔离、跨组织策展评分降级和输入来源审计。
 - 已实现：MFA 每只动物只贡献一个通量估计，输出 log2FC SE、Hedges' g；可选 biological-replicate bootstrap/标签置换。历史产物只有在重新运行 MFA 后才会具备这些字段。
 - 已实现：RNA 显式 `sample_batches` 时使用可辨识的 `~batch + condition` 设计；完全混淆会拒绝推断。也可逐批分析后用 protocol 级随机效应 Meta。
 - 已实现：蛋白质组/代谢组可读取多个已独立完成 QC/差异分析的批次目录，按同一效应尺度与 SE 做随机效应 Meta；缺少不确定性的批次只记为 observed，不计入 pooled 推断。
@@ -331,22 +341,20 @@ params:
 `data_reliability`。`batch_qc.csv` 的 `suggested_batch_reliability` 只是审核建议，
 不会被流程自动复制到评分配置，避免把未经确认的诊断结果再次计权。
 
-## 旧打分矩阵（兼容结果）
+## MFA 显著性判定（方向锚点）
 
-以下 MFA gate、0–4 分和 High/Medium/Low 仅用于复现旧版本结果。它们保留在 `legacy_*` 字段以及同名兼容列中，不作为新的证据等级或跨实验比较指标。
+通过判定的 MFA 差异反应在证据画像中 MFA 层记为 support，作为其他组学方向判断的锚点；未通过的反应 MFA 层记为 no_signal，
+其他组学照常评估。旧版在此之上的 0–4 加和总分、固定权重与 High/Medium/Low 置信度已在阶段 2.8 删除，不再输出 `legacy_*` 字段。
 
-### MFA 入场门槛（Gate）
-
-旧矩阵中，并非所有 MFA 差异反应都进入打分流程。反应需通过 **MFA gate** 才获得 legacy 分数，未通过者的 `legacy_total_score=0`。新证据画像仍会评估其他可用组学。
-
-**Gate 条件：FDR < 0.05 AND |Cohen's d| > 0.8（大效应量）**
+**判定条件：FDR < 0.05 且 |Cohen's d| > 0.8（大效应量）**。样本量不足以给出 p 值时（如每组 1 只），|Cohen's d| ≥ 0.8 且
+|log2FC| ≥ 0.58 按 `effect_size_only` 通过（`fallback_mode`）。
 
 | 指标 | 阈值 | 说明 |
 |---|---|---|
 | FDR（Benjamini-Hochberg 校正后 p 值） | < 0.05 | 控制多重检验假阳性 |
 | Cohen's d（效应量） | \|d\| > 0.8 | 要求大效应量（Cohen 标准），而非仅统计显著 |
 
-**限制：** MFA 差异分析的统计检验基于 MCMC 拟合点（每样本 ~150 次迭代，IQR 过滤后 ~75 点），而非生物学重复（n=3-4）。将同一只小鼠的拟合点作为独立样本会造成伪重复。FDR + Cohen's d 双阈值只能作为旧流程的启发式筛选，不能修复独立观测单位错误；新画像默认把该 MFA 证据标记为 `pseudo_replicate`。
+**限制：** 旧版 MFA 差异分析的统计检验基于 MCMC 拟合点（每样本 ~150 次迭代，IQR 过滤后 ~75 点），而非生物学重复（n=3-4）。将同一只小鼠的拟合点作为独立样本会造成伪重复。FDR + Cohen's d 双阈值只是启发式筛选，不能修复独立观测单位错误；拟合点层面的推断在证据画像中标记为 `pseudo_replicate`，只给探索性设计等级。`omicsweave run` 的 MFA 差异分析以动物为推断单位，`flux_anchored` 据此不再降级。
 
 Gate 结果示例（本项目 HFD/HSD/LFD 实验，1191 个反应）：
 
@@ -355,116 +363,6 @@ Gate 结果示例（本项目 HFD/HSD/LFD 实验，1191 个反应）：
 | HFD_vs_LFD | 397 | 52 | 13.1% |
 | HSD_vs_LFD | 397 | 114 | 28.7% |
 | HFD_vs_HSD | 397 | 82 | 20.7% |
-
-### 四层打分体系
-
-通过 gate 的反应，在 MFA、转录组、蛋白质组、代谢组四个组学层分别打分，各层得分加总得到总分。
-
-| 组学层 | 满分 | 权重 | 子项组成 |
-|---|---|---|---|
-| **MFA** | 1.0 | ×1.0 | sig(0/0.5) + effect(0/0.25/0.5) |
-| **转录组** | 1.0 | ×1.0 | sig(0/0.4) + dir(0/0.3) + effect(0/0.15/0.3) |
-| **蛋白质组** | 1.2 | ×1.2 | sig(0/0.5) + dir(0/0.15 或 0/0.3) + effect(0/0.2/0.4) |
-| **代谢组** | 0.8 | ×0.8 | sig(0/0.3) + dir(0/0.15/0.3) + effect(0/0.1/0.2) |
-| **总分** | **4.0** | | |
-
-### 子项评分细则
-
-#### sig_score（显著性分）
-
-**含义**：该反应映射的基因/蛋白质/代谢物中，是否存在达到显著性阈值的差异条目。为二值判断（0 或满分），有任一显著即得满分。
-
-| 组学 | 满分 | 显著性判定标准 |
-|---|---|---|
-| MFA | 0.3 | FDR < 0.05 |
-| 转录组 | 0.4 | 任一映射基因 padj < 0.05 且 \|log2FC\| > 0.58 |
-| 蛋白质组 | 0.5 | 任一映射蛋白 pval < 0.05 且 \|log2FC\| > 0.58 |
-| 代谢组 | 0.3 | 任一映射代谢物 fdr < 0.05 且 \|log2FC\| > 0.58 |
-
-蛋白质组满分最高（0.5），因为酶蛋白是通量反应的直接执行者。
-
-#### dir_score（方向一致性分）
-
-**含义**：差异组学的变化方向是否与 MFA 通量变化方向一致。
-
-| 组学 | 满分 | 判定逻辑 |
-|---|---|---|
-| 转录组 | 0.3 | 任一显著**直接酶/直接转运基因**的 log2FC 与通量同向；间接基因不计方向分 |
-| 蛋白质组 | 0.3 | **直接酶或直接运输执行者**方向一致 = 0.3；间接蛋白仅记录关联 |
-| 代谢组 | 0.3 或 0.15 | **产物**同向一致或**底物**反向一致 = 0.3；**关联**代谢物仅显著 = 0.15 |
-
-蛋白质组只允许直接催化酶提供方向一致性。没有直接酶的运输/交换反应可把其 transporter 作为直接执行者；upstream regulators、downstream enzymes 和 cofactors 只记录为关联信号，避免抑制因子被错误解释成同向支持。
-
-代谢组的分层处理：映射字典区分底物（substrates）、产物（products）和关联（related），分别判断方向一致性——通量↑时产物丰度↑（同向一致）或底物丰度↓（反向一致）均得 0.3；仅有关联代谢物显著变化但角色不明确得 0.15。优先级：products > substrates > related。
-
-#### effect_score（效应量分）
-
-**含义**：差异变化的幅度大小。使用阶梯函数分级，确保微小差异与巨大差异的得分有明确区分。
-
-**MFA 层** 使用 Cohen's d 分级（因 MFA 效应量用 Cohen's d 衡量更可靠）：
-
-| \|Cohen's d\| 范围 | 级别 | MFA effect_score |
-|---|---|---|
-| < 0.8 | trivial（已不可能，gate 要求 >0.8） | 0 |
-| 0.8 ~ 1.5 | moderate（中等效应） | 0.15 |
-| ≥ 1.5 | large（大效应） | 0.30 |
-
-**转录组/蛋白质组/代谢组** 使用 |log2FC| 分级：
-
-| \|log2FC\| 范围 | 级别 | 转录组 | 蛋白质组 | 代谢组 |
-|---|---|---|---|---|
-| < 0.58 | trivial（微小） | 0 | 0 | 0 |
-| 0.58 ~ 1.0 | moderate（中等） | 0.15 | 0.20 | 0.10 |
-| ≥ 1.0 | large（大） | 0.30 | 0.40 | 0.20 |
-
-#### ~~bio_score（已移除）~~
-
-> v2 版本已移除 bio_score（原 0.4 分）。该子项基于映射表中是否存在 pathway/description 字段，但 96% 的 gate-passed 反应都获得了该分数，区分度极低。0.4 分已平均分配给 sig_score（0.3→0.5）和 effect_score（0.3→0.5），使 MFA 评分完全由统计指标驱动。
-
-### 权重差异的设计理由
-
-| 组学 | 权重 | 理由 |
-|---|---|---|
-| **蛋白质组 ×1.2（最高）** | 蛋白质是酶功能的直接执行者，蛋白质丰度变化与通量变化的因果关系最直接 |
-| **转录组 ×1.0** | 基因表达到蛋白质存在翻译调控和降解差异，间接性较高 |
-| **代谢组 ×0.8（最低）** | 代谢物浓度受多条通路汇聚影响，一对一映射关系最弱 |
-| **MFA ×1.0** | 作为基线层，提供通量本身的统计证据（显著性和效应量） |
-
-### 置信度分级
-
-| 等级 | 总分阈值 | 含义 |
-|---|---|---|
-| **High** | ≥ 3.0 | 3-4 组学层一致支持，强生物学证据 |
-| **Medium** | ≥ 2.0 | 2 组学层支持，中等可信度 |
-| **Low** | ≥ 1.0 | 单组学层支持，需进一步验证 |
-| **Insufficient** | < 1.0 | 未通过 gate 或证据不足 |
-
-### 评分示例
-
-以 `HEX_c`（liver, HSD_vs_LFD）为例（总分 3.54, High）：
-
-```
-MFA (1.0 × 1.0 = 1.0):
-  sig  = 0.5  (FDR < 0.05)
-  effect = 0.5  (|Cohen's d| = 2.88, large)
-
-转录组 (0.85 × 1.0 = 0.7):
-  sig  = 0.4  (有显著差异基因 Hk1/Hk2)
-  dir  = 0.3  (基因上调，通量上调，方向一致)
-  effect = 0.15 (|log2FC| 0.58~1.0, moderate)
-
-蛋白质组 (1.0 × 1.2 = 1.2):
-  sig  = 0.5  (有显著差异蛋白)
-  dir  = 0.3  (直接酶 HK 蛋白方向一致)
-  effect = 0.2  (|log2FC| 0.58~1.0, moderate)
-
-代谢组 (0.7 × 0.8 = 0.64):
-  sig  = 0.3  (有显著差异代谢物)
-  dir  = 0.3  (产物方向一致: G6P↑与通量↑同向)
-  effect = 0.1  (|log2FC| 0.58~1.0, moderate)
-
-总分: 1.0 + 0.7 + 1.2 + 0.64 = 3.54 → High
-```
 
 ---
 
@@ -493,10 +391,10 @@ MFA (1.0 × 1.0 = 1.0):
 
 | 文件 | 说明 |
 |---|---|
-| `common/flux_omics_scores.csv` | 每个 MFA 反应的多维画像；含 `legacy_*` 兼容列 |
+| `common/flux_evidence_profile.csv` | 每个（反应, 组织, 比较）的多维证据画像 |
 | `common/evidence_table.csv` | 每个反应 × 组学层的统一长表，含匹配来源、歧义和缺失原因 |
 | `common/mapping_integrity_audit.csv` | 映射结构错误、ID 冲突、注册表覆盖与别名统计 |
-| `common/pathway_scores.csv` | 通路级 support/conflict/coverage 汇总及旧分兼容列 |
+| `common/pathway_evidence_profile.csv` | 通路级 support/conflict/coverage 汇总与各证据等级的反应数 |
 | `tables/pathway_evidence_long.csv` | 通路融合前的组学来源、概率和排名长表 |
 | `tables/pathway_fusion.csv` | Fisher/RRA 融合结果及 BH FDR |
 | `tables/pathway_convergence.csv` | 兼容用跨组学共享通路详细列表 |
@@ -513,9 +411,9 @@ MFA (1.0 × 1.0 = 1.0):
 | `mfa_volcano_{comp}.png` | MFA 火山图 |
 | `mfa_pathway_condition_heatmap.png` | 通路-条件热图 |
 | `mfa_tca_cross_tissue_heatmap.png` | TCA 循环热图 |
-| `score_distribution.png` | 评分分布直方图 |
-| `confidence_pie.png` | 置信度饼图 |
-| `score_by_tissue.png` | 组织评分箱线图 |
+| `evidence_grades.png` | 证据等级分布 |
+| `support_conflict.png` | 每个反应的支持度与冲突度 |
+| `support_by_tissue.png` | 各组织支持度箱线图 |
 | `pathway_convergence_heatmap.png` | 通路收敛热图 |
 | `differential_summary_{comp}.png` | 差异汇总柱形图 |
 | `tissue_dashboard_{comp}.png` | 组织看板 |
@@ -598,50 +496,10 @@ MFA 是唯一能直接测量代谢通路**实际功能输出**的技术。以功
 - **GEM 多组学集成综述**: Shahreen N, et al. (2026). Multi-omics integration in genome-scale metabolic models: a review of constraint-based approaches. *Mol Omics*. PMID: 41660891
 - **ML 通量预测**: Gonçalves DM, et al. (2023). Predicting metabolic fluxes from omics data via machine learning. *Comput Struct Biotechnol J*. PMID: 37876626
 
-### 旧 Flux-centric 打分矩阵（仅兼容历史结果）
+### 方向一致性判断
 
-下述规则用于解释 `legacy_*` 列和旧图表，不是当前主证据策略。
-
-对每条 MFA 差异反应 × 每个比较 × 每个组织，从四组学层评估一致性：
-
-```
-评分框架 (每条 MFA 差异反应):
-
-0. MFA Gate（入场门槛）
-   FDR < 0.05 AND |Cohen's d| > 0.8 → 通过 gate，进入打分
-   未通过 → 直接 Insufficient (总分 0)
-   注: 使用 FDR + Cohen's d 而非 pvalue + log2FC，
-       是因为 MFA 统计检验基于 MCMC 拟合点(伪重复)，
-       导致 p 值极度膨胀(72-82% 反应 p<0.05)
-
-1. MFA 层 (0-1.0分)
-   - FDR 显著: +0.5
-   - 效应量(|Cohen's d|): 0.8-1.5 → +0.25, ≥1.5 → +0.5
-
-2. 转录组证据 (0-1.0分, ×1.0)
-   - 显著性: 映射基因中有显著 → +0.4
-   - 方向一致: 基因FC方向与通量FC同向 → +0.3
-   - 效应量: |log2FC| 0.58-1.0 → +0.15, ≥1.0 → +0.3
-
-3. 蛋白质组证据 (0-1.2分, ×1.2 权重更高)
-   - 显著性: 映射蛋白中有显著 → +0.5
-   - 方向一致(直接酶): direct_enzymes 方向一致 → +0.3
-   - 方向一致(间接): 仅间接蛋白一致 → +0.15
-   - 效应量: |log2FC| 0.58-1.0 → +0.2, ≥1.0 → +0.4
-
-4. 代谢组证据 (0-0.8分, ×0.8)
-   - 显著性: 映射代谢物中有显著 → +0.3
-   - 产物方向一致: flux↑→product↑ (同向) → +0.3
-   - 底物方向一致: flux↑→substrate↓ (反向) → +0.3
-   - 关联代谢物: 仅显著变化, 方向不确定 → +0.15
-   - 效应量: |log2FC| 0.58-1.0 → +0.1, ≥1.0 → +0.2
-
-总分 0-4.0, 置信度分级:
-  ≥ 3.0: High (3-4 组学一致)
-  ≥ 2.0: Medium (2 组学一致)
-  ≥ 1.0: Low (单组学支持)
-  < 1.0: Insufficient
-```
+对每条 MFA 差异反应 × 每个比较 × 每个组织，证据构建器在各组学层判断映射特征的变化方向是否与通量一致：
+转录组与蛋白组只用直接酶 / 直接转运体，代谢组只用底物与产物，其余关联分子只计入匹配，不提供方向。
 
 #### 方向一致性判断的生物学逻辑
 

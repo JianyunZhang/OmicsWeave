@@ -44,8 +44,8 @@ except ImportError:
     _HAS_ADJUST_TEXT = False
 
 
-# Effect-size threshold used by the MFA significance rule and by
-# FluxOmicsScorer's fallback gate (scoring.fallback_mode.mfa_gate).
+# Effect-size threshold used by the MFA significance rule and by the
+# flux-anchored evidence builder's fallback rule (scoring.fallback_mode.mfa_gate).
 _DEFAULT_EFFECT_CUTOFF = 0.8
 
 

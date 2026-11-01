@@ -25,7 +25,7 @@ from .df_analysis import UNCONSTRAINED_LABELS
 
 _PASSTHROUGH = ("identifiability", "frac_at_bound", "selection_probability", "direction_stability",
                 "permutation_pvalue")
-_EXTRA = ("flux_id", "diff", "diff_se", "cohen_d", "pvalue_ttest", "pvalue_mannwhitney",
+_EXTRA = ("flux_id", "diff", "diff_se", "log2fc_se", "cohen_d", "pvalue_ttest", "pvalue_mannwhitney",
           "fdr_ttest", "fdr_mannwhitney", "kegg_reaction", "kegg_pathway", "reactome_id", "ec_number")
 
 

@@ -19,7 +19,7 @@ from omicsweave.integration.mappings import (
     match_metabolite_roles,
     match_protein_features,
 )
-from omicsweave.integration.methods.flux_omics_scorer import FluxOmicsScorer
+from omicsweave.integration.methods.flux_evidence import FluxEvidenceBuilder
 from omicsweave.integration.loaders.transcriptomics_loader import TranscriptomicsLoader
 from omicsweave.integration.loaders.mfa_loader import MFALoader
 
@@ -41,7 +41,7 @@ class GeneFeatureMappingTest(unittest.TestCase):
         )
 
     def test_regulatory_mrna_is_association_only_not_direct_flux_support(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         flux_row = pd.Series({"flux_id": "HEX_c", "flux_log2fc": 1.0})
         regulatory_only = pd.DataFrame({
             "gene": ["Gckr"],
@@ -49,9 +49,8 @@ class GeneFeatureMappingTest(unittest.TestCase):
             "padj": [0.01],
         })
 
-        score, details = scorer.score_transcriptomics(flux_row, regulatory_only)
+        details = builder.transcriptomics_evidence(flux_row, regulatory_only)
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["direction_source"], "indirect_gene")
         self.assertEqual(details["n_concordant"], 0)
         self.assertEqual(details["n_opposite"], 0)
@@ -82,7 +81,7 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         )
 
     def test_regulatory_protein_is_association_only_not_direct_flux_support(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         flux_row = pd.Series({"flux_id": "HEX_c", "flux_log2fc": 1.0})
         regulatory_only = pd.DataFrame({
             "protein": ["Gckr"],
@@ -91,11 +90,10 @@ class ProteinFeatureMappingTest(unittest.TestCase):
             "log2fc_case_vs_control": [1.5],
         })
 
-        score, details = scorer.score_proteomics(
+        details = builder.proteomics_evidence(
             flux_row, regulatory_only, "case_vs_control"
         )
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["direction_source"], "indirect")
         self.assertEqual(details["n_concordant"], 0)
         self.assertEqual(details["n_opposite"], 0)
@@ -132,18 +130,17 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         )
 
     def test_missing_proteomics_comparison_columns_are_no_data_not_signal(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         flux_row = pd.Series({"flux_id": "HEX_c", "flux_log2fc": 1.0})
         proteins = pd.DataFrame({
             "protein": ["Gck"],
             "uniprot_id": ["P52792"],
         })
 
-        score, details = scorer.score_proteomics(
+        details = builder.proteomics_evidence(
             flux_row, proteins, "missing_vs_comparison"
         )
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["evidence_mode"], "no_data")
         self.assertEqual(details["n_sig"], 0)
         self.assertEqual(details["data_reason"], "missing_comparison_effect")
@@ -233,7 +230,7 @@ class DatabaseRegistryTest(unittest.TestCase):
 
 class EvidenceMappingAuditOutputTest(unittest.TestCase):
     def test_evidence_table_exposes_mapping_provenance_and_ambiguity(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         mfa = {
             "case_vs_control": pd.DataFrame({
                 "flux_id": ["ACONT_m"],
@@ -253,8 +250,8 @@ class EvidenceMappingAuditOutputTest(unittest.TestCase):
             }),
         }
 
-        scorer.score_all(mfa, {}, {}, metabolites)
-        evidence = scorer.get_evidence_table()
+        builder.build_all(mfa, {}, {}, metabolites)
+        evidence = builder.get_evidence_table()
         row = evidence.loc[evidence["layer"].eq("metabolomics")].iloc[0]
 
         self.assertEqual(row["mapping_methods"], "database_id:1")
@@ -317,8 +314,8 @@ class MetaboliteFeatureMappingTest(unittest.TestCase):
         self.assertEqual(matched.target_count_by_role["substrates"], 1)
         self.assertEqual(sum(matched.target_count_by_role.values()), 1)
 
-    def test_metabolomics_scorer_rejects_short_alias_substring_false_positives(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+    def test_metabolomics_evidence_rejects_short_alias_substring_false_positives(self) -> None:
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         flux_row = pd.Series({"flux_id": "GAPD_c", "flux_log2fc": 1.0})
         metabolites = pd.DataFrame({
             "compound": ["Piperidine derivative", "PI(18:0_20:4)"],
@@ -327,27 +324,25 @@ class MetaboliteFeatureMappingTest(unittest.TestCase):
             "log2fc_case_vs_control": [1.5, 1.5],
         })
 
-        score, details = scorer.score_metabolomics(
+        details = builder.metabolomics_evidence(
             flux_row, metabolites, "case_vs_control"
         )
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["evidence_mode"], "no_match")
         self.assertEqual(details["n_metabolites_found"], 0)
 
     def test_missing_metabolomics_comparison_columns_are_no_data_not_signal(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         flux_row = pd.Series({"flux_id": "ACONT_m", "flux_log2fc": 1.0})
         metabolites = pd.DataFrame({
             "compound": ["Citrate", "Isocitrate"],
             "HMDB": ["HMDB0000094", "HMDB0000193"],
         })
 
-        score, details = scorer.score_metabolomics(
+        details = builder.metabolomics_evidence(
             flux_row, metabolites, "missing_vs_comparison"
         )
 
-        self.assertEqual(score, 0.0)
         self.assertEqual(details["evidence_mode"], "no_data")
         self.assertEqual(details["n_sig"], 0)
         self.assertEqual(details["data_reason"], "missing_comparison_effect")

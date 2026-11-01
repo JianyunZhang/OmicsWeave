@@ -167,7 +167,7 @@ class IntegrateTest(unittest.TestCase):
         with self.assertRaisesRegex(RunError, "至少 2 个组学"):
             integrate_experiment(EXP, ["pathway_convergence"], root=self.root)
         with self.assertRaisesRegex(RunError, "尚未接入"):
-            integrate_experiment(EXP, ["flux_anchored"], root=self.root)
+            integrate_experiment(EXP, ["sample_level"], root=self.root)
         with self.assertRaisesRegex(RunError, "未知整合模式"):
             integrate_experiment(EXP, ["network"], root=self.root)
         with self.assertRaisesRegex(RunError, "没有指定整合模式"):

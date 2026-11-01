@@ -15,7 +15,7 @@ Usage:
     python run_cross_tissue_integration.py --experiment 20250613_cimr_wt_mice_dio_glp
 
 This is a pathway-centric integration for transcriptomics + metabolomics data
-(no MFA / proteomics). The MFA-gated flux_omics_scorer is NOT used.
+(no MFA / proteomics). The MFA-gated FluxEvidenceBuilder is NOT used.
 
 Author: Claude Code
 """

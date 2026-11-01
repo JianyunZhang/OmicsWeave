@@ -162,31 +162,27 @@ omicsweave proteomics report --experiment 20250425_cimr_wt_mice_dio
 
 ---
 
-## 3.5 多组学集成打分评估（Flux-centric）
+## 3.5 多组学集成（Flux-anchored 证据画像）
 
 ### 核心功能
 
-- 以 **MFA 差异反应** 为主线整合转录组/蛋白组/代谢组证据
-- 反应级打分（0-4.0）+ 通路级聚合 + 可视化 + Markdown 报告
-- 内置 MFA gate，减少伪显著反应进入集成评分
+- 以 **MFA 差异反应** 为锚点整合转录组/蛋白组/代谢组证据
+- 反应级多维证据画像（支持、冲突、覆盖、稳定性、设计等级、证据等级）+ 通路级汇总 + 可视化 + Markdown 报告
+- MFA 显著性判定只决定 MFA 层能否作为方向锚点，不影响其他组学的证据评估
 
-### 打分逻辑（当前实现）
+### 证据画像（当前实现）
 
-1. **MFA gate**：优先使用 `FDR < 0.05 且 |Cohen's d| > 0.8`；缺失时回退到 `pvalue + |log2FC|` 规则。  
-2. **分层评分**（通过 gate 后）：
-   - MFA：0-1.0（显著性 + 效应量）
-   - Transcriptomics：0-1.0
-   - Proteomics：0-1.2
-   - Metabolomics：0-0.8
-3. **总分**：0-4.0，按 `confidence_thresholds` 分级（阈值由配置文件控制，主实验常用 High≥3.0 / Medium≥2.0 / Low≥1.0）。
+1. **MFA 显著性判定**：优先使用 `FDR < 0.05 且 |Cohen's d| > 0.8`；缺失时回退到 `pvalue + |log2FC|` 规则；样本量不足时按效应量判定。  
+2. **各组学证据**：按反应 → 基因/蛋白/代谢物映射，提取显著特征、与通量方向一致或相反的直接执行者（酶、转运体、底物 / 产物）及其效应量、统计可信度与数据来源。
+3. **证据画像**：各层证据汇总为 support / conflict / coverage 与证据等级（Convergent、Single-layer、Exploratory、Conflicting 等）。旧版 0–4 加和总分与 High/Medium/Low 置信度已删除（阶段 2.8）。
 
 ### 主要脚本
 
 | 脚本 | 作用 |
 |---|---|
 | `run_multiomics_analysis.py` | 多组学集成主入口 |
-| `integration/flux_omics_scorer.py` | 反应级打分核心 |
-| `integration/pathway_convergence.py` | 跨组学通路收敛分析 |
+| `integration/methods/flux_evidence.py` | flux-anchored 证据构建器（反应级证据提取与证据画像） |
+| `integration/methods/pathway_convergence.py` | 跨组学通路收敛分析 |
 | `report.py` | 自动化输出 `multiomics_report.md` |
 
 ### 运行示例

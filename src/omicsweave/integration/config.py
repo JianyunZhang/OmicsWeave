@@ -97,16 +97,6 @@ _DEFAULT_SCORING = {
         "log2fc": [0.58, 1.0],
         "cohen_d": [0.8, 1.5],
     },
-    "confidence_thresholds": {
-        "high": 2.5,
-        "medium": 1.5,
-        "low": 0.8,
-    },
-    "weights": {
-        "transcriptomics": 1.0,
-        "proteomics": 1.2,
-        "metabolomics": 0.8,
-    },
     # Per-omics significance thresholds (override global pval_cutoff / log2fc_cutoff)
     # If an omics key is present, its pval_cutoff and log2fc_cutoff are used;
     # otherwise the global defaults apply.
@@ -137,11 +127,14 @@ _DEFAULT_PLOT_COLORS = {
         "proteomics": "#C44E52",
         "mfa": "#8172B2",
     },
-    "confidence": {
-        "High": "#1B7837",
-        "Medium": "#762A83",
-        "Low": "#F4A582",
-        "Insufficient": "#D9D9D9",
+    "evidence_grade": {
+        "Replicated": "#1B7837",
+        "Convergent": "#5AAE61",
+        "Single-layer": "#A6DBA0",
+        "Exploratory": "#F4A582",
+        "Conflicting": "#B2182B",
+        "No-signal": "#D9D9D9",
+        "Not-assessable": "#F0F0F0",
     },
     "tissue": {
         "liver": "#E24A33",

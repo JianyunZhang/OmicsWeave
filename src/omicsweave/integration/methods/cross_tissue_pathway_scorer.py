@@ -2,8 +2,8 @@
 """
 Pathway-centric cross-tissue multi-omics integration scorer.
 
-Unlike the MFA-gated `flux_omics_scorer.py` (which requires differential flux
-as an entry gate), this scorer is designed for experiments with only
+Unlike the flux-anchored evidence builder (`flux_evidence.py`, which needs
+differential flux as the anchor), this scorer is designed for experiments with only
 transcriptomics + metabolomics data (no MFA / proteomics). It scores
 SYSTEMIC PATHWAYS that recur across multiple tissues by quantifying:
 
@@ -33,11 +33,11 @@ import pandas as pd
 # All tissues the integration considers
 DEFAULT_TISSUES = ["heart", "liver", "renal_cortex", "sq_adipose", "gast_muscle"]
 
-# Significance / effect thresholds (mirror flux_omics_scorer defaults)
+# Significance / effect thresholds (same defaults as the flux-anchored evidence builder)
 DEFAULT_LOG2FC_CUTOFF = 0.58
 DEFAULT_LARGE_LOG2FC = 2.0
 
-# Confidence tiers (mirror flux_omics_scorer.py:68-76)
+# Confidence tiers of this curated cross-tissue scorer (the flux-anchored additive score was removed in phase 2.8)
 DEFAULT_CONFIDENCE = {"high": 3.0, "medium": 2.0, "low": 1.0}
 
 # Normalize raw comparison keys (as written in evidence.yaml) to friendly
@@ -57,7 +57,7 @@ _COMPARISON_LABELS = {
 # ---------------------------------------------------------------------------
 
 def _confidence_label(score: float, thresholds: dict[str, float]) -> str:
-    """Map numeric score to confidence label (mirrors flux_omics_scorer)."""
+    """Map numeric score to confidence label."""
     if score >= thresholds.get("high", 3.0):
         return "High"
     if score >= thresholds.get("medium", 2.0):

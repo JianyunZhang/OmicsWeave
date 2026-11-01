@@ -9,7 +9,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] validate [--experiment 实验ID ...]
     omicsweave [--project-dir DIR] migrate --experiment 实验ID [--dry-run] [--force]
     omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
-    omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode pathway_convergence] [--source 运行ID]
+    omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode flux_anchored,pathway_convergence] [--source 运行ID]
     omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 

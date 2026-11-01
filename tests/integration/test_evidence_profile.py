@@ -15,7 +15,7 @@ import pandas as pd
 from omicsweave.core.project import project_dir
 from omicsweave.integration.methods.evidence_profile import EvidenceProfileScorer
 from omicsweave.integration.methods.cross_tissue_pathway_scorer import CrossTissuePathwayScorer
-from omicsweave.integration.methods.flux_omics_scorer import FluxOmicsScorer
+from omicsweave.integration.methods.flux_evidence import FluxEvidenceBuilder
 from omicsweave.integration.methods.pathway_convergence import PathwayConvergenceAnalyzer
 from omicsweave.core.statistics.stability import calibrate_biological_stability
 from omicsweave.integration.mappings import FLUX_GENE_MAPPING
@@ -90,7 +90,7 @@ class EvidenceProfileTest(unittest.TestCase):
         config = SimpleNamespace(scoring={
             "evidence_profile": {"mfa_inference_unit": "mcmc_fit_points"},
         })
-        scorer = FluxOmicsScorer(config)
+        builder = FluxEvidenceBuilder(config)
         flux_row = pd.Series({
             "flux_id": flux_id,
             "tissue": "liver",
@@ -107,24 +107,24 @@ class EvidenceProfileTest(unittest.TestCase):
             "n_eff": [8],
         })
 
-        result = scorer.score_reaction(
+        result = builder.build_record(
             flux_row, tx_df, None, None, "case_vs_control"
         )
-        evidence = scorer.evidence_profile_scorer.build_records(result)
+        evidence = builder.evidence_profile_scorer.build_records(result)
         tx_record = next(row for row in evidence if row["layer"] == "transcriptomics")
 
         self.assertFalse(result["gate_passed"])
-        self.assertEqual(result["legacy_total_score"], 0.0)
         self.assertGreater(result["support_score"], 0.0)
         self.assertEqual(tx_record["assessment_status"], "support")
+        self.assertFalse({"legacy_total_score", "total_score", "confidence"} & set(result))
 
-        scored = scorer.score_all(
+        scored = builder.build_all(
             {"case_vs_control": pd.DataFrame([flux_row])},
             {"case_vs_control": {"liver": tx_df}},
             {},
             {},
         )
-        evidence_table = scorer.get_evidence_table()
+        evidence_table = builder.get_evidence_table()
         self.assertEqual(len(scored), 1)
         self.assertEqual(len(evidence_table), 4)
         self.assertTrue({
@@ -178,7 +178,7 @@ class EvidenceProfileTest(unittest.TestCase):
         config = SimpleNamespace(scoring={
             "evidence_profile": {"mfa_inference_unit": "biological_replicate"},
         })
-        scorer = FluxOmicsScorer(config)
+        builder = FluxEvidenceBuilder(config)
         flux_row = pd.Series({
             "flux_id": "HEX_c",
             "tissue": "liver",
@@ -187,28 +187,28 @@ class EvidenceProfileTest(unittest.TestCase):
             "gate_passed": True,
         })
 
-        _, direct_details = scorer.score_transcriptomics(
+        direct_details = builder.transcriptomics_evidence(
             flux_row,
             pd.DataFrame({
                 "gene": ["Hk1"], "log2fc": [1.2],
                 "padj": [0.01], "lfcSE": [0.2], "n_eff": [6],
             }),
         )
-        _, indirect_details = scorer.score_transcriptomics(
+        indirect_details = builder.transcriptomics_evidence(
             flux_row,
             pd.DataFrame({
                 "gene": ["Hif1a"], "log2fc": [1.2],
                 "padj": [0.01], "lfcSE": [0.2], "n_eff": [6],
             }),
         )
-        direct_record = scorer.evidence_profile_scorer.build_records({
+        direct_record = builder.evidence_profile_scorer.build_records({
             "flux_id": "HEX_c", "tissue": "liver", "comparison": "case_vs_control",
             "flux_log2fc": 1.0, "gate_passed": True,
             "mfa_details": {}, "tx_details": direct_details,
             "prot_details": {"evidence_mode": "no_data"},
             "metab_details": {"evidence_mode": "no_data"},
         })[1]
-        indirect_record = scorer.evidence_profile_scorer.build_records({
+        indirect_record = builder.evidence_profile_scorer.build_records({
             "flux_id": "HEX_c", "tissue": "liver", "comparison": "case_vs_control",
             "flux_log2fc": 1.0, "gate_passed": True,
             "mfa_details": {}, "tx_details": indirect_details,
@@ -223,21 +223,27 @@ class EvidenceProfileTest(unittest.TestCase):
         )
 
     def test_pathway_aggregation_has_no_pandas_apply_deprecation(self) -> None:
-        scorer = FluxOmicsScorer(SimpleNamespace(scoring={}))
+        builder = FluxEvidenceBuilder(SimpleNamespace(scoring={}))
         scored = pd.DataFrame({
             "comparison": ["case_vs_control", "case_vs_control"],
             "tissue": ["liver", "liver"],
             "flux_id": ["reaction_a", "reaction_b"],
-            "total_score": [1.0, 2.0],
-            "confidence": ["Low", "Medium"],
-            "gate_passed": [True, True],
+            "support_score": [0.2, 0.6],
+            "conflict_score": [0.0, 0.1],
+            "coverage_score": [0.5, 0.75],
+            "evidence_grade": ["Exploratory", "Convergent"],
+            "gate_passed": [True, False],
         })
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", FutureWarning)
-            aggregated = scorer.aggregate_by_pathway(scored)
+            aggregated = builder.aggregate_by_pathway(scored)
 
         self.assertEqual(len(aggregated), 1)
+        row = aggregated.iloc[0]
+        self.assertEqual((row["n_reactions"], row["n_gated"], row["n_convergent"]), (2, 1, 1))
+        self.assertEqual(row["top_reactions"], "reaction_b, reaction_a")
+        self.assertAlmostEqual(row["mean_support_score"], 0.4)
         self.assertFalse(
             any(issubclass(item.category, FutureWarning) for item in caught)
         )

@@ -21,6 +21,7 @@ from omicsweave.core.run import RunContext, RunError, finish_run, load_validated
 
 # 已实现的整合模式：模式 → "模块:函数"
 MODES: dict[IntegrationMode, str] = {
+    IntegrationMode.FLUX_ANCHORED: "omicsweave.integration.modes.flux_anchored:run",
     IntegrationMode.PATHWAY_CONVERGENCE: "omicsweave.integration.modes.pathway_convergence:run",
 }
 
@@ -69,7 +70,7 @@ def _select_modes(requested: list[str], configured: list[IntegrationMode]) -> li
         except ValueError:
             raise RunError(f"未知整合模式 {name!r}，可选：{'、'.join(m.value for m in IntegrationMode)}") from None
         if mode not in MODES:
-            raise RunError(f"整合模式 {mode.value} 尚未接入（阶段 2.3 进行中），当前可用："
+            raise RunError(f"整合模式 {mode.value} 尚未接入，当前可用："
                            f"{'、'.join(m.value for m in MODES)}；也可暂用 omicsweave integration run")
         if mode not in modes:
             modes.append(mode)

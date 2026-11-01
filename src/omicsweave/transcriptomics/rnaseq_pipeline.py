@@ -718,7 +718,7 @@ def export_multiomics_csv(de_df, output_dir, comp_name):
     Export a standardized DE result file for multi-omics integration.
 
     Creates ``de_for_multiomics_<comp>.csv`` with fixed column names so
-    downstream consumers (FluxOmicsScorer, TranscriptomicsLoader) never
+    downstream consumers (FluxEvidenceBuilder, TranscriptomicsLoader) never
     need column-name adapters.
 
     Columns: gene_symbol, ensembl_gene_id, ncbi_gene_id, log2fc, lfcSE,
