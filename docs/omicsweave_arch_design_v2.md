@@ -298,6 +298,20 @@ integration:
 
 ### 5.5 样本表
 
+**文件格式**（`omicsweave.core.config.read_table`）：
+
+- 默认为制表符分隔；扩展名为 `.csv` 时按逗号分隔（含逗号的值需加双引号，Excel 会自动处理）。文件名由
+  `design.subjects` / `design.samples` 指定，`omicsweave init` 与 `migrate` 写出的都是 `.tsv`；
+- 编码为 UTF-8（可带 BOM），或带 BOM 的 UTF-16（Excel 的“Unicode 文本”）。Excel“文本文件(制表符分隔)”在中文
+  Windows 下是 GBK，读取时会报出行号并说明如何转存，不会猜测编码；
+- 所有单元格按字符串读取：`007` 不会变成 7，`NA`、空单元格保留原样（空单元格为空字符串）；
+- 以 `#` 开头的行是注释；单元格中的 `#` 是普通字符（如 `cage#3`）；
+- 只读出一列、表头中却有另一种分隔符时（例如 `.tsv` 里实际是逗号分隔），报错说明，而不是当作一列读入。
+
+为什么样本表不用 YAML：它是平铺的记录（几十到几百行），需要在 Excel 中核对；写成 YAML 冗长且有隐式类型转换
+（`007` → 7、`NO` → false）。为什么默认制表符而非逗号：样本描述中常有逗号，制表符几乎不会出现在值里，
+不需要引号转义；同类规范（ISA-Tab、SDRF-Proteomics、QIIME 2 metadata、Snakemake 样本表）也多用制表符。
+
 `subjects.tsv`：每只动物一行。
 
 | 列 | 必填 | 说明 |

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
 import yaml
 
 from omicsweave.core.config import ConfigError, load_experiment, load_project
@@ -152,6 +153,59 @@ class ReplicateRulesTest(DemoProjectCase):
         keep = {"m01", "m02", "m03", "m05", "m06", "m07", "m09", "m10", "m11"}
         self._keep_subjects(keep)
         self.assert_message("warning", "3 vs 3，最小 p = 0.1")
+
+
+class SampleTableFormatTest(DemoProjectCase):
+    """样本表的读取：注释与单元格中的 #、Excel 另存的编码、逗号分隔的 .csv。"""
+
+    def _load(self):
+        return load_experiment(load_project(self.root), EXP)
+
+    def _rewrite(self, name: str, encoding: str) -> None:
+        path = self.exp_dir / name
+        path.write_bytes(path.read_text(encoding="utf-8").encode(encoding))
+
+    def test_hash_inside_cell_is_kept_and_comment_lines_are_skipped(self) -> None:
+        def mutate(lines):
+            rows = [lines[0] + "\tcage"] + [line + f"\tcage#{i}" for i, line in enumerate(lines[1:], 1)]
+            return ["# 每只动物一行", rows[0], "  # 缩进的注释行", *rows[1:]]
+
+        self.edit_table("subjects.tsv", mutate)
+        subjects = self._load().subjects
+        self.assertEqual(subjects["cage"].iloc[0], "cage#1")
+        self.assertFalse(subjects["subject_id"].str.startswith("#").any())
+        self.assertEqual(self.messages("error"), [])
+
+    def test_excel_unicode_text_and_utf8_bom(self) -> None:
+        path = self.exp_dir / "samples.tsv"
+        text = path.read_text(encoding="utf-8")
+        for encoding in ("utf-16", "utf-8-sig"):
+            path.write_bytes(text.encode(encoding))
+            samples = self._load().samples
+            self.assertEqual(list(samples.columns[:2]), ["sample_id", "subject_id"], encoding)
+            self.assertEqual(len(samples), 26, encoding)
+
+    def test_non_utf8_table_explains_how_to_convert(self) -> None:
+        self.edit_table("subjects.tsv", lambda lines: [lines[0] + "\tnote"] + [line + "\t高脂饮食" for line in lines[1:]])
+        self._rewrite("subjects.tsv", "gbk")
+        with self.assertRaises(ConfigError) as caught:
+            self._load()
+        self.assertIn("第 2 行不是 UTF-8", str(caught.exception))
+        self.assert_message("error", "CSV UTF-8")
+
+    def test_csv_sample_table(self) -> None:
+        samples = self._load().samples
+        samples["notes"] = "HFD, 8 weeks"
+        samples.to_csv(self.exp_dir / "samples.csv", index=False)
+        (self.exp_dir / "samples.tsv").unlink()
+        self.edit_yaml(lambda d: d["design"].update(samples="samples.csv"))
+        loaded = self._load().samples
+        pd.testing.assert_frame_equal(loaded, samples)
+        self.assertEqual(self.messages("error"), [])
+
+    def test_comma_separated_content_in_tsv_is_reported(self) -> None:
+        self.edit_table("subjects.tsv", lambda lines: [line.replace("\t", ",") for line in lines])
+        self.assert_message("error", "看起来是逗号分隔的文件")
 
 
 class InputRulesTest(DemoProjectCase):

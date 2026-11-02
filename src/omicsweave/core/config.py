@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-读取项目配置：``project.yaml``、``experiment.yaml`` 与 ``subjects.tsv`` / ``samples.tsv``。
+读取项目配置：``project.yaml``、``experiment.yaml`` 与 ``subjects.tsv`` / ``samples.tsv``
+（样本表也可以是 UTF-8 的 ``.csv``，见 :func:`read_table`）。
 
 配置中的相对路径一律相对于项目目录解析。字符串值中的 ``${project.references.<名称>}``
 会替换为 ``project.yaml`` 中对应的参考文件路径。
 """
 from __future__ import annotations
 
+import codecs
+import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +26,9 @@ from .project import project_dir
 PROJECT_FILE = "project.yaml"
 EXPERIMENT_FILE = "experiment.yaml"
 _VAR = re.compile(r"\$\{project\.references\.([A-Za-z0-9_]+)\}")
+# 样本表的分隔符按扩展名决定：.csv 为逗号，其余为制表符
+_DELIMITERS = {".csv": ","}
+_DELIMITER_NAMES = {"\t": "制表符", ",": "逗号"}
 
 
 class ConfigError(Exception):
@@ -115,12 +121,46 @@ def _substitute(value: Any, references: dict[str, str]) -> Any:
     return value
 
 
+def _decode_table(path: Path) -> str:
+    """UTF-8（可带 BOM）或带 BOM 的 UTF-16（Excel 的“Unicode 文本”）；其他编码报错并说明如何转存。"""
+    data = path.read_bytes()
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return data.decode("utf-16")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        line = data[:exc.start].count(b"\n") + 1
+        raise ConfigError([
+            f"样本表 {path.name} 第 {line} 行不是 UTF-8 编码（Excel 另存为“文本文件(制表符分隔)”时用的是系统编码，"
+            "如中文 Windows 的 GBK）。请在 Excel 中另存为“Unicode 文本(*.txt)”后把扩展名改为 .tsv，"
+            "或另存为“CSV UTF-8(逗号分隔)(*.csv)”，也可以用文本编辑器转存为 UTF-8"]) from exc
+
+
 def read_table(path: Path) -> pd.DataFrame:
-    """读取 TSV 样本表：全部按字符串读取，去掉首尾空白，空单元格保留为空字符串。"""
+    """读取样本表：全部按字符串读取，去掉首尾空白，空单元格保留为空字符串。
+
+    ``.csv`` 按逗号分隔，其余（``.tsv``、``.txt`` 等）按制表符分隔。以 ``#`` 开头的行是注释；
+    单元格中的 ``#`` 是普通字符。
+    """
     if not path.is_file():
         raise ConfigError([f"找不到样本表 {path}"])
-    table = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, comment="#")
+    sep = _DELIMITERS.get(path.suffix.lower(), "\t")
+    lines = [line for line in _decode_table(path).splitlines() if not line.lstrip(" ").startswith("#")]
+    if not any(line.strip() for line in lines):
+        raise ConfigError([f"样本表 {path.name} 是空的，至少需要表头"])
+    try:
+        table = pd.read_csv(io.StringIO("\n".join(lines)), sep=sep, dtype=str, keep_default_na=False)
+    except pd.errors.ParserError as exc:
+        raise ConfigError([f"样本表 {path.name} 无法按{_DELIMITER_NAMES[sep]}分隔读取：{exc}"]) from exc
     table.columns = [c.strip() for c in table.columns]
+    other = "," if sep == "\t" else "\t"
+    if len(table.columns) == 1 and other in table.columns[0]:
+        expected = _DELIMITER_NAMES[sep]
+        suffix = ".csv" if other == "," else ".tsv"
+        raise ConfigError([
+            f"样本表 {path.name} 按{expected}分隔只读出一列，表头中却有{_DELIMITER_NAMES[other]}，看起来是"
+            f"{_DELIMITER_NAMES[other]}分隔的文件。请改为{expected}分隔，或把扩展名改为 {suffix}"
+            "（并相应修改 experiment.yaml 的 design.subjects / design.samples）"])
     return table.apply(lambda col: col.str.strip())
 
 

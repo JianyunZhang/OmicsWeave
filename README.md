@@ -48,6 +48,11 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 └── analysis_results/<experiment_id>/...   # 分析输出
 ```
 
+配置（`*.yaml`）与样本表（`*.tsv`）分开：配置是层级结构、手写，样本表每行一条记录、常在 Excel 中编辑。
+样本表用 UTF-8 的制表符分隔文本；在 Excel 中编辑后另存为“Unicode 文本(*.txt)”再改扩展名为 `.tsv`，
+或另存为“CSV UTF-8(逗号分隔)(*.csv)”并在 `experiment.yaml` 的 `design.samples` / `design.subjects` 中写 `.csv` 文件名
+（读取规则见 v2 设计文档第 5.5 节）。
+
 新建项目用 `omicsweave init` 生成模板，填好后用 `omicsweave validate` 检查；完整示例见
 [examples/demo_project](examples/demo_project)（合成数据），字段说明见 v2 设计文档第 5 节。
 已有旧版各组学配置（`mfa_data/`、`transcriptomics_data/` 等）的实验，可用

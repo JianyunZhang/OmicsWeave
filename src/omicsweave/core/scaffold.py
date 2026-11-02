@@ -41,7 +41,7 @@ experiment:
   metadata: {{}}                      # 例如 tracer: U-13C glucose
 
 design:
-  subjects: subjects.tsv            # 每只动物一行
+  subjects: subjects.tsv            # 每只动物一行；UTF-8 制表符分隔，也可写 .csv（逗号分隔）
   samples: samples.tsv              # 每次组学测量一行
   factors:                          # 声明实验因素：所在表格（subject / sample）、取值与参照水平
     diet:      {{level: subject, levels: [LFD, HFD], reference: LFD}}
