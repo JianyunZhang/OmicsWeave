@@ -240,6 +240,7 @@ def _check_inputs(exp: Experiment, out: _Collector) -> None:
                     out.error(f"{omics.value} 的输入文件不存在：{f}")
             if omics is Omics.MFA:
                 _check_mfa_input(project, spec, out)
+                _check_mfa_tracers(rows, out)
 
         executable = settings.adapter.get("executable")
         if executable and shutil.which(str(executable)) is None and not project.resolve(executable).is_file():
@@ -261,10 +262,17 @@ def _check_mfa_input(project: Project, spec, out: _Collector) -> None:
         missing = [key for key in ("model_id", "flux_units") if not getattr(spec, key, None)]
         if missing:
             out.error(f"legacy_mfa_xlsx 需要在 mfa.input 中给出 {'、'.join(missing)}（旧文件中没有这些信息）")
-        if len(files) > 2:
-            out.error("legacy_mfa_xlsx 的 files 依次为通量文件与可选的 MID 文件，最多 2 个")
-    elif len(files) > 1:
-        out.warning(f"mfa 输入格式 {spec.format} 只读取 files 中的第一个")
+
+
+def _check_mfa_tracers(rows: pd.DataFrame, out: _Collector) -> None:
+    """多示踪剂时 samples.tsv 的 protocol 列区分示踪剂，必须每个 MFA 样本都填写。"""
+    if "protocol" not in rows.columns:
+        return
+    protocol = rows["protocol"].astype(str).str.strip()
+    tracers = set(protocol) - {""}
+    blank = rows.loc[protocol == "", "sample_id"]
+    if len(tracers) > 1 and not blank.empty:
+        out.error(f"MFA 样本的 protocol（示踪剂）有 {len(tracers)} 种，但以下样本没有填写：{_preview(list(blank))}")
 
 
 def _check_raw_files(project: Project, omics: Omics, fmt: str, layout: str | None,

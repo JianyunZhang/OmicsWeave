@@ -8,6 +8,10 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
 还原为旧版 ``MFAAnalyser`` 的内部数据，所以同一份数据与旧流程（``omicsweave mfa run``）的结果逐值一致。
 样本分组来自 samples.tsv / subjects.tsv，比较来自 ``design.contrasts``（含 ``subset``），不再读取文件中的分组。
 
+``input.files`` 可以列出多组结果（如每种示踪剂一组，要求同一模型、同一单位）。samples.tsv 的 ``protocol``
+列给出每个 MFA 样本的示踪剂；出现两种及以上示踪剂时，先在每个示踪剂内单独分析，再按
+:mod:`omicsweave.mfa.multi_tracer` 分层合并，``tables/differential.parquet`` 为合并结果。
+
 输出（``omics/mfa/``）::
 
     data/<组织>/                    每只动物的代表净通量（分析层数据集；行 = 反应，列 = 样本）
@@ -15,6 +19,14 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
     qc/mid_fit_residuals.parquet    实测与模拟 MID 的残差（有 MID 时）
     tables/differential.parquet     统一差异结果表（所有比较 × 所有组织）
     details/                        旧版格式的明细 CSV；各比较的差异通量宽表在 details/contrasts/<比较>/ 下
+
+多示踪剂时另有::
+
+    tables/differential_by_tracer.parquet   各示踪剂单独分析的差异结果（多一列 tracer）
+    tables/tracer_coverage.parquet          各示踪剂对每条反应的可辨识性与是否参与合并
+    tables/tracer_flux_levels.parquet       按条件合并的绝对通量及示踪剂间一致性检验
+    qc/tracer_concordance.parquet           各示踪剂相对其余示踪剂的系统偏离
+    details/tracers/<示踪剂>/                各示踪剂的明细 CSV（结构同 details/）
 """
 from __future__ import annotations
 
@@ -24,18 +36,19 @@ from pathlib import Path
 import pandas as pd
 
 from omicsweave.adapters.mfa.legacy import (
-    convert_legacy_mfa,
     legacy_all_fits,
     legacy_flux_matrix,
     legacy_mid_matrices,
+    read_input_sets,
 )
 from omicsweave.contract.dataset import ContractError, Dataset, DatasetMeta, ValueType, empty_features, write_dataset
-from omicsweave.contract.mfa import MFAResults, read_mfa, validate_mfa
-from omicsweave.contract.tables import write_differential
-from omicsweave.core.config import Project
+from omicsweave.contract.mfa import MFAResults, validate_mfa
+from omicsweave.contract.tables import validate_differential, write_differential
+from omicsweave.core.config import Experiment, Project
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 
+from . import multi_tracer
 from .df_analysis import differential_flux, mid_fit_residuals, quality_control, sample_flux_matrix
 from .export import differential_flux_to_contract
 
@@ -50,20 +63,41 @@ def _preview(values, limit: int = 5) -> str:
 
 
 def load_results(project: Project, spec) -> tuple[MFAResults, list[Path], list[str]]:
-    """按 ``omics.mfa.input`` 读取 MFA 结果，返回 (结果, 读取的文件, 转换提示)。"""
+    """按 ``omics.mfa.input`` 读取 MFA 结果，返回 (结果, 读取的文件, 提示)；多组结果合并为一份。"""
     files = [project.resolve(f) for f in spec.files]
     if not files:
         raise RunError("omics.mfa.input.files 为空")
     try:
-        if spec.format == "legacy_mfa_xlsx":
-            conversion = convert_legacy_mfa(files[0], files[1] if len(files) > 1 else None,
-                                            model_id=spec.model_id, flux_units=spec.flux_units,
-                                            software=getattr(spec, "software", None),
-                                            tracer=getattr(spec, "tracer", None))
-            return conversion.results, files[:2], conversion.notes
-        return read_mfa(files[0]), files[:1], []
+        results, notes = read_input_sets(files, spec.format, model_id=getattr(spec, "model_id", None),
+                                         flux_units=getattr(spec, "flux_units", None),
+                                         software=getattr(spec, "software", None),
+                                         tracer=getattr(spec, "tracer", None))
     except ContractError as exc:
         raise RunError(str(exc)) from exc
+    return results, files, notes
+
+
+def tracer_strata(experiment: Experiment, samples: list[str], results: MFAResults) -> dict[str, str] | None:
+    """MFA 样本 → 示踪剂（samples.tsv 的 ``protocol`` 列）；只有一种示踪剂时返回 None，按单示踪剂分析。
+
+    以 samples.tsv 为准：``protocol`` 全部填写且只有一种取值时，即使各结果文件 ``info.tracer`` 的写法不同，
+    也按单示踪剂分析。``protocol`` 没有（完整）填写时，用结果文件的 ``info.tracer`` 防止不同示踪剂被混成一组。
+    """
+    table = experiment.samples
+    rows = table[(table["omics"] == Omics.MFA.value) & table["sample_id"].isin(samples)]
+    protocol = rows["protocol"] if "protocol" in rows.columns else pd.Series("", index=rows.index)
+    tracer_of = dict(zip(rows["sample_id"], protocol.fillna("").astype(str).str.strip()))
+    blank = [s for s, t in tracer_of.items() if not t]
+    if len({t for t in tracer_of.values() if t}) <= 1:
+        declared = [t.strip() for t in (results.info.tracer or "").split(";") if t.strip()]
+        if blank and len(declared) > 1:
+            raise RunError(f"MFA 结果文件记录了多种示踪剂（{'、'.join(declared)}），但 samples.tsv 的 protocol 列没有为每个"
+                           "样本填写；请填写每个 MFA 样本的示踪剂，否则不同示踪剂的动物会被当作同一组比较。"
+                           "若实为同一种示踪剂（只是写法不同），给所有 MFA 样本填同一个 protocol 即按单示踪剂分析")
+        return None
+    if blank:
+        raise RunError(f"samples.tsv 中有 {len(blank)} 个 MFA 样本没有填写 protocol（示踪剂）：{_preview(blank)}")
+    return tracer_of
 
 
 def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -> None:
@@ -77,6 +111,136 @@ def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -
                     "estimate": "per-animal median of IQR-filtered net flux fits"},
         )
         write_dataset(out / "data" / str(tissue), Dataset(wide, empty_features(wide.index), meta))
+
+
+def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits: dict, tissues: list[str],
+                         details: Path, analysis: dict, flux_units: str, record: OmicsRun,
+                         scope: str = "") -> dict[str, pd.DataFrame]:
+    """按 ``design.contrasts`` 对 ``flux_df`` 中的样本做差异通量分析，返回 比较 → 统一差异结果表。
+
+    ``details`` 下须已有 ``sample_flux_matrix`` 写出的可辨识性表；``scope`` 用于提示中标明示踪剂。
+    """
+    tables: dict[str, pd.DataFrame] = {}
+    where = f"（示踪剂 {scope}）" if scope else ""
+    for contrast in experiment.config.design.contrasts:
+        groups = {s: g for s, g in contrast_groups(experiment, contrast, Omics.MFA).items() if s in flux_df.index}
+        if not groups:
+            record.notes.append(f"比较 {contrast.id} 在 MFA{where}中没有样本，已跳过")
+            continue
+        # 每个比较单独一个明细目录，避免水平相同、subset 不同的比较互相覆盖
+        contrast_dir = details / "contrasts" / contrast.id
+        if (details / _IDENTIFIABILITY).is_file():
+            (contrast_dir / _IDENTIFIABILITY).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(details / _IDENTIFIABILITY, contrast_dir / _IDENTIFIABILITY)
+        pair = (contrast.numerator, contrast.denominator)
+        found = differential_flux(flux_df, all_fits, groups, list(pair), tissues, contrast_dir,
+                                  comparisons=[pair], analysis_config=analysis)
+        if not found:
+            record.notes.append(f"比较 {contrast.id} 在 MFA{where}中有一组没有样本，已跳过")
+            continue
+        tables[contrast.id] = differential_flux_to_contract(
+            next(iter(found.values())), numerator=contrast.numerator, denominator=contrast.denominator,
+            contrast_id=contrast.id, contrast_role=contrast.role.value, flux_units=flux_units)
+    return tables
+
+
+def _run_single(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
+                tissues: list[str], labels: dict[str, str], analysis: dict, out: Path, record: OmicsRun) -> list[str]:
+    details = out / "details"
+    matrix = sample_flux_matrix(flux_df, all_fits, labels, tissues, details, analysis)
+    if matrix is not None:
+        _write_flux_datasets(matrix, results, out)
+    tables = _differential_tables(experiment, flux_df, all_fits, tissues, details, analysis,
+                                  results.info.flux_units, record)
+    if tables:
+        write_differential(pd.concat(tables.values(), ignore_index=True), out / "tables" / "differential.parquet")
+    return list(tables)
+
+
+def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
+                      tissues: list[str], labels: dict[str, str], tracer_of: dict[str, str], analysis: dict,
+                      out: Path, record: OmicsRun) -> list[str]:
+    """先在每个示踪剂内单独分析（可辨识性、差异通量），再分层合并。"""
+    try:
+        settings = multi_tracer.PoolingSettings.from_analysis(analysis)
+    except (TypeError, ValueError) as exc:
+        raise RunError(str(exc)) from exc
+    units = results.info.flux_units
+    animals, identifiability, by_tracer = [], [], []
+    for tracer in sorted(set(tracer_of.values())):
+        samples = [s for s in flux_df.index if tracer_of.get(s) == tracer]
+        details = out / "details" / "tracers" / tracer
+        fits = {s: all_fits[s] for s in samples if s in all_fits}
+        matrix = sample_flux_matrix(flux_df.loc[samples], fits, labels, tissues, details, analysis)
+        if matrix is None:
+            record.notes.append(f"示踪剂 {tracer} 没有可用的通量，未参与合并")
+            continue
+        animals.append(matrix.assign(tracer=tracer))
+        identifiability.append(pd.read_csv(details / _IDENTIFIABILITY).assign(tracer=tracer))
+        tables = _differential_tables(experiment, flux_df.loc[samples], fits, tissues, details, analysis,
+                                      units, record, scope=tracer)
+        by_tracer += [t.assign(tracer=tracer) for t in tables.values()]
+    if not animals:
+        return []
+
+    animals_df = pd.concat(animals, ignore_index=True)
+    _write_flux_datasets(animals_df, results, out)
+    coverage = multi_tracer.tracer_coverage(pd.concat(identifiability, ignore_index=True), settings)
+    tables_dir = out / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    coverage.to_parquet(tables_dir / "tracer_coverage.parquet", index=False)
+    if by_tracer:
+        per_tracer = pd.concat(by_tracer, ignore_index=True)
+        for tracer, part in per_tracer.groupby("tracer"):
+            problems = validate_differential(part.drop(columns="tracer"))
+            if problems:
+                raise RunError(f"示踪剂 {tracer} 的差异结果不符合规范：" + "；".join(problems))
+        per_tracer.to_parquet(tables_dir / "differential_by_tracer.parquet", index=False)
+
+    pooled_tables, contrasts_run = [], []
+    for contrast in experiment.config.design.contrasts:
+        groups = contrast_groups(experiment, contrast, Omics.MFA)
+        pooled = multi_tracer.pool_contrast(animals_df, groups, contrast.numerator, contrast.denominator,
+                                            coverage, settings, seed_key=contrast.id)
+        table = multi_tracer.to_differential(pooled, contrast_id=contrast.id, contrast_role=contrast.role.value,
+                                             flux_units=units, settings=settings)
+        if table.empty:
+            continue
+        pooled_tables.append(table)
+        contrasts_run.append(contrast.id)
+        counts = table["tracer_evidence"].value_counts().to_dict()
+        record.notes.append(f"比较 {contrast.id} 多示踪剂合并：{int(table['selected'].sum())} 条通量入选；"
+                            + "、".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    if pooled_tables:
+        write_differential(pd.concat(pooled_tables, ignore_index=True), tables_dir / "differential.parquet")
+
+    levels, deviations = multi_tracer.flux_levels(animals_df, labels, coverage, settings)
+    if not levels.empty:
+        levels.to_parquet(tables_dir / "tracer_flux_levels.parquet", index=False)
+        concordance = multi_tracer.tracer_concordance(deviations)
+        if not concordance.empty:
+            (out / "qc").mkdir(parents=True, exist_ok=True)
+            concordance.to_parquet(out / "qc" / "tracer_concordance.parquet", index=False)
+    return contrasts_run
+
+
+def _multi_tracer_notes(experiment: Experiment, tracer_of: dict[str, str]) -> list[str]:
+    """合并的前提：各示踪剂是独立的动物队列；同一示踪剂内的多个批次不单独建模。"""
+    rows = experiment.samples.drop_duplicates("sample_id").set_index("sample_id").loc[list(tracer_of)]
+    tracer = pd.Series(tracer_of)
+    notes = []
+    subjects = rows["subject_id"][rows["subject_id"] != ""]
+    per_subject = tracer[subjects.index].groupby(subjects).nunique()
+    shared = sorted(per_subject[per_subject > 1].index)
+    if shared:
+        notes.append(f"{len(shared)} 只动物接受了不止一种示踪剂（{_preview(shared)}）；合并假定各示踪剂的动物相互独立，"
+                     "p 值可能偏乐观")
+    if "batch" in rows.columns:
+        per_tracer = rows["batch"].groupby(tracer[rows.index]).nunique()
+        mixed = sorted(per_tracer[per_tracer > 1].index)
+        if mixed:
+            notes.append(f"示踪剂 {'、'.join(mixed)} 内有多个批次，按同一组动物分析，未做批次整合")
+    return notes
 
 
 def run(ctx: RunContext) -> OmicsRun:
@@ -105,6 +269,7 @@ def run(ctx: RunContext) -> OmicsRun:
     used = sorted(found & declared)
     if not used:
         raise RunError("MFA 结果与 samples.tsv（omics = mfa）没有共同的样本")
+    tracer_of = tracer_strata(experiment, used, results)
 
     flux_df = legacy_flux_matrix(results).loc[used]
     all_fits = {s: fits for s, fits in legacy_all_fits(results).items() if s in used}
@@ -126,32 +291,12 @@ def run(ctx: RunContext) -> OmicsRun:
 
     contrasts_run = []
     if ctx.wants("differential"):
-        matrix = sample_flux_matrix(flux_df, all_fits, labels, tissues, details, analysis)
-        if matrix is not None:
-            _write_flux_datasets(matrix, results, out)
-        tables = []
-        for contrast in experiment.config.design.contrasts:
-            groups = {s: g for s, g in contrast_groups(experiment, contrast, Omics.MFA).items() if s in flux_df.index}
-            if not groups:
-                record.notes.append(f"比较 {contrast.id} 在 MFA 中没有样本，已跳过")
-                continue
-            # 每个比较单独一个明细目录，避免水平相同、subset 不同的比较互相覆盖
-            contrast_dir = details / "contrasts" / contrast.id
-            if (details / _IDENTIFIABILITY).is_file():
-                (contrast_dir / _IDENTIFIABILITY).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(details / _IDENTIFIABILITY, contrast_dir / _IDENTIFIABILITY)
-            pair = (contrast.numerator, contrast.denominator)
-            found_tables = differential_flux(flux_df, all_fits, groups, list(pair), tissues, contrast_dir,
-                                             comparisons=[pair], analysis_config=analysis)
-            if not found_tables:
-                record.notes.append(f"比较 {contrast.id} 在 MFA 中有一组没有样本，已跳过")
-                continue
-            tables.append(differential_flux_to_contract(
-                next(iter(found_tables.values())), numerator=contrast.numerator, denominator=contrast.denominator,
-                contrast_id=contrast.id, contrast_role=contrast.role.value, flux_units=results.info.flux_units))
-            contrasts_run.append(contrast.id)
-        if tables:
-            write_differential(pd.concat(tables, ignore_index=True), out / "tables" / "differential.parquet")
+        if tracer_of is None:
+            contrasts_run = _run_single(experiment, results, flux_df, all_fits, tissues, labels, analysis, out, record)
+        else:
+            record.notes += _multi_tracer_notes(experiment, tracer_of)
+            contrasts_run = _run_multi_tracer(experiment, results, flux_df, all_fits, tissues, labels, tracer_of,
+                                              analysis, out, record)
 
     record.parameters = {
         "input_format": settings.input.format,
@@ -161,4 +306,7 @@ def run(ctx: RunContext) -> OmicsRun:
         "contrasts": contrasts_run,
         "analysis": analysis,
     }
+    if tracer_of is not None:
+        counts = pd.Series(tracer_of).value_counts()
+        record.parameters["tracers"] = {str(t): int(counts[t]) for t in sorted(counts.index)}
     return record

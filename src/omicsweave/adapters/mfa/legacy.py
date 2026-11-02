@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from omicsweave.contract.dataset import ContractError
-from omicsweave.contract.mfa import MFAInfo, MFAResults, normalize_id
+from omicsweave.contract.mfa import MFAInfo, MFAResults, merge_mfa, normalize_id, read_mfa
 
 SHEET_INFO = "sheet_information"
 REVERSE_SUFFIX = "__R"
@@ -172,6 +172,49 @@ def convert_legacy_mfa(flux_path: str | Path, mid_path: str | Path | None = None
     info = MFAInfo(model_id=model_id, flux_units=flux_units, software=software, tracer=tracer)
     return LegacyConversion(results=MFAResults(info=info, flux=flux, mid=mid, fits=fits),
                             conditions=conditions, notes=notes)
+
+
+def legacy_result_sets(files: list[Path]) -> list[tuple[Path, Path | None]]:
+    """旧版格式的文件列表依次为每组结果的通量文件与可选的 MID 文件，按文件内容区分。"""
+    sets: list[list[Path | None]] = []
+    for path in map(Path, files):
+        if not path.is_file():
+            raise ContractError(f"找不到 {path}")
+        kind = detect_legacy_kind(path)
+        if kind == "flux":
+            sets.append([path, None])
+        elif kind == "mid":
+            if not sets or sets[-1][1] is not None:
+                raise ContractError(f"{path.name} 是 MID 文件，但前面没有与之对应的通量文件；"
+                                    "文件应依次为每组结果的通量文件与可选的 MID 文件")
+            sets[-1][1] = path
+        else:
+            raise ContractError(f"{path.name} 不是旧版自研软件格式（没有 sheet_information 工作表）")
+    return [(flux, mid) for flux, mid in sets]
+
+
+def read_input_sets(files: list[Path], fmt: str, *, model_id: str | None = None, flux_units: str | None = None,
+                    software: str | None = None, tracer: str | None = None) -> tuple[MFAResults, list[str]]:
+    """读取实验声明的 MFA 输入（``omics.mfa.input``），返回 (合并后的结果, 提示)。
+
+    每个标准格式文件或 Parquet 目录为一组结果；旧版格式每组为通量文件加可选的 MID 文件（需给出
+    ``model_id`` 与 ``flux_units``）。多组结果（如每种示踪剂一组）按 :func:`merge_mfa` 合并。
+    """
+    notes: list[str] = []
+    if fmt == "legacy_mfa_xlsx":
+        if not model_id or not flux_units:
+            raise ContractError("legacy_mfa_xlsx 输入需要在 mfa.input 中给出 model_id 与 flux_units")
+        parts = []
+        for flux, mid in legacy_result_sets(files):
+            conversion = convert_legacy_mfa(flux, mid, model_id=model_id, flux_units=flux_units,
+                                            software=software, tracer=tracer)
+            parts.append(conversion.results)
+            notes += conversion.notes
+    else:
+        parts = [read_mfa(f) for f in files]
+    if len(parts) > 1:
+        notes.append(f"读取并合并了 {len(parts)} 组结果（模型 {parts[0].info.model_id}）")
+    return merge_mfa(parts), notes
 
 
 def _legacy_columns(table: pd.DataFrame) -> list[str]:

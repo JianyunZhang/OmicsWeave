@@ -257,6 +257,40 @@ def validate_mfa(results: MFAResults) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def merge_mfa(parts: list[MFAResults]) -> MFAResults:
+    """合并多组结果（如同一模型下不同示踪剂各自的拟合）。
+
+    只有同一代谢网络模型、同一通量单位的结果才能放在一起分析；样本名不能在两组中重复。
+    ``software`` / ``tracer`` / ``notes`` 合并为以分号分隔的不重复取值。
+    """
+    if not parts:
+        raise ContractError("没有可合并的 MFA 结果")
+    if len(parts) == 1:
+        return parts[0]
+    for field, label in (("model_id", "代谢网络模型（model_id）"), ("flux_units", "通量单位（flux_units）")):
+        values = sorted({getattr(p.info, field) for p in parts})
+        if len(values) > 1:
+            raise ContractError(f"多组 MFA 结果的{label}不同：{' / '.join(values)}；只有同一模型、同一单位的结果才能合并分析")
+    seen: set[str] = set()
+    for part in parts:
+        repeated = seen & set(part.samples)
+        if repeated:
+            raise ContractError(f"样本 {', '.join(sorted(repeated)[:5])} 出现在多组 MFA 结果中，样本名必须唯一")
+        seen |= set(part.samples)
+
+    def joined(field: str) -> str | None:
+        values = dict.fromkeys(v.strip() for p in parts for v in (getattr(p.info, field) or "").split(";") if v.strip())
+        return "; ".join(values) or None
+
+    def stacked(name: str) -> pd.DataFrame | None:
+        tables = [getattr(p, name) for p in parts if getattr(p, name) is not None]
+        return pd.concat(tables, ignore_index=True) if tables else None
+
+    info = MFAInfo(model_id=parts[0].info.model_id, flux_units=parts[0].info.flux_units,
+                   software=joined("software"), tracer=joined("tracer"), notes=joined("notes"))
+    return MFAResults(info=info, flux=stacked("flux"), mid=stacked("mid"), fits=stacked("fits"))
+
+
 def _parse_info(raw: dict[str, Any], source: str) -> MFAInfo:
     data = {k: v for k, v in raw.items() if v not in (None, "") and not (isinstance(v, float) and np.isnan(v))}
     try:

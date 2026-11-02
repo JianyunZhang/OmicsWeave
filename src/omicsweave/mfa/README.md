@@ -41,7 +41,7 @@ omicsweave mfa check --experiment <id>             # 检查实验声明的 MFA �
 ```
 
 保留全部拟合结果时行数通常超过 Excel 上限，`convert` 默认输出 Parquet 目录（`mfa_tables`）。
-按统一项目模型运行用 `omicsweave run --experiment <id> --omics mfa`：读取 `experiment.yaml` 声明的输入（标准 Excel、Parquet 目录或旧版导出均可），分组与比较来自样本表和 `design.contrasts`，输出每只动物的代表净通量数据集与统一差异结果表（`omics/mfa/tables/differential.parquet`）；同一份数据与旧流程的结果逐值一致。`omicsweave mfa run` 仍读取旧版配置，图件、通路比较、MID 分析、解读报告与多批次整合暂时只在旧流程中提供。
+按统一项目模型运行用 `omicsweave run --experiment <id> --omics mfa`：读取 `experiment.yaml` 声明的输入（标准 Excel、Parquet 目录或旧版导出均可），分组与比较来自样本表和 `design.contrasts`，输出每只动物的代表净通量数据集与统一差异结果表（`omics/mfa/tables/differential.parquet`）；同一份数据与旧流程的结果逐值一致。只有一种示踪剂时无需额外配置；同一模型下多种示踪剂的结果可以在 `input.files` 中一起列出，按示踪剂分层合并。两种情况的配置见「使用方法 → 统一运行的 MFA 配置」。`omicsweave mfa run` 仍读取旧版配置，图件、通路比较、MID 分析、解读报告与多批次整合暂时只在旧流程中提供。
 
 ### 支持的数据类型
 
@@ -136,6 +136,7 @@ omicsweave/
     provenance.py                  # MFA 溯源字段 + 跨批次可合并性断言（读写与比对见 core/provenance.py）
     bridging_qc.py                 # 桥接样本一致性 → 技术噪声地板
     mfa_integration.py             # 多批次 Meta + 跨 protocol 一致性 + 整合报告
+    multi_tracer.py                # 多示踪剂分层合并（统一运行，见 6.3）
     mfa_integration_plotting.py    # 整合结果绘图
     run_mfa_analysis.py            # CLI 入口（单批次 / --all-batches / --integrate）
     plot_mfa_results.py            # 独立绘图入口
@@ -799,6 +800,60 @@ omicsweave mfa run --experiment <id> --report-only
 
 ## 使用方法
 
+### 统一运行的 MFA 配置：单示踪剂与多示踪剂
+
+统一运行（`omicsweave run --experiment <id> --omics mfa`）读取 `experiment.yaml` 的 `omics.mfa` 段与
+`samples.tsv`。**只有一种示踪剂**（如只做了 U-13C 葡萄糖灌注）是默认情况，不需要任何与示踪剂有关的配置，
+分析方式与引入多示踪剂整合之前完全相同。
+
+**单示踪剂**
+
+```yaml
+# experiment.yaml
+omics:
+  mfa:
+    enabled: true
+    input:
+      level: table
+      format: mfa_tables                 # 或 omicsweave_mfa_xlsx；旧版导出用 legacy_mfa_xlsx
+      files: [mfa/glucose_tables]        # 一组结果
+      # 旧版导出：format: legacy_mfa_xlsx，并补充 model_id 与 flux_units，
+      # files: [mfa/flux_raw_data.xlsx, mfa/mid_raw_data.xlsx]
+    analysis:                            # 可省略；与旧流程的 analysis 段含义相同
+      differential_flux: {statistic: auto, fdr_threshold: 0.10, log2fc_threshold: 0.5}
+```
+
+```text
+# samples.tsv：protocol 列可以没有，也可以全部填同一个值
+sample_id   subject_id  omics  tissue        protocol
+glc_c1      m01         mfa    multi_tissue  glucose
+glc_t1      m04         mfa    multi_tissue  glucose
+...
+```
+
+- 输出与之前相同：`data/<组织>/`、`qc/`、`tables/differential.parquet`、`details/`；不会生成
+  `differential_by_tracer`、`tracer_coverage`、`tracer_flux_levels`、`tracer_concordance` 这些多示踪剂的表；
+- `analysis.multi_tracer` 段在单示踪剂时不起作用，可以不写；
+- 同一种示踪剂有多个结果文件（如两个批次）时，可以都列在 `files` 中，按同一组动物合并分析
+  （不做批次校正，批次整合仍用旧流程 `omicsweave mfa run --integrate`）。各文件 `info.tracer` 的写法若不一致
+  （如 `U-13C glucose` 与 `13C-glucose`），运行会因无法确认是否为同一示踪剂而报错，此时给所有 MFA 样本的
+  `protocol` 填同一个值即可。
+
+**多示踪剂**：`files` 每种示踪剂列一组结果（须为同一 `model_id`、同一 `flux_units`），samples.tsv 的
+`protocol` 列为每个 MFA 样本填写示踪剂，配置项、计算与输出见「6.3 多示踪剂整合」。
+
+**按什么判定单示踪剂还是多示踪剂**（以 samples.tsv 为准，结果文件的 `info.tracer` 只用于防止误混）：
+
+| samples.tsv 的 `protocol`（MFA 样本） | 结果文件的 `info.tracer` | 分析方式 |
+|---|---|---|
+| 没有该列，或全部为空 | 未填写，或只有一种 | 单示踪剂 |
+| 没有该列，或全部为空 | 多组结果写了不同的示踪剂 | 报错：请填写 `protocol` |
+| 全部填写，只有一种取值 | 任意 | 单示踪剂 |
+| 全部填写，两种及以上取值 | 任意 | 多示踪剂分层合并 |
+| 两种及以上取值，但有样本未填 | 任意 | `omicsweave validate` 报错 |
+
+旧版流程 `omicsweave mfa run` 读取旧版配置，不受上述设置影响。
+
 ### 标准执行流程（速查）
 
 ```bash
@@ -932,7 +987,8 @@ batch。流程对两条轴都支持，但它们**不是同一种操作**：
 
 > **方法学局限**：并行标记实验的正确处理方式是**在拟合阶段联合多示踪剂数据**
 > （Crown & Antoniewicz 2013），而非对各自独立拟合出的通量图事后投票。
-> 本步骤的结果应作为「相互印证」，不能当作「相互验证」。
+> 本步骤的结果应作为「相互印证」，不能当作「相互验证」。统一运行（`omicsweave run`）
+> 中改为按示踪剂分层、精度加权合并，见「6.3 多示踪剂整合」。
 
 #### 6.1 整合路线判定（合并之前必须先读）
 
@@ -1034,6 +1090,97 @@ P95 门槛已纳入 `is_cross_batch_supported` 的判定。
 自动识别出来充当这一角色。**建议后续批次固定纳入 2–3 个桥接样本**
 （同一动物分装或混合 QC 池），否则跨批次差异中的技术成分永远无法与
 生物学成分分离。
+
+#### 6.3 多示踪剂整合（统一运行 `omicsweave run`）
+
+同一实验、同一代谢网络模型，分别用多种示踪剂（如 U-13C 葡萄糖、13C 乳酸钠、13C 甘油、
+13C 丙氨酸）灌注、分别拟合时，各示踪剂测的是**同一组通量**，但约束的部位不同：葡萄糖主要约束
+糖酵解与 PDH，甘油约束甘油激酶与糖异生入口，丙氨酸约束 GPT / PC，乳酸约束 LDH 与 Cori 循环。
+示踪剂约束不到的反应，拟合值只由约束与初值决定。可选的整合方式：
+
+| 方式 | 做法 | 评价 |
+|---|---|---|
+| 拟合阶段联合（上游） | 各示踪剂的 MID 联合拟合到同一组通量（并行标记实验，Crown & Antoniewicz 2013；COMPLETE-MFA，Leighty & Antoniewicz 2013） | 精度与可辨识性最好，联合残差本身就是模型检验。但在体每只动物只输一种示踪剂，只能在组水平联合拟合，失去以动物为单位的推断，组间比较要另做动物层面的重抽样 |
+| **示踪剂分层、精度加权合并（统一运行默认）** | 各示踪剂独立拟合、每只动物一个估计；每条反应只用约束住它的示踪剂，按精度加权合并组间差，示踪剂内置换给 p 值，Q 检验判断示踪剂之间是否一致 | 保留生物学重复，利用示踪剂互补；能区分“只有一种示踪剂能解析”与“多个示踪剂相互印证”的反应 |
+| 方向投票（旧流程 `cross_protocol_consensus`） | 各示踪剂分别判显著，再数方向 | 不看效应量与精度；要求至少 2 个示踪剂显著，只有一种示踪剂能约束的反应永远通不过；突破不了单示踪剂的样本量下界 |
+| 不分示踪剂直接混合 | 各示踪剂的动物合成一组比较 | **不要用**：未被约束的估计稀释有信息的估计，示踪剂间的系统差异混进组内方差 |
+
+联合拟合由求解软件完成，结果可以作为一组普通的 MFA 结果读入；以下说明统一运行中的分层合并
+（实现见 `multi_tracer.py`）。只有一种示踪剂时本节不适用，配置见「使用方法 → 统一运行的 MFA 配置」。
+
+**配置**：`input.files` 每种示踪剂列一组结果（标准格式每个文件或目录为一组；旧版格式依次写每组的
+`flux_raw_data.xlsx` 与可选的 `mid_raw_data.xlsx`），各组必须是同一 `model_id`、同一 `flux_units`。
+samples.tsv 的 `protocol` 列写每个 MFA 样本的示踪剂，出现两种及以上取值即按多示踪剂分析。
+结果文件的 `info.tracer` 不同却没有 `protocol` 列时直接报错，不会把不同示踪剂的动物悄悄混在一起。
+
+```yaml
+omics:
+  mfa:
+    enabled: true
+    input:
+      level: table
+      format: mfa_tables
+      files: [mfa/glucose, mfa/lactate, mfa/glycerol, mfa/alanine]
+    analysis:
+      multi_tracer:                 # 均可省略，以下为默认值
+        exclude_unconstrained: true # poorly_constrained / bound_pinned 的示踪剂不参与该反应的合并
+        include_fit_variance: true  # 方差计入每只动物拟合点的方差
+        heterogeneity_alpha: 0.10   # Cochran Q 的 p 低于该值判为示踪剂间冲突
+        min_tracers: 1              # 入选至少需要的参与合并的示踪剂数；要求跨示踪剂重复时设为 2
+        max_exact_permutations: 200000
+        n_permutations: 10000
+        random_state: 0
+```
+
+p、FDR、|log2FC|、Hedges' g 阈值沿用 `analysis.differential_flux`。
+
+**计算**（每个比较 × 组织 × 反应）：
+
+1. 每个示踪剂内单独做 `sample_flux_matrix` 与差异通量分析（与单示踪剂流程相同），得到每只动物的代表
+   净通量、拟合点方差，以及**该示踪剂下**的可辨识性；
+2. 该反应在某示踪剂下为 `poorly_constrained` / `bound_pinned` 时，该示踪剂不参与合并；
+3. 各示踪剂的组间差 Δ_t 与方差 V_t = (s²_A + f̄_A)/n_A + (s²_B + f̄_B)/n_B（s² 为动物间方差，
+   f̄ 为拟合点方差均值，约束得不好的估计自动降权）；
+4. 逆方差固定效应合并 Δ̂ = Σ w_t Δ_t / Σ w_t（w_t = 1/V_t）。各示踪剂估计的是同一个比较效应，
+   固定效应是先验正确的模型；Q 检验显著说明模型或“同一代谢状态”的假设对某个示踪剂不成立，
+   此时标为 `multi_tracer_conflict`，不入选；
+5. p 值来自示踪剂内的组标签置换（分层置换，可枚举时精确计算），不依赖正态近似。示踪剂越多可达的
+   最小 p 越小：单示踪剂 3 vs 3 为 0.1，四个示踪剂各 3 vs 3 为 2/20⁴ ≈ 1.25×10⁻⁵；
+6. BH-FDR 按比较校正，入选规则与单示踪剂相同；最小可达 p 仍高于阈值时（如只有一个示踪剂能约束、
+   每组 3 只），与单示踪剂一样只给效应量（合并的 Hedges' g 与 |log2FC|）。
+
+**输出**（`omics/mfa/`）：
+
+| 文件 | 说明 |
+|---|---|
+| `tables/differential.parquet` | 合并结果，每个（比较, 组织, 反应）一行，下游整合（flux_anchored 等）直接使用；附加列 `tracer_evidence`、`tracers_informative` / `tracers_excluded`、`diff` / `diff_se` / `ci_*`、`heterogeneity_q` / `heterogeneity_pvalue` / `i_squared`、`tracer_effects`、`tracer_weights` |
+| `tables/differential_by_tracer.parquet` | 各示踪剂单独分析的结果（多一列 `tracer`），与单示踪剂流程逐列相同 |
+| `tables/tracer_coverage.parquet` | 每个（示踪剂, 组织, 反应）的可辨识性、是否参与合并，`n_informative_tracers` 显示示踪剂之间的互补关系 |
+| `tables/tracer_flux_levels.parquet` | 每个（组织, 反应, 条件）按示踪剂合并的绝对通量，及各示踪剂是否一致（`tracers_consistent`） |
+| `qc/tracer_concordance.parquet` | 每个示踪剂相对其余示踪剂的留一法偏离：`max_abs_z`、`frac_beyond_1_96`（一致时约 5%）、`median_rel_deviation`（系统偏高或偏低） |
+| `details/tracers/<示踪剂>/` | 各示踪剂的明细 CSV |
+
+`tracer_evidence` 的取值：
+
+| 取值 | 含义 |
+|---|---|
+| `multi_tracer_consistent` | ≥2 个示踪剂约束该反应且彼此一致——最强的证据 |
+| `single_tracer` | 只有一个示踪剂能约束；结论成立，但没有跨示踪剂的重复 |
+| `multi_tracer_conflict` | 示踪剂之间不一致，不做合并结论 |
+| `not_identifiable` | 没有任何示踪剂约束该反应 |
+| `insufficient` | 各示踪剂内每组都不足 2 只动物 |
+
+**阅读顺序**：先看 `tracer_coverage`（这条反应到底有没有被约束），再看 `tracer_concordance` 与
+`tracer_flux_levels`（同一条件下各示踪剂给出的绝对通量是否一致；某个示踪剂系统性偏离时，先排查该
+示踪剂下的模型失拟，或输注本身是否改变了代谢状态——乳酸钠、甘油、丙氨酸以非痕量速率输注时尤其需要
+注意），最后看 `differential.parquet`。
+
+**局限**：
+
+- 合并假定各示踪剂是相互独立的动物队列；同一动物接受多种示踪剂时运行会给出提示，p 值可能偏乐观；
+- 每组 3 只左右时 V_t 估计不稳，Q 检验也随之不稳，判断冲突时应结合 `tracer_effects` 一起看；
+- `ci_lower` / `ci_upper` 按正态近似，小样本下偏窄；p 值来自置换，不受影响；
+- 同一示踪剂内的多个批次在统一运行中按同一组动物分析，未做批次整合（批次整合仍用旧流程 `--integrate`）。
 
 ### 方法 7: Python 编程调用
 
@@ -1755,3 +1902,5 @@ annotated = annotate_flux_dataframe(df)
 4. Wiechert W. (2001). "13C metabolic flux analysis". *Metab Eng*, 3(3), 195-206.
 5. Benjamini Y, Hochberg Y. (1995). "Controlling the false discovery rate: a practical and powerful approach to multiple testing". *J R Stat Soc Ser B*, 57(1), 289-300.
 6. Virtanen P, et al. (2020). "SciPy 1.0: fundamental algorithms for scientific computing in Python". *Nature Methods*, 17(3), 261-272.
+7. Crown SB, Antoniewicz MR. (2013). "Parallel labeling experiments and metabolic flux analysis: past, present and future methodologies". *Metab Eng*, 16, 21-32. PMID 23246523.
+8. Leighty RW, Antoniewicz MR. (2013). "COMPLETE-MFA: complementary parallel labeling experiments technique for metabolic flux analysis". *Metab Eng*, 20, 49-55. PMID 24021936.

@@ -351,7 +351,7 @@ omicsweave --project-dir <项目目录> migrate --experiment <实验ID> [--dry-r
 | 转录组样本列表（`<动物>_<组织>`）与 `sample_batches` | 样本行、`batch` 列与 `R1;R2` 文件路径；有批次时 `covariates: [batch]` |
 | 蛋白组 `Run` 名、代谢组样本列 | 样本行，按旧流程的规则对应动物；代谢组的 QC、空白列记为 `sample_type` = `qc` / `blank` |
 | MFA 样本 | `tissue` 为 `multi_tissue`。样本名能按末尾编号与 `mouse_groups` 的动物一一对应且分组一致时，以动物编号为 `subject_id`；否则每个 MFA 样本当作一只动物 |
-| MFA 的 protocol / batch 目录 | `protocol`、`batch` 列；各批次的文件、示踪剂、血糖 QC 设置记在 `omics.mfa.adapter.batches`。`input.files` 目前只能写一个批次（默认批次），多批次输入在阶段 2 解决 |
+| MFA 的 protocol / batch 目录 | `protocol`、`batch` 列；各批次的文件、示踪剂、血糖 QC 设置记在 `omics.mfa.adapter.batches`。`input.files` 写默认批次；多示踪剂整合时可依次列出各示踪剂批次的文件（见第 6.2 节），同一示踪剂内多批次的整合尚未接入统一运行 |
 | 各组学的分析参数 | `omics.<组学>.analysis`，为合并内置默认值与各层覆盖后的生效值 |
 
 无法从旧配置推断、写进 `MIGRATION.md` 待补充的内容：比较的 `role` 与 `reversal_pairs`；是否把 `group` 拆成饮食、处理等多个因素；MFA 的 `model_id` 与 `flux_units`；整合模式；样本对应不到动物、不同组学样本重名（后出现的加组学前缀，数据表中的原列名写在 `data_column`）等问题。
@@ -414,6 +414,7 @@ MFA 另有专用约定（不套用普通矩阵；实现见 `omicsweave.contract.
   - Excel（`omicsweave_mfa_xlsx`）：工作表 `info` / `flux` / `mid` / `fits`，适合每个样本一个估计值（可附置信区间）或少量拟合。
   - Parquet 目录（`mfa_tables`）：`info.json` 加 `flux` / `mid` / `fits.parquet`。保留全部拟合结果时，行数通常超过 Excel 的 104 万行上限（约 150 次拟合 × 450 个通量列 × 30 个样本 ≈ 200 万行），应使用这种载体。
 - **旧版自研软件格式**（`legacy_mfa_xlsx`）可以直接作为输入，`files` 依次为 `flux_raw_data.xlsx` 与可选的 `mid_raw_data.xlsx`，并在 `mfa.input` 中补充 `model_id` 与 `flux_units`；也可以用转换器一次性转为标准格式。转换结果与旧版 `MFAAnalyser` 的读取结果逐值一致（最优拟合通量、MID 矩阵、按拟合配对的净通量均有回归测试）。
+- **多组结果与多示踪剂**：`input.files` 可列出多组结果（标准格式每个文件或目录一组；旧版格式依次为每组的通量文件与可选的 MID 文件），要求同一 `model_id` 与 `flux_units`、样本名不重复。samples.tsv 的 `protocol` 列给出每个 MFA 样本的示踪剂；没有该列或只有一种取值时按单示踪剂分析，与之前相同；出现两种及以上时，`omicsweave run` 先在每个示踪剂内单独分析，再按示踪剂分层、精度加权合并（只用约束住该反应的示踪剂，示踪剂内置换给 p 值，Q 检验判断示踪剂是否一致），`differential.parquet` 为合并结果，另有各示踪剂结果、示踪剂覆盖与一致性表（`omicsweave/mfa/README.md` 第 6.3 节）。
 - **命令**：`omicsweave mfa template` 生成 Excel 模板（含“说明”工作表）；`omicsweave mfa check <文件>` 检查结果文件，`--experiment <ID>` 时检查实验声明的 MFA 输入并与 `samples.tsv` 核对样本；`omicsweave mfa convert` 把旧版导出转为标准格式。
 
 ---

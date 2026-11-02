@@ -4,7 +4,8 @@
 ``omicsweave mfa template / check / convert`` 三个动作的实现。
 
 - ``template``：生成标准 Excel 模板；
-- ``check``：检查一个 MFA 结果文件，或检查某个实验声明的 MFA 输入并与 samples.tsv 核对样本；
+- ``check``：检查一个 MFA 结果文件，或检查某个实验声明的 MFA 输入（可为多组结果，如每种示踪剂一组）
+  并与 samples.tsv 核对样本；
 - ``convert``：把旧版自研软件导出的 Excel 转换为标准格式。
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ from omicsweave.contract.mfa import MFAResults, read_mfa, validate_mfa, write_mf
 from omicsweave.core.config import ConfigError, load_experiment, load_project
 from omicsweave.core.model import Omics
 
-from .legacy import convert_legacy_mfa, detect_legacy_kind, read_legacy_mid
+from .legacy import convert_legacy_mfa, detect_legacy_kind, read_input_sets, read_legacy_mid
 
 UNSPECIFIED = "(未指定)"
 
@@ -84,19 +85,12 @@ def _check_experiment(experiment_id: str) -> int:
     files = [exp.project.resolve(f) for f in spec.files]
     if not files:
         return _report(["experiment.yaml 中 mfa.input.files 为空"], [])
-    notes: list[str] = []
-    if spec.format == "legacy_mfa_xlsx":
-        model_id, units = getattr(spec, "model_id", None), getattr(spec, "flux_units", None)
-        if not model_id or not units:
-            return _report(["legacy_mfa_xlsx 输入需要在 mfa.input 中给出 model_id 与 flux_units"], [])
-        conversion = convert_legacy_mfa(files[0], files[1] if len(files) > 1 else None,
-                                        model_id=model_id, flux_units=units)
-        results, notes = conversion.results, conversion.notes
-    else:
-        results = read_mfa(files[0])
+    results, notes = read_input_sets(files, spec.format, model_id=getattr(spec, "model_id", None),
+                                     flux_units=getattr(spec, "flux_units", None))
     errors, warnings = validate_mfa(results)
 
-    declared = set(exp.samples.loc[exp.samples["omics"] == Omics.MFA.value, "sample_id"])
+    rows = exp.samples[exp.samples["omics"] == Omics.MFA.value]
+    declared = set(rows["sample_id"])
     found = set(results.samples)
     if found - declared:
         errors.append(f"MFA 结果中有 {len(found - declared)} 个样本不在 samples.tsv（omics = mfa）中："
@@ -104,6 +98,13 @@ def _check_experiment(experiment_id: str) -> int:
     if declared - found:
         warnings.append(f"samples.tsv 中有 {len(declared - found)} 个 MFA 样本在结果文件里找不到："
                         f"{', '.join(sorted(declared - found)[:5])}")
+    if "protocol" in rows.columns:
+        tracers = rows.loc[rows["sample_id"].isin(found), "protocol"].astype(str).str.strip()
+        counts = tracers[tracers != ""].value_counts()
+        if len(counts) > 1:
+            notes.append("示踪剂（samples.tsv 的 protocol 列）：" + "，".join(f"{t} {n} 个样本"
+                                                                     for t, n in sorted(counts.items()))
+                         + "；omicsweave run 将按示踪剂分层合并")
     print(f"实验 {exp.id} 的 MFA 输入（{spec.format}）：{_summary(results)}")
     return _report(errors, warnings, notes)
 

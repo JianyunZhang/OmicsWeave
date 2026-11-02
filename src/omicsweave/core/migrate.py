@@ -230,8 +230,12 @@ def _collect_mfa(experiment_id: str, root: Path) -> _Part | None:
         else:
             notes.append(f"MFA 批次 {entry.get('protocol')}/{entry.get('batch')} 的分析参数与默认批次不同，已保留在 adapter.batches 中")
     if len(entries) > 1:
-        notes.append(f"MFA 共 {len(entries)} 个批次；input.files 目前只能写一个批次的结果，已写默认批次"
+        notes.append(f"MFA 共 {len(entries)} 个批次；input.files 已写默认批次"
                      f"（{default_cfg.protocol_id}/{default_cfg.batch_id}），全部批次见 omics.mfa.adapter.batches")
+        if len({e.get("protocol") for e in entries}) > 1:
+            notes.append("MFA 有多个示踪剂 protocol：如需多示踪剂整合，在 input.files 中依次列出各示踪剂批次的通量文件与"
+                         "MID 文件（要求同一代谢网络模型），samples.tsv 的 protocol 列已标明每个样本的示踪剂；"
+                         "同一示踪剂内多批次的整合尚未接入统一运行")
     files = [f for f in (_rel(default_cfg.flux_file, root), _rel(default_cfg.mid_file, root)) if f]
     if not files:
         notes.append("MFA 旧配置中没有通量文件路径，请在 omics.mfa.input.files 中补充")

@@ -74,6 +74,7 @@ omics:                              # 按需启用；input.level 为 raw（下�
     # input: {{level: table, format: legacy_mfa_xlsx, model_id: central_carbon_v1, flux_units: "nmol/min/g tissue",
     #          files: [experiments/{experiment_id}/mfa/flux_raw_data.xlsx, experiments/{experiment_id}/mfa/mid_raw_data.xlsx]}}
     # 标准格式（omicsweave mfa template 生成模板）：format: omicsweave_mfa_xlsx；全部拟合结果用 Parquet 目录：format: mfa_tables
+    # 单示踪剂无需额外配置；多示踪剂（同一模型）在 files 中每种示踪剂列一组结果，并在 samples.tsv 加 protocol 列写示踪剂
 
 integration:
   enabled: false

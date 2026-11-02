@@ -690,6 +690,7 @@ O0 打包 ✅ ─▶ O1 核心契约与项目模型 ─▶ O2 各组学接入 + 
 ### Phase O2 — OmicsWeave：各组学接入、证据整合与报告
 
 - [ ] RNA-seq、代谢组、MFA、蛋白组改为读取分析层数据、输出统一结果表（Parquet）：四个组学（转录组、蛋白组为表格层输入）均已写出差异结果表与富集结果表，与旧流程逐值一致（转录组 ORA 有意改为本地计算）；`omicsweave export` 已完成。
+- [x] MFA 多示踪剂整合（同一模型、多种示踪剂）：`input.files` 读取多组结果，按 samples.tsv 的 `protocol` 分层，可辨识性门控 + 精度加权固定效应合并 + 示踪剂内分层置换 + Q 检验，另出示踪剂覆盖与一致性 QC（`omicsweave/mfa/multi_tracer.py`）。同一示踪剂内多批次的整合尚未接入统一运行。
 - [ ] 单组学独立运行与三种整合模式（v2 第 9 节）：`omicsweave run` 运行框架已完成并接入四个组学；`omicsweave integrate` 已完成，pathway_convergence、flux_anchored 已接入，sample_level 待做；旧打分模块的加和总分已删除，证据提取改为 flux-anchored 证据构建器。
 - [ ] 引入 `BiologicalEntity` / `Association` / `Evidence` / `PathwayCandidate` / `TargetHypothesis`。
 - [ ] 接入通路数据库和标准实体 ID 映射；ID 映射改为数据文件 + 解析器；加入小鼠→人同源映射。
