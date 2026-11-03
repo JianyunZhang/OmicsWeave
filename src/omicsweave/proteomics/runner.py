@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-蛋白组的统一运行器（``omicsweave run --omics proteomics``）：读取 ``experiment.yaml`` 声明的 DIA-NN 报告，
-按组织预处理，再按其中的比较做差异蛋白分析，写出统一结果表。
+蛋白组的统一运行器（``omicsweave run --omics proteomics``）：读取 ``experiment.yaml`` 声明的 DIA-NN 报告
+或蛋白 × 样本矩阵，按组织预处理，再按其中的比较做差异蛋白分析，写出统一结果表。
 
-计算沿用旧流程：报告按 q 值过滤、聚合为蛋白 × 样本矩阵后，按组织用全部样本做 log2 与样本中位数居中
+计算沿用旧流程：报告按 q 值过滤、聚合为蛋白 × 样本矩阵后（矩阵输入直接读取），按组织用全部样本做 log2 与样本中位数居中
 （不插补，按总观测数过滤）；每个比较只取该比较的样本，用 limma 方差压缩的线性模型检验
 （``analysis.dp_method: wilcoxon`` 时用旧版秩和检验），协变量取 ``design.covariates`` 与
 ``analysis.design_covariates``。样本按矩阵中的列顺序参与计算，所以同一份报告与旧流程
@@ -19,6 +19,17 @@
 样本名由报告 ``Run`` 列按旧流程的规则提取（如 ``..._Liver_86`` → ``Liver86``），即 samples.tsv 的 ``sample_id``；
 不同时在 ``data_column`` 中写出提取后的名称。
 
+已在其他软件中汇总好的蛋白 × 样本矩阵（``format: protein_matrix``，``.xlsx`` / ``.csv`` / ``.tsv``）::
+
+    files: [data/protein_matrix.xlsx]   # 同样可用 tissue_files
+    sheet: expression_data              # Excel 工作表，默认第一个
+    feature_column: Gene.Name           # 特征名列，默认第一列；为空的行改用 uniprot_column
+    uniprot_column: Protein.Id          # 可选：UniProt 列，用于富集与整合时的蛋白匹配
+    scale: log2                         # 矩阵数值为 log2（默认）或 linear
+
+其余数值列为样本，列名即 ``sample_id``，不同时写在 ``data_column``。不做 q 值过滤；同名特征按
+``analysis.protein_aggregation`` 合并，之后的预处理与检验与 DIA-NN 报告相同（已归一化的矩阵会再做一次中位数居中）。
+
 输出（``omics/proteomics/``）::
 
     data/<组织>/                   log2、中位数居中、未插补的强度（分析层数据集；行 = 蛋白，列 = 样本）
@@ -31,8 +42,9 @@ from __future__ import annotations
 
 from dataclasses import fields
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+import numpy as np
 import pandas as pd
 
 from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows
@@ -59,6 +71,10 @@ _DEFAULTS: dict[str, Any] = {
     "protein_aggregation": "log2_mean", "design_covariates": [],
     "gene_sets": [DEFAULT_GENE_SETS["kegg"]], "run_prerank_gsea": True, "gsea_ranking_metric": "moderated_t",
 }
+_AGGREGATIONS = ("log2_mean", "linear_mean")
+_MATRIX_SCALES = ("log2", "linear")
+# 输入格式 → 提示中的名称
+_SOURCE_NAMES = {"diann_report": "DIA-NN 报告", "protein_matrix": "蛋白矩阵"}
 
 
 def _preview(values, limit: int = 5) -> str:
@@ -74,18 +90,89 @@ def _samples(experiment: Experiment) -> pd.DataFrame:
     return rows
 
 
+def _read_table(path: Path, sheet: str | None) -> pd.DataFrame:
+    if path.suffix.lower() in (".xlsx", ".xls"):
+        with pd.ExcelFile(path) as book:
+            if sheet is not None and sheet not in book.sheet_names:
+                raise RunError(f"{path.name} 中没有工作表 {sheet!r}（有：{'、'.join(book.sheet_names)}）")
+            table = pd.read_excel(book, sheet_name=sheet if sheet is not None else 0)
+    else:
+        table = pd.read_csv(path, sep="," if path.suffix.lower() == ".csv" else "\t")
+    table.columns = [str(c).strip() for c in table.columns]
+    return table
+
+
+def _aggregate(values: pd.DataFrame, features: pd.Series, aggregation: str) -> pd.DataFrame:
+    """同名特征合并，规则与 DIA-NN 报告聚合时相同：log2_mean 为 log2 空间求均值（几何均值）。"""
+    values = values.where(values > 0)
+    if aggregation == "log2_mean":
+        return np.exp2(np.log2(values).groupby(features.to_numpy(), sort=False).mean())
+    return values.groupby(features.to_numpy(), sort=False).mean()
+
+
+def read_protein_matrix(path: Path, spec, aggregation: str,
+                        notes: list[str]) -> tuple[pd.DataFrame, dict[str, str]]:
+    """``protein_matrix`` 输入 → (蛋白 × 数据列名的线性强度, 蛋白 → UniProt)，与 DIA-NN 报告聚合后的形状相同。"""
+    scale = str(getattr(spec, "scale", None) or "log2")
+    if scale not in _MATRIX_SCALES:
+        raise RunError(f"protein_matrix 的 scale 应为 {' / '.join(_MATRIX_SCALES)}，而不是 {scale!r}")
+    table = _read_table(path, getattr(spec, "sheet", None))
+    feature_column = getattr(spec, "feature_column", None) or table.columns[0]
+    uniprot_column = getattr(spec, "uniprot_column", None)
+    for label, column in (("feature_column", feature_column), ("uniprot_column", uniprot_column)):
+        if column is not None and column not in table.columns:
+            raise RunError(f"{path.name} 中没有 {label} 指定的列 {column!r}")
+
+    def text(column: str | None) -> pd.Series:
+        if column is None:
+            return pd.Series("", index=table.index)
+        return table[column].astype("string").fillna("").str.strip()
+
+    uniprot = text(uniprot_column).str.split(";").str[0]
+    features = text(feature_column).where(lambda s: s != "", uniprot)
+    unnamed = features == ""
+    if unnamed.any():
+        notes.append(f"{path.name} 中有 {int(unnamed.sum())} 行没有特征名（{feature_column} 与 UniProt 均为空），已跳过")
+    keep = ~unnamed
+    samples = [c for c in table.columns
+               if c not in (feature_column, uniprot_column) and pd.api.types.is_numeric_dtype(table[c])]
+    values = table.loc[keep, samples].astype(float)
+    if scale == "log2":
+        values = np.exp2(values)
+    features = features[keep]
+    if features.duplicated().any():
+        notes.append(f"{path.name} 中有 {int(features.duplicated().sum())} 行特征名重复，按 {aggregation} 合并")
+    matrix = _aggregate(values, features, aggregation)
+    matrix.index = matrix.index.astype(str)
+    to_uniprot: dict[str, str] = {}
+    for feature, accession in zip(features, uniprot[keep]):
+        if accession:
+            to_uniprot.setdefault(feature, accession)   # 与 DIA-NN 报告相同：同名特征取第一行的 UniProt
+    return matrix, to_uniprot
+
+
+def _read_report(path: Path, spec, aggregation: str, notes: list[str]) -> tuple[pd.DataFrame | None, dict[str, str]]:
+    return load_and_clean_data(str(path), protein_aggregation=aggregation)
+
+
+_LOADERS: dict[str, Callable[..., tuple[pd.DataFrame | None, dict[str, str]]]] = {
+    "diann_report": _read_report, "protein_matrix": read_protein_matrix,
+}
+
+
 def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
               record: OmicsRun) -> list[tuple[str, pd.DataFrame, dict[str, str]]]:
     """按组织返回 (组织, 蛋白 × sample_id 的原始强度, 蛋白 → UniProt)。列顺序与旧流程的矩阵相同。"""
     tissue_files = getattr(spec, "tissue_files", None) or {}
     jobs = ([(str(t), project.resolve(p)) for t, p in tissue_files.items()] if tissue_files
             else [(None, project.resolve(f)) for f in spec.files])
+    source = _SOURCE_NAMES[spec.format]
     blocks: dict[str, tuple[pd.DataFrame, dict[str, str]]] = {}
     for tissue, path in jobs:
         if not path.is_file():
-            raise RunError(f"找不到 DIA-NN 报告 {path}")
+            raise RunError(f"找不到{source} {path}")
         record.inputs.append(path)
-        matrix, to_uniprot = load_and_clean_data(str(path), protein_aggregation=aggregation)
+        matrix, to_uniprot = _LOADERS[spec.format](path, spec, aggregation, record.notes)
         if matrix is None or matrix.empty:
             record.notes.append(f"{path.name} 中没有通过过滤的蛋白定量，已跳过")
             continue
@@ -105,7 +192,7 @@ def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
     found = {s for m, _ in blocks.values() for s in m.columns}
     missing = [s for s in rows["sample_id"] if s not in found]
     if missing:
-        record.notes.append(f"DIA-NN 报告中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
+        record.notes.append(f"{source}中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
     return [(t, m, u) for t, (m, u) in blocks.items()]
 
 
@@ -128,9 +215,11 @@ def run(ctx: RunContext) -> OmicsRun:
     if spec.level == "raw":
         raise RunError("原始 .raw 的 DIA-NN 搜库尚未接入统一运行；已有 DIA-NN 报告时把 omics.proteomics.input 改为 "
                        "{level: table, format: diann_report, files: [报告]}，或暂用 omicsweave proteomics run")
-    if spec.format != "diann_report":
-        raise RunError(f"蛋白组输入格式 {spec.format} 尚未接入统一运行（可用 diann_report）")
+    if spec.format not in _LOADERS:
+        raise RunError(f"蛋白组输入格式 {spec.format} 尚未接入统一运行（可用 {'、'.join(_LOADERS)}）")
     settings = {**_DEFAULTS, **settings_block.analysis}
+    if settings["protein_aggregation"] not in _AGGREGATIONS:
+        raise RunError(f"protein_aggregation 应为 {' / '.join(_AGGREGATIONS)}")
     fdr_method = normalize_fdr_method(str(settings["fdr_method"]))
     pval_cutoff, log2fc_cutoff = float(settings["pval_cutoff"]), float(settings["log2fc_cutoff"])
     rule = f"padj<{pval_cutoff} and |log2FC|>{log2fc_cutoff}"
@@ -142,7 +231,7 @@ def run(ctx: RunContext) -> OmicsRun:
     covariate_table = _covariate_table(experiment, rows, covariates)
     blocks = _matrices(ctx.project, spec, rows, str(settings["protein_aggregation"]), record)
     if not blocks:
-        raise RunError("DIA-NN 报告中没有找到 samples.tsv 声明的样本")
+        raise RunError(f"{_SOURCE_NAMES[spec.format]}中没有找到 samples.tsv 声明的样本")
 
     tables, contrasts_run, enrichment_inputs = [], [], []
     for tissue, raw, to_uniprot in blocks:
@@ -154,7 +243,8 @@ def run(ctx: RunContext) -> OmicsRun:
                                 index=normalized.index)
         meta = DatasetMeta(omics=Omics.PROTEOMICS, tissue=tissue, value_type=ValueType.INTENSITY, scale="log2",
                            normalization="median_centering", feature_id_type="gene_or_protein_group",
-                           source={"protein_aggregation": settings["protein_aggregation"],
+                           source={"input_format": spec.format,
+                                   "protein_aggregation": settings["protein_aggregation"],
                                    "differential_input": "log2_normalized_unimputed"})
         write_dataset(out / "data" / tissue, Dataset(normalized, features, meta))
 

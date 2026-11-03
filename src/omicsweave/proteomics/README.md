@@ -18,6 +18,22 @@ input:
 ```
 
 样本名由报告 `Run` 列按本模块的规则提取（如 `..._Liver_86` → `Liver86`），即 `sample_id`；不同时在 samples.tsv 的 `data_column` 列写出。
+
+已在其他软件中汇总好的蛋白 × 样本矩阵用 `protein_matrix`（`.xlsx` / `.csv` / `.tsv`）：
+
+```yaml
+input:
+  level: table
+  format: protein_matrix
+  files: [experiments/<id>/data/protein_matrix.xlsx]   # 同样可用 tissue_files
+  sheet: expression_data        # Excel 工作表，默认第一个
+  feature_column: Gene.Name     # 特征名列，默认第一列；为空的行改用 uniprot_column
+  uniprot_column: Protein.Id    # 可选：UniProt 列，用于富集与整合时的蛋白匹配
+  scale: log2                   # 矩阵数值为 log2（默认）或 linear
+```
+
+其余数值列为样本，列名即 `sample_id`，不同时写在 `data_column`。矩阵不做 q 值过滤；同名特征按 `analysis.protein_aggregation` 合并，之后的预处理与检验与 DIA-NN 报告相同（同一份数据两种输入的结果一致，见回归测试）。已归一化的矩阵会再做一次样本中位数居中。
+
 预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致。富集（`enrichment`）：预排序 GSEA 与旧流程相同（按调节 t 排序，每个库分别检验，库由 `analysis.gene_sets` 指定，默认 KEGG_2019_Mouse），另做按方向的本地 ORA。`.raw` 搜库、图件与 ssGSEA 暂时仍用下文的旧流程。
 结果写入结果包的 `omics/proteomics/`，可用 `omicsweave export` 导出为 Excel。
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""蛋白组统一运行器：与旧流程逐值一致；一份报告含多个组织、用 data_column 对应样本名；原始层输入的提示。
+"""蛋白组统一运行器：与旧流程逐值一致；一份报告含多个组织、用 data_column 对应样本名；原始层输入的提示；
+蛋白 × 样本矩阵输入（protein_matrix）与同一数据的 DIA-NN 报告结果一致。
 
 核心回归：同一个旧版蛋白组实验（两个组织，批次协变量），旧流程 analyze_tissue（limma，~0 + condition + batch）
 与“omicsweave migrate → omicsweave run --omics proteomics”的差异结果逐值一致。
@@ -21,8 +22,11 @@ from omicsweave.contract.dataset import read_dataset
 from omicsweave.contract.tables import read_differential, read_enrichment
 from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
+from omicsweave.core.model import OmicsInput
 from omicsweave.core.project import project_context
 from omicsweave.core.run import RunError, run_experiment
+from omicsweave.proteomics.run_proteomics_pipeline import load_and_clean_data
+from omicsweave.proteomics.runner import read_protein_matrix
 
 EXP = "prot_exp"
 ANIMALS = {str(i): ("LFD" if i <= 4 else "HFD") for i in range(1, 9)}
@@ -205,6 +209,104 @@ class ReportInputTest(unittest.TestCase):
         self.assertEqual(set(table["design_formula"]), {"~0 + condition"})
         self.assertEqual(sorted(heart.matrix.columns), sorted(f"heart_{m}" for m in animals))
         self.assertTrue(any("Liver9" in n for n in notes))
+
+
+def _matrix_spec(**extra) -> OmicsInput:
+    return OmicsInput(level="table", format="protein_matrix", **extra)
+
+
+class MatrixInputTest(unittest.TestCase):
+    def test_matrix_matches_report(self) -> None:
+        """同一份数据写成 DIA-NN 报告与 log2 宽表（Excel，非第一个工作表），差异结果与数据集一致。"""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            exp_dir = root / "experiments" / EXP
+            exp_dir.mkdir(parents=True)
+            animals = {f"m{i}": ("LFD" if i <= 3 else "HFD") for i in range(1, 7)}
+            runs = {_run_name("heart", str(i)): (g, "b1") for i, g in enumerate(animals.values(), start=1)}
+            diann_report(runs, seed=11).to_csv(exp_dir / "report.tsv", sep="\t", index=False)
+            # 报告聚合后的矩阵写成 log2 宽表，样本列名与报告中提取出的样本名相同
+            matrix, to_uniprot = _quiet(load_and_clean_data, str(exp_dir / "report.tsv"))
+            wide = np.log2(matrix).rename_axis("Gene.Name").reset_index()
+            wide.insert(1, "Protein.Id", wide["Gene.Name"].map(to_uniprot))
+            with pd.ExcelWriter(exp_dir / "proteins.xlsx") as writer:
+                pd.DataFrame({"Sheet": ["expression_data"]}).to_excel(writer, sheet_name="column_descriptions",
+                                                                      index=False)
+                wide.to_excel(writer, sheet_name="expression_data", index=False)
+
+            (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                               encoding="utf-8")
+            pd.DataFrame({"subject_id": list(animals), "diet": list(animals.values())}).to_csv(
+                exp_dir / "subjects.tsv", sep="\t", index=False)
+            pd.DataFrame([{"sample_id": f"heart_{m}", "subject_id": m, "omics": "proteomics", "tissue": "heart",
+                           "data_column": f"Heart{i}"} for i, m in enumerate(animals, start=1)]).to_csv(
+                exp_dir / "samples.tsv", sep="\t", index=False)
+            experiment = {
+                "schema_version": 1, "experiment": {"id": EXP},
+                "design": {"factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"]}},
+                           "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD",
+                                          "denominator": "LFD", "role": "disease_effect"}]},
+                "omics": {"proteomics": {"enabled": True}},
+            }
+            inputs = {
+                "diann_report": {"files": [f"experiments/{EXP}/report.tsv"]},
+                "protein_matrix": {"files": [f"experiments/{EXP}/proteins.xlsx"], "sheet": "expression_data",
+                                   "feature_column": "Gene.Name", "uniprot_column": "Protein.Id"},
+            }
+            tables, datasets = {}, {}
+            for fmt, extra in inputs.items():
+                experiment["omics"]["proteomics"]["input"] = {"level": "table", "format": fmt, **extra}
+                (exp_dir / "experiment.yaml").write_text(yaml.safe_dump(experiment, sort_keys=False),
+                                                         encoding="utf-8")
+                run_dir, notes = _quiet(run_experiment, EXP, ["proteomics"], steps=["differential"], root=root)
+                self.assertEqual(notes, [], fmt)
+                prot = run_dir / "omics" / "proteomics"
+                tables[fmt] = read_differential(prot / "tables" / "differential.parquet").set_index("feature_id")
+                datasets[fmt] = read_dataset(prot / "data" / "heart")
+
+        report, from_matrix = tables["diann_report"], tables["protein_matrix"].loc[tables["diann_report"].index]
+        self.assertEqual(len(from_matrix), len(tables["protein_matrix"]))
+        # log2 → 线性 → log2 的舍入误差（约 1e-16）经 limma 先验自由度的迭代估计放大到约 1e-8
+        for column in ("log2fc", "statistic", "pvalue", "padj", "mean_numerator", "mean_denominator"):
+            np.testing.assert_allclose(from_matrix[column].to_numpy(dtype=float),
+                                       report[column].to_numpy(dtype=float), rtol=1e-6, equal_nan=True,
+                                       err_msg=column)
+        self.assertEqual(list(from_matrix["selected"]), list(report["selected"]))
+        self.assertTrue(from_matrix.loc["Prot000", "selected"])
+        pd.testing.assert_frame_equal(datasets["protein_matrix"].matrix, datasets["diann_report"].matrix,
+                                      rtol=1e-9, check_names=False)
+        self.assertEqual(datasets["protein_matrix"].features.loc["Prot000", "uniprot_id"], "P00000")
+        self.assertEqual(datasets["protein_matrix"].meta.source["input_format"], "protein_matrix")
+
+    def test_reader_options(self) -> None:
+        """线性强度、默认第一列为特征名、空名改用 UniProt、同名合并（几何均值）、非数值列不当作样本。"""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "proteins.csv"
+            pd.DataFrame({
+                "gene": ["Alb", "Alb", "", ""],
+                "accession": ["P07724;Q3", "P07724", "P01942", ""],
+                "description": ["serum albumin", "serum albumin", "hemoglobin", "unknown"],
+                "s1": [4.0, 16.0, 10.0, 1.0],
+                "s2": [2.0, 0.0, 20.0, 1.0],
+            }).to_csv(path, index=False)
+            notes: list[str] = []
+            matrix, to_uniprot = read_protein_matrix(path, _matrix_spec(scale="linear", uniprot_column="accession"),
+                                                     "log2_mean", notes)
+            with self.assertRaisesRegex(RunError, "scale"):
+                read_protein_matrix(path, _matrix_spec(scale="ln"), "log2_mean", [])
+            with self.assertRaisesRegex(RunError, "uniprot_column"):
+                read_protein_matrix(path, _matrix_spec(uniprot_column="UniProt"), "log2_mean", [])
+            with self.assertRaisesRegex(RunError, "工作表"):
+                pd.DataFrame({"gene": ["Alb"], "s1": [1.0]}).to_excel(Path(tmp) / "m.xlsx", index=False)
+                read_protein_matrix(Path(tmp) / "m.xlsx", _matrix_spec(sheet="expression_data"), "log2_mean", [])
+
+        self.assertEqual(list(matrix.index), ["Alb", "P01942"])
+        self.assertEqual(list(matrix.columns), ["s1", "s2"])
+        self.assertAlmostEqual(matrix.loc["Alb", "s1"], 8.0)        # sqrt(4 × 16)
+        self.assertAlmostEqual(matrix.loc["Alb", "s2"], 2.0)        # 0 视为未检出
+        self.assertEqual(to_uniprot, {"Alb": "P07724", "P01942": "P01942"})
+        self.assertTrue(any("1 行没有特征名" in n for n in notes))
+        self.assertTrue(any("重复" in n for n in notes))
 
 
 if __name__ == "__main__":

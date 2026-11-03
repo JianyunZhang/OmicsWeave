@@ -550,7 +550,7 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
   - 预排序 GSEA 与旧流程相同。转录组按 log2FC × −log10 p 排序，多个库合并检验；蛋白组按调节 t 排序，每个库分别检验。用同一个基因集库时结果与旧流程逐值一致（回归测试）。
   - ORA 改为本地计算：入选特征按方向（上调 / 下调）分别做单侧 Fisher 检验，背景为该比较中有 p 值的特征，BH 校正。旧流程的转录组 ORA 把基因列表上传到 Enrichr 在线服务、以库中全部基因为背景，这一差异是有意的。
   - 基因集库由 `analysis.gene_sets` 指定：本地 GMT 文件，或 Enrichr 库名（默认与旧流程相同）。按库名时只下载库本身，首次下载后缓存为 `<paths.references>/gene_sets/<库名>.gmt`，运行清单登记其校验值；下载失败时跳过富集并给出提示，差异结果照常写出。
-- 蛋白组：表格层输入 `diann_report`（`tissue_files` 每个组织一份报告，或 `files` 中一份报告含多个组织；样本名由 `Run` 列按旧流程的规则提取，不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本做 log2 与样本中位数居中（不插补，按总观测数过滤），再按各比较只取该比较的样本，用 limma 方差压缩的线性模型检验，协变量取 `design.covariates` 与 `analysis.design_covariates`；输出未插补的强度数据集、QC 表与图、统一差异结果表。与旧流程（`omicsweave proteomics run`）的差异结果逐值一致（回归测试）。
+- 蛋白组：表格层输入 `diann_report`（`tissue_files` 每个组织一份报告，或 `files` 中一份报告含多个组织；样本名由 `Run` 列按旧流程的规则提取，不同于 `sample_id` 时写在 `data_column`），或 `protein_matrix`（其他软件汇总好的蛋白 × 样本矩阵，`.xlsx` / `.csv` / `.tsv`；`sheet`、`feature_column`、`uniprot_column`、`scale: log2|linear` 说明表格结构，不做 q 值过滤，之后的处理与 DIA-NN 报告相同，同一份数据两种输入的结果一致）。按组织用全部样本做 log2 与样本中位数居中（不插补，按总观测数过滤），再按各比较只取该比较的样本，用 limma 方差压缩的线性模型检验，协变量取 `design.covariates` 与 `analysis.design_covariates`；输出未插补的强度数据集、QC 表与图、统一差异结果表。与旧流程（`omicsweave proteomics run`）的差异结果逐值一致（回归测试）。
 - 以下内容暂时仍由各组学原有的命令（`omicsweave <组学> run`）提供：MFA 的图件、通路比较、MID 分析、解读报告与多批次整合；代谢组的图件与解读报告；转录组的 FASTQ 处理、图件与多批次联合模型；蛋白组的 `.raw` 搜库、图件与 ssGSEA（样本层面的通路得分）。`--omics all` 遇到尚未接入的组学时跳过并给出提示。
 - 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
