@@ -502,12 +502,12 @@ analysis_results/<experiment_id>/<run_id>/
 | `contrast_id`、`contrast_role`、`tissue`、`omics` | 同差异结果表 |
 | `method`、`query` | `ora`（`query` 为所用特征列表：`up` / `down` / `all`）或 `gsea_prerank`（`query` 为 `ranked`） |
 | `gene_set_library`、`term_id`、`term_name` | 基因集库、条目 ID（如 `ko00010`、`GO:0006096`，可空）、条目名称 |
-| `pvalue`、`padj`、`padj_method` | GSEA 自带的 FDR q 值记为 `gsea_fdr` |
+| `pvalue`、`padj`、`padj_method` | GSEA 自带的 FDR q 值记为 `gsea_fdr`；GSEA 的置换 p 值 / FDR 为 0 时改为 1/(置换次数+1) |
 | `effect_direction` | `up` / `down` / `mixed` / `none`：ORA 由查询列表决定（`all` → `mixed`），GSEA 由 NES 的符号决定 |
 | `overlap_size`、`set_size` | ORA 必填：命中数与通路大小；GSEA 为 leading edge 数与通路大小 |
 | `query_size`、`universe_size`、`odds_ratio` | ORA 可选 |
 | `es`、`nes` | GSEA；`nes` 必填 |
-| `hit_features`、`tool`、`flags` | 以分号分隔的命中特征；产生结果的工具 |
+| `hit_features`、`tool`、`flags` | 以分号分隔的命中特征；产生结果的工具；以分号分隔的标记（如 `pvalue_floored`、`padj_floored`） |
 
 统一运行（`omicsweave run`）直接写出这两张表；`omicsweave export --experiment <ID> [--run <运行ID>] [--format xlsx|tsv]` 把结果包中的结果表导出为 Excel（附运行信息工作表）或 TSV，便于查看与共享。Parquet 仍是正式格式，导出文件是派生副本，默认写在结果包的 `exports/` 下，不登记在运行清单中。
 
@@ -575,6 +575,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 - `omicsweave integrate --experiment <ID> [--mode ...] [--source <运行ID>]`：默认读取最近一次含统一结果表的运行，模式默认取 `integration.modes`，参数写在 `integration.parameters.<模式>`。
 - `pathway_convergence` 已接入：读取各组学的 `enrichment.parquet`，通路按名称匹配，每个（组织, 比较）内融合（组学内 Bonferroni、组学间 Fisher，BH 校正），融合方法与旧流程相同（回归测试：与旧版分析器逐值一致）；另列出各组学的效应方向与方向是否一致，并给出各组学显著通路的两两交集（ORA 用 padj < 0.05，GSEA 用 FDR < 0.25）。前提：至少两个组学有富集结果。
+  - GSEA 置换 p 值为 0 的处理：没有一次置换达到观测富集分数时，gseapy 报告的 NOM p 与 FDR q 为 0，直接进入 Fisher 合并只受浮点下限约束（真实四组学数据中出现过约 1e-305 的融合 p 值）。现在由生成 `enrichment.parquet` 的一侧（已知置换次数 n）把这些 0 改为 1/(n+1)，并在 `flags` 中记 `pvalue_floored` / `padj_floored`；旧流程命令的输出不变。该下限对 GSEA FDR 偏保守（FDR 的实际分辨率可细于 1/(n+1)），被截断的通路可能排在 FDR 略小于 1/(n+1) 的通路之后。源结果包中仍有为 0 的 GSEA padj（早于此修正生成）时，整合运行记录会提示重新运行 enrichment 步骤。回归测试：GSEA p 为 0 时融合 p 值等于以 1/(n+1) 代入的 Fisher 合并值；三个组学运行器与旧流程的 GSEA 对比在旧值为 0 处改为比较 1/(n+1)。
 - `flux_anchored` 已接入（随 2.8）：读取各组学的 `differential.parquet`，整理为证据构建器 `FluxEvidenceBuilder` 的输入（MFA 每个比较一张表；转录组每个（比较, 组织）一张表；蛋白组、代谢组每个组织一张宽表），输出多维证据画像 `flux_evidence_profile`、证据长表 `flux_evidence_table` 与通路汇总 `flux_pathway_profile`。前提：MFA 与至少一个其他组学有差异结果。MFA 的 p 值与 FDR 取主检验路径，推断单位取自差异结果（以动物为单位时不再降为 `pseudo_replicate`）；蛋白组、代谢组的有效样本量取自 `n_numerator + n_denominator`。回归测试：统一结果表整理后的输入与旧加载器形状的输入给出相同的证据画像与证据长表。
 - `sample_level` 待接入；此前可用旧命令 `omicsweave integration harmonize`。
 

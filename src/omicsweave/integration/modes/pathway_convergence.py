@@ -6,7 +6,9 @@
 读取源结果包中各组学的 ``enrichment.parquet``，通路按名称匹配（去掉库名前缀、小写、合并空白），比较按
 ``contrast_id`` 区分，不跨比较合并。前提：至少两个组学有富集结果。
 
-- 证据：每条富集结果一行，概率取其 padj，在（组织, 比较, 组学）内按概率排序得到秩；
+- 证据：每条富集结果一行，概率取其 padj，在（组织, 比较, 组学）内按概率排序得到秩。GSEA 的置换 p 值 / FDR
+  为 0 时已在生成富集结果表时改为 1/(置换次数+1)（``flags`` 记 ``pvalue_floored`` / ``padj_floored``）；
+  旧结果包里仍为 0 的会使融合 p 值趋近 0，此时在运行记录中提示重新运行；
 - 融合：同一组学内的多条结果（不同方法、方向或库）按 Bonferroni 合并，至少两个组学有该通路时组学间用
   Fisher 法合并，各（组织, 比较）内 BH 校正（与旧流程相同，见
   :func:`omicsweave.integration.methods.pathway_convergence.fuse_pathway_evidence`）。另列出各组学中该通路
@@ -124,6 +126,10 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     overlaps.to_parquet(tables / "pathway_overlaps.parquet", index=False)
 
     record = IntegrationRun(MODE, inputs=paths, parameters={**params, "omics": sorted(enrichment["omics"].unique())})
+    zero = (enrichment["method"] == "gsea_prerank") & (pd.to_numeric(enrichment["padj"], errors="coerce") == 0)
+    if zero.any():
+        record.notes.append(f"有 {int(zero.sum())} 条 GSEA 结果的 padj 为 0（结果包早于置换下限 1/(n+1) 的修正），"
+                            "相关通路的融合 p 值会趋近 0；请重新运行 omicsweave run 的 enrichment 步骤")
     if fusion.empty:
         record.notes.append("没有在两个及以上组学中同时出现的通路（通路名不同、或富集结果过少）")
     return record

@@ -171,6 +171,9 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         for tissue in TISSUES:
             legacy = pd.read_csv(self.legacy_gsea_dir / f"gsea_{tissue}_HFD_vs_LFD_results.csv").set_index("Term")
             new = gsea[gsea["tissue"] == tissue].set_index("term_name").loc[legacy.index]
+            # 旧流程保留 gseapy 报告的 0；统一结果表改为 1/(置换次数+1)（默认 1000 次）并在 flags 中注明
+            self.assertEqual(list(new["flags"].str.contains("pvalue_floored")), list(legacy["NOM p-val"] == 0))
+            legacy[["NOM p-val", "FDR q-val"]] = legacy[["NOM p-val", "FDR q-val"]].replace(0.0, 1 / 1001)
             for legacy_column, column in (("NES", "nes"), ("ES", "es"), ("NOM p-val", "pvalue"),
                                           ("FDR q-val", "padj")):
                 np.testing.assert_allclose(new[column].to_numpy(dtype=float),

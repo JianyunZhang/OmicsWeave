@@ -100,5 +100,6 @@ def prerank_rows(ranked: pd.Series, libraries: Libraries, settings: EnrichmentSe
         if result.res2d is None or result.res2d.empty:
             continue
         parts.append(prerank_to_contract(result.res2d, contrast_id=contrast_id, contrast_role=contrast_role,
-                                         tissue=tissue, omics=omics, gene_set_library=library))
+                                         tissue=tissue, omics=omics, gene_set_library=library,
+                                         permutation_num=settings.gsea_permutation_num))
     return pd.concat(parts, ignore_index=True) if parts else _empty()

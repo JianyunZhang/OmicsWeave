@@ -126,12 +126,17 @@ class GseapyTest(unittest.TestCase):
         res = gp.prerank(rnk=ranks, gene_sets=sets, min_size=5, max_size=100, permutation_num=20,
                          seed=1, outdir=None, no_plot=True, threads=1, verbose=False)
         table = prerank_to_contract(res.res2d, tissue="liver", omics="transcriptomics",
-                                    gene_set_library="custom", **CONTRAST)
+                                    gene_set_library="custom", permutation_num=20, **CONTRAST)
         self.assertEqual(validate_enrichment(table), [])
         rows = table.set_index("term_name")
         self.assertEqual(rows.loc["SET_TOP", "effect_direction"], "up")
         self.assertEqual(rows.loc["SET_BOTTOM", "effect_direction"], "down")
         self.assertEqual(rows.loc["SET_TOP", "set_size"], 30)
+        # 20 次置换都没达到观测富集分数时 gseapy 报告 0，改为 1/21 并标记
+        self.assertEqual(float(res.res2d.set_index("Term").loc["SET_TOP", "NOM p-val"]), 0.0)
+        self.assertEqual((rows.loc["SET_TOP", "pvalue"], rows.loc["SET_TOP", "flags"]),
+                         (1 / 21, "pvalue_floored;padj_floored"))
+        self.assertTrue((table[["pvalue", "padj"]] >= 1 / 21).all().all())
 
     def test_prerank_library_prefix_and_missing_library(self) -> None:
         res2d = pd.DataFrame({"Term": ["KEGG_2019_Mouse__Glycolysis"], "ES": [0.5], "NES": [1.8],

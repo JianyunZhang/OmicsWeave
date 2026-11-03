@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from scipy.stats import combine_pvalues
 
 from omicsweave import cli
 from omicsweave.adapters.gseapy_results import prerank_to_contract
@@ -99,6 +100,39 @@ class MatchesLegacyAnalyzerTest(unittest.TestCase):
         self.assertEqual(glycolysis["contrast_role"], "disease_effect")
 
 
+class GseaPermutationFloorTest(unittest.TestCase):
+    """没有一次置换达到观测富集分数时 gseapy 报告 p = 0；进入融合前应已改为 1/(置换次数+1)。"""
+
+    def test_zero_gsea_pvalue_is_floored_before_fusion(self) -> None:
+        res2d = transcriptomics_gsea(0)
+        res2d.loc[0, ["NOM p-val", "FDR q-val"]] = 0.0    # Glycolysis / Gluconeogenesis
+        floor = 1 / 1001
+        metabolomics = ora_to_contract(metabolomics_ora(0), contrast_id=COMPARISON, contrast_role="disease_effect",
+                                       tissue="liver", query="all")
+
+        def fuse(permutation_num: int | None) -> tuple[pd.DataFrame, pd.Series]:
+            transcriptomics = prerank_to_contract(res2d, contrast_id=COMPARISON, contrast_role="disease_effect",
+                                                  tissue="liver", omics=Omics.TRANSCRIPTOMICS.value,
+                                                  permutation_num=permutation_num)
+            fusion = fusion_table(evidence_table(pd.concat([metabolomics, transcriptomics], ignore_index=True)))
+            return transcriptomics, fusion.set_index("pathway_term").loc["glycolysis / gluconeogenesis"]
+
+        table, glycolysis = fuse(1000)
+        self.assertEqual((table.loc[0, "pvalue"], table.loc[0, "padj"]), (floor, floor))
+        self.assertEqual(table.loc[0, "flags"], "pvalue_floored;padj_floored")
+        self.assertEqual(set(table["flags"].iloc[1:]), {""})
+        # 融合 p 值以截断后的输入为下界：Fisher 法对每个输入单调，转录组一侧的概率不低于 1/(n+1)
+        metabolomics_p = metabolomics.set_index("term_name").loc["Glycolysis / Gluconeogenesis", "padj"]
+        np.testing.assert_allclose(glycolysis["fused_pvalue"],
+                                   combine_pvalues([floor, metabolomics_p], method="fisher").pvalue, rtol=1e-12)
+        self.assertIn(f"'transcriptomics': {round(floor, 6)}", glycolysis["omics_probabilities"])
+
+        # 置换次数未知时保留 0，融合 p 值只受浮点下限约束（真实数据中出现过约 1e-305）
+        table, glycolysis = fuse(None)
+        self.assertEqual((table.loc[0, "pvalue"], table.loc[0, "flags"]), (0.0, ""))
+        self.assertLess(glycolysis["fused_pvalue"], 1e-300)
+
+
 class IntegrateTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -145,6 +179,13 @@ class IntegrateTest(unittest.TestCase):
         self.assertEqual(list(bundle_tables(run_dir)), ["pathway_evidence", "pathway_fusion", "pathway_overlaps"])
         sheets = pd.read_excel(export_bundle(run_dir), sheet_name=None)
         self.assertEqual(list(sheets), ["info", "pathway_evidence", "pathway_fusion", "pathway_overlaps"])
+
+    def test_stale_bundle_with_zero_gsea_padj_is_noted(self) -> None:
+        source = self.source_bundle(["metabolomics", "transcriptomics"])
+        path = source / "omics" / "transcriptomics" / "tables" / "enrichment.parquet"
+        write_enrichment(pd.read_parquet(path).assign(padj=lambda t: t["padj"].mask(t.index == 0, 0.0)), path)
+        _, notes = integrate_experiment(EXP, ["pathway_convergence"], root=self.root)
+        self.assertTrue(any("1 条 GSEA 结果的 padj 为 0" in note for note in notes), notes)
 
     def test_configured_modes_and_parameters(self) -> None:
         self.source_bundle(["metabolomics", "transcriptomics"])

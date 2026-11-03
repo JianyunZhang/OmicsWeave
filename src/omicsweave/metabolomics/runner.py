@@ -302,7 +302,8 @@ def run(ctx: RunContext) -> OmicsRun:
                 if gsea is not None:
                     enrichment.append(prerank_to_contract(
                         gsea, contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
-                        omics=Omics.METABOLOMICS.value, gene_set_library="KEGG").pipe(_split_kegg_terms))
+                        omics=Omics.METABOLOMICS.value, gene_set_library="KEGG",
+                        permutation_num=int(settings["gsea_permutation_num"])).pipe(_split_kegg_terms))
         pd.DataFrame(validation).to_csv(details / "plsda_validation.csv", index=False, encoding="utf-8-sig")
 
     if differential:
