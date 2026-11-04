@@ -100,8 +100,8 @@ params:
 
   ora_min_set_size: 3
   ora_max_set_size: 500
-  pathway_scope: "metabolism"        # metabolism / all
-  exclude_overview_pathways: true
+  pathway_scope: "metabolism"        # metabolism（不含 ko015xx 耐药图）/ all
+  exclude_overview_pathways: true    # 去掉 KEGG Global and overview maps（含 ko012xx）
 
   gsea_min_set_size: 3
   gsea_max_set_size: 500
@@ -178,7 +178,7 @@ metabolomics_results/
 - 代谢物鉴定可信度取决于供应商注释，流程不会把名称映射当作 Level 1 鉴定；
 - 默认 PQN 假设大多数代谢物不发生同方向整体变化；若实验确有全局代谢池改变，应结合内标和绝对定量判断；
 - PLS-DA 是监督探索工具，必须结合 Q²、交叉验证准确率和置换 P，不可只依据 score plot；
-- ORA/GSEA 默认只分析 KEGG metabolism 范围并排除总览图；可通过配置放宽，但疾病/信号图的共享代谢物注释容易造成过度解释；
+- ORA/GSEA 默认只分析 KEGG metabolism 范围（ko00001–ko01999，不含 ko015xx 耐药图），并排除全部 Global and overview maps（ko01100/ko01110/ko01120 与 ko012xx、ko01310/ko01320）；可通过配置放宽，但疾病/信号图的共享代谢物注释容易造成过度解释；
 - n 很小时 FDR 功效有限；原始 P 发现会单独报告，但不能替代多重检验结论。
 
 ## 验证

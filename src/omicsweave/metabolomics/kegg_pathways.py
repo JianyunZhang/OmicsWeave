@@ -115,11 +115,26 @@ KEGG_PATHWAYS: dict[str, str] = {
 }
 
 
+# KEGG BRITE br08901 中 Metabolism > Global and overview maps 的全部条目
 KEGG_OVERVIEW_PATHWAYS = {
     "ko01100",  # Metabolic pathways
     "ko01110",  # Biosynthesis of secondary metabolites
     "ko01120",  # Microbial metabolism in diverse environments
+    "ko01200",  # Carbon metabolism
+    "ko01210",  # 2-Oxocarboxylic acid metabolism
+    "ko01212",  # Fatty acid metabolism
+    "ko01220",  # Degradation of aromatic compounds
+    "ko01230",  # Biosynthesis of amino acids
+    "ko01232",  # Nucleotide metabolism
+    "ko01240",  # Biosynthesis of cofactors
+    "ko01250",  # Biosynthesis of nucleotide sugars
+    "ko01310",  # Nitrogen cycle
+    "ko01320",  # Sulfur cycle
 }
+
+# ko015xx 编号落在 ko00001–ko01999 内，但属于 Human Diseases > Drug resistance
+# （如 ko01521 EGFR TKI resistance、ko01522 Endocrine resistance、ko01523 Antifolate resistance）
+KEGG_DRUG_RESISTANCE_RANGE = range(1500, 1600)
 
 
 def is_pathway_in_scope(
@@ -128,7 +143,15 @@ def is_pathway_in_scope(
     *,
     exclude_overview: bool = True,
 ) -> bool:
-    """判断通路是否进入统计集合；默认仅分析 KEGG Metabolism 类。"""
+    """判断通路是否进入统计集合；默认仅分析 KEGG Metabolism 类。
+
+    ``metabolism``：ko00001–ko01999，去掉 ko015xx 耐药图。``all``：任意 ``koNNNNN``。
+
+    ``exclude_overview`` 与 scope 无关，去掉 KEGG 归为 Global and overview maps 的全部通路，
+    包括 ko012xx（Carbon metabolism、Biosynthesis of amino acids 等）。这些图是具体代谢图的并集，
+    同一批代谢物会被重复检验；集合大（真实小鼠数据中 20–70 个已注释代谢物），只增加 BH 分母而
+    不提供独立证据，显著时也只能回到组成它的具体通路解释。需要时设为 False 保留。
+    """
     pathway_id = str(ko_id).strip()
     if exclude_overview and pathway_id in KEGG_OVERVIEW_PATHWAYS:
         return False
@@ -138,7 +161,10 @@ def is_pathway_in_scope(
     if normalized_scope != "metabolism":
         raise ValueError("pathway_scope 仅支持 'metabolism' 或 'all'")
     match = re.fullmatch(r"ko(\d{5})", pathway_id)
-    return bool(match and 0 < int(match.group(1)) < 2000)
+    if not match:
+        return False
+    number = int(match.group(1))
+    return 0 < number < 2000 and number not in KEGG_DRUG_RESISTANCE_RANGE
 
 
 def get_pathway_name(ko_id: str) -> str:

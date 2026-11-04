@@ -113,7 +113,7 @@ ORA 直接使用 `Significant_<comparison>`。统计 universe 是具有至少一
 
 使用 `fisher_exact(..., alternative="greater")` 检验过度代表。所有合格通路，包括 overlap 为 0 的通路，都进入多重检验分母；输出 P、FDR、odds ratio、overlap、背景大小和成员列表。
 
-默认 `pathway_scope: metabolism`，排除信号、疾病通路及 ko01100/ko01110/ko01120 总览图，并用 3–500 的集合大小门控。设置 `all` 可放宽类别，但需谨慎解释共享代谢物造成的疾病图富集。
+默认 `pathway_scope: metabolism`，只保留 ko00001–ko01999，并去掉其中编号相邻但属于 Human Diseases > Drug resistance 的 ko015xx 耐药图（如 ko01521 EGFR TKI resistance、ko01522 Endocrine resistance、ko01523 Antifolate resistance），因此信号、疾病通路均不进入统计。`exclude_overview_pathways: true`（默认）在任何 scope 下都去掉 KEGG 归为 Global and overview maps 的全部通路：ko01100/ko01110/ko01120，以及 ko01200 Carbon metabolism、ko01210、ko01212 Fatty acid metabolism、ko01220、ko01230 Biosynthesis of amino acids、ko01232、ko01240、ko01250、ko01310、ko01320。这些图是具体代谢图的并集，代谢物会被重复检验；集合大，只增加 BH 分母而不提供独立证据，显著时也只能回到组成它的具体通路解释。集合大小再用 3–500 门控。设置 `all` 可放宽类别（含耐药图），但需谨慎解释共享代谢物造成的疾病图富集；需要总览图时设 `exclude_overview_pathways: false`。
 
 ## 10. GSEA
 

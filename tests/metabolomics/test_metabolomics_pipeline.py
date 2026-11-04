@@ -284,6 +284,37 @@ class DifferentialAnalysisTests(unittest.TestCase):
 
 
 class PathwayAnalysisTests(unittest.TestCase):
+    def test_metabolism_scope_excludes_drug_resistance_maps(self) -> None:
+        # ko015xx 编号在 ko01xxx 内，但 KEGG 归为 Human Diseases > Drug resistance
+        for ko_id in ("ko01501", "ko01502", "ko01503", "ko01521", "ko01522", "ko01523", "ko01524"):
+            with self.subTest(ko_id=ko_id):
+                self.assertFalse(is_pathway_in_scope(ko_id))
+                self.assertFalse(is_pathway_in_scope(ko_id, exclude_overview=False))
+                self.assertTrue(is_pathway_in_scope(ko_id, "all"))
+        # 相邻的真正代谢图不受影响
+        for ko_id in ("ko00010", "ko00920", "ko01040", "ko01053"):
+            with self.subTest(ko_id=ko_id):
+                self.assertTrue(is_pathway_in_scope(ko_id))
+        for ko_id in ("ko04910", "ko05231"):
+            with self.subTest(ko_id=ko_id):
+                self.assertFalse(is_pathway_in_scope(ko_id))
+                self.assertTrue(is_pathway_in_scope(ko_id, "all"))
+        self.assertFalse(is_pathway_in_scope("map00010", "all"))
+        with self.assertRaises(ValueError):
+            is_pathway_in_scope("ko00010", "signaling")
+
+    def test_overview_flag_drops_every_global_and_overview_map(self) -> None:
+        overview = (
+            "ko01100", "ko01110", "ko01120", "ko01200", "ko01210", "ko01212", "ko01220",
+            "ko01230", "ko01232", "ko01240", "ko01250", "ko01310", "ko01320",
+        )
+        for ko_id in overview:
+            with self.subTest(ko_id=ko_id):
+                self.assertFalse(is_pathway_in_scope(ko_id))
+                self.assertFalse(is_pathway_in_scope(ko_id, "all"))
+                self.assertTrue(is_pathway_in_scope(ko_id, exclude_overview=False))
+                self.assertTrue(is_pathway_in_scope(ko_id, "all", exclude_overview=False))
+
     def test_ora_uses_consistent_annotated_universe_and_adjusts_tests(self) -> None:
         rows = []
         for index in range(20):
