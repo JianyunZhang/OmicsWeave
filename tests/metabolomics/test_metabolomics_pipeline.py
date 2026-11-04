@@ -28,6 +28,7 @@ from omicsweave.metabolomics.experiment_config import (
     load_metabolomics_config,
 )
 from omicsweave.metabolomics.gsea._run import build_ranked_metabolites
+from omicsweave.metabolomics.kegg_pathways import get_pathway_name, is_pathway_in_scope
 from omicsweave.metabolomics.plotting.qc_plots import fit_plsda
 from omicsweave.metabolomics.plotting.heatmap import select_heatmap_features
 from omicsweave.metabolomics.metabolomics_pipeline import run_pipeline
@@ -328,6 +329,20 @@ class PathwayAnalysisTests(unittest.TestCase):
         glycolysis = result.set_index("ID").loc["ko00010"]
         self.assertEqual(glycolysis["SigCount"], 4)
         self.assertLess(glycolysis["FDR"], 0.05)
+
+    def test_lipid_and_xenobiotic_maps_are_named_without_changing_scope(self) -> None:
+        # 广靶 + 脂质组注释中常见、此前显示为 name unavailable 的代谢通路
+        expected = {
+            "ko00563": "Glycosylphosphatidylinositol (GPI)-anchor biosynthesis",
+            "ko00565": "Ether lipid metabolism",
+            "ko00980": "Metabolism of xenobiotics by cytochrome P450",
+            "ko01040": "Biosynthesis of unsaturated fatty acids",
+        }
+        for ko_id, name in expected.items():
+            self.assertEqual(get_pathway_name(ko_id), name)
+        # 名称只用于显示：是否进入统计由编号范围决定，缺名称的通路照常参与
+        self.assertEqual(get_pathway_name("ko00999"), "ko00999 (name unavailable)")
+        self.assertTrue(is_pathway_in_scope("ko00999"))
 
 
 class GseaTests(unittest.TestCase):
