@@ -24,6 +24,7 @@ from omicsweave.core.project import project_context
 from omicsweave.core.run import run_experiment
 from omicsweave.metabolomics.experiment_config import load_metabolomics_config
 from omicsweave.metabolomics.metabolomics_pipeline import run_pipeline
+from tests.visualization.test_volcano import assert_volcanoes
 
 EXP = "met_exp"
 GROUPS = {str(i): ("LFD" if i <= 5 else "HFD") for i in range(1, 11)}
@@ -165,6 +166,9 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
                          ["QC1", "metabolomics_QC1"])
         metrics = pd.read_parquet(met / "qc" / "heart" / "feature_metrics.parquet")
         self.assertEqual(metrics["feature_id"].iloc[0], "MW0000")
+
+    def test_volcano_for_each_tissue_and_contrast(self) -> None:
+        assert_volcanoes(self, self.run_dir / "omics" / "metabolomics")
 
 
 class PeakTableInputTest(unittest.TestCase):

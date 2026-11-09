@@ -156,7 +156,7 @@ src/omicsweave/
 │   └── modes/              # 整合模式：flux_anchored ✅、pathway_convergence ✅；sample_level 待接入
 ├── evidence/               # 实体标准化、同源映射、证据记录、候选通路/靶点假设
 ├── reporting/              # 由结果包生成 HTML/PDF 报告
-├── visualization/          # theme.py：统一绘图主题 ✅；通用图形阶段 2 迁入
+├── visualization/          # theme.py：统一绘图主题 ✅；figures.py：图件文件名与保存 ✅；volcano.py：火山图 ✅；其余通用图形阶段 2 迁入
 └── cli.py
 ```
 
@@ -542,7 +542,8 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
 **现状（阶段 2 进行中）**：
 
 - 运行框架已实现（`core/run.py`）：配置通过 `validate` 才开始运行；每次运行写入独立的 `<run_id>/` 目录；各组学由运行器实现，运行器不读写进程级全局状态，同一进程中可以并行运行多个实验。
-- 已接入的组学：MFA（步骤 `qc`、`differential`）、代谢组（步骤 `qc`、`differential`、`enrichment`）、转录组（步骤 `qc`、`differential`、`enrichment`）、蛋白组（步骤 `qc`、`differential`、`enrichment`）。
+- 已接入的组学：MFA（步骤 `qc`、`differential`、`figures`）、代谢组（步骤 `qc`、`differential`、`enrichment`、`figures`）、转录组（步骤 `qc`、`differential`、`enrichment`、`figures`）、蛋白组（步骤 `qc`、`differential`、`enrichment`、`figures`）。
+- 图件（`figures` 步骤，默认运行）：四个组学共用 `visualization/volcano.py`，由本次运行写出的 `tables/differential.parquet` 为每个组织 × 比较画一张火山图，写到 `omics/<组学>/figures/volcano_<组织>_<比较>.pdf|png`，并登记在运行清单中。点的颜色只取决于表中的 `selected`，所以图与结果表的入选结果一致；阈值线只作参考，入选规则写在图下方。纵轴：转录组、蛋白组、代谢组为校正后 p（与入选规则相同），MFA 为主检验的 p 值，只给效应量的比较改为 |Hedges' g|；MFA 横轴半宽不超过 log2FC = 10，更大的倍数钉在边界上。图件不写入创建时间，同一结果表重画的文件逐字节一致；绘图在 `visualization.theme.themed()` 中进行（临时套用主题并加锁），不改全局设置，同一进程中并行运行的结果与顺序运行一致（测试覆盖）。只指定部分步骤时，`figures` 须与 `differential`（或 `enrichment`）同时指定。
 - MFA：输入按 `omics.mfa.input` 读取（标准 Excel、Parquet 目录或旧版导出），分组与比较来自样本表和 `design.contrasts`（含 `subset`），输出每只动物的代表净通量数据集与统一差异结果表。计算沿用原有的差异通量引擎，同一份数据与旧流程（`omicsweave mfa run`）的结果逐值一致（回归测试）。
 - 代谢组：读取峰面积表（`format: peak_table`；`tissue_files` 每个组织一张表，或 `files` 中一张表含多个组织，组织由 samples.tsv 给出；样本列名不同于 `sample_id` 时写在 `data_column`）。按组织用全部样本预处理（按组判断检出率、插补、归一化、log2），再按各比较做 Welch t 检验与 PLS-DA VIP，用显著代谢物做 KEGG ORA；输出预处理后的数据集、QC 表、统一差异结果表与富集结果表。与旧流程（`omicsweave metabolomics run`）的差异结果、VIP 与 ORA 逐值一致（回归测试）。富集还包括代谢物集预排序 GSEA（沿用旧流程，结果逐值一致）。
 - 转录组：表格层输入，`counts_matrix`（基因 × 样本计数）或 `kallisto`（每个样本的 `abundance.tsv`，经 `input.tx2gene` 或 `adapter.transcriptome_fasta` 聚合到基因，默认 lengthScaledTPM）。按组织、按比较做差异表达：每组至少 2 个生物学重复时用 PyDESeq2（apeGLM 收缩 log2FC），设计为 `~[协变量 +] condition`，协变量取 `design.covariates` 中在该比较的样本间取值不同的列；样本量不足或拟合失败时退回秩和检验，有协变量时不退回。输出基因计数数据集、文库大小与 kallisto 比对率、统一差异结果表。与旧流程从基因计数补跑的差异结果逐值一致（回归测试）。原始层 FASTQ 的质控、修剪与定量在阶段 3 接入，迁移得到的原始层输入运行时会提示改用定量结果。
@@ -551,7 +552,7 @@ omicsweave run --experiment <id> --omics transcriptomics --steps qc,differential
   - ORA 改为本地计算：入选特征按方向（上调 / 下调）分别做单侧 Fisher 检验，背景为该比较中有 p 值的特征，BH 校正。旧流程的转录组 ORA 把基因列表上传到 Enrichr 在线服务、以库中全部基因为背景，这一差异是有意的。
   - 基因集库由 `analysis.gene_sets` 指定：本地 GMT 文件，或 Enrichr 库名（默认与旧流程相同）。按库名时只下载库本身，首次下载后缓存为 `<paths.references>/gene_sets/<库名>.gmt`，运行清单登记其校验值；下载失败时跳过富集并给出提示，差异结果照常写出。
 - 蛋白组：表格层输入 `diann_report`（`tissue_files` 每个组织一份报告，或 `files` 中一份报告含多个组织；样本名由 `Run` 列按旧流程的规则提取，不同于 `sample_id` 时写在 `data_column`），或 `protein_matrix`（其他软件汇总好的蛋白 × 样本矩阵，`.xlsx` / `.csv` / `.tsv`；`sheet`、`feature_column`、`uniprot_column`、`scale: log2|linear` 说明表格结构，不做 q 值过滤，之后的处理与 DIA-NN 报告相同，同一份数据两种输入的结果一致）。按组织用全部样本做 log2 与样本中位数居中（不插补，按总观测数过滤），再按各比较只取该比较的样本，用 limma 方差压缩的线性模型检验，协变量取 `design.covariates` 与 `analysis.design_covariates`；输出未插补的强度数据集、QC 表与图、统一差异结果表。与旧流程（`omicsweave proteomics run`）的差异结果逐值一致（回归测试）。
-- 以下内容暂时仍由各组学原有的命令（`omicsweave <组学> run`）提供：MFA 的图件、通路比较、MID 分析、解读报告与多批次整合；代谢组的图件与解读报告；转录组的 FASTQ 处理、图件与多批次联合模型；蛋白组的 `.raw` 搜库、图件与 ssGSEA（样本层面的通路得分）。`--omics all` 遇到尚未接入的组学时跳过并给出提示。
+- 以下内容暂时仍由各组学原有的命令（`omicsweave <组学> run`）提供：MFA 的火山图以外的图件、通路比较、MID 分析、解读报告与多批次整合；代谢组的火山图以外的图件与解读报告；转录组的 FASTQ 处理、火山图以外的图件与多批次联合模型；蛋白组的 `.raw` 搜库、火山图以外的图件与 ssGSEA（样本层面的通路得分）。`--omics all` 遇到尚未接入的组学时跳过并给出提示。
 - 缺少某组学的可选依赖时，提示安装对应的依赖组（如 `pip install "omicsweave[mfa]"`）。
 
 ### 9.2 多组学整合（可选，三种模式）
@@ -593,7 +594,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | `common/pandas_safety.py`、`common/project.py` | `core/` | |
 | 3 份 `provenance.py`（mfa / transcriptomics / multiomics） | `core/provenance.py` | ✅ MFA 与转录组的读写、比对已合并，各自只保留本组学的字段；multiomics 的那份实为输入审计，改名为 `integration/input_audit.py` |
 | 5 套配置加载器（约 3,450 行） | `core/config.py` + 各组学设置段 | 改为第 5 节的统一模型；旧配置通过 `omicsweave migrate` 转换 |
-| 5 份 `plotting/_config.py`；3–4 份火山图、热图、PCA | `visualization/` | 主题 ✅（`visualization/theme.py`）；通用图在阶段 2 合并，组学专用图保留在各模块；`_config.py` 中的全局状态在 1.10 去除 |
+| 5 份 `plotting/_config.py`；3–4 份火山图、热图、PCA | `visualization/` | 主题 ✅（`visualization/theme.py`）；火山图 ✅（`visualization/volcano.py`，读取统一差异结果表，四个组学的 `figures` 步骤共用；旧命令仍用各自的实现）；热图、PCA 等通用图在阶段 2 继续合并，组学专用图保留在各模块；`_config.py` 中的全局状态在 1.10 去除 |
 
 ### 10.2 保留为各组学核心（接入新数据契约）
 

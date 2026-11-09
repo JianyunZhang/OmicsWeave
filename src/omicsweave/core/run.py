@@ -7,10 +7,13 @@
 
     manifest.json     运行 ID、命令、配置哈希、输入输出文件的校验值
     metadata/         subjects / samples（Parquet）与展开后的实验配置
-    omics/<组学>/      data/（分析层数据集）、qc/、tables/（统一结果表）、details/（旧版格式的明细表）
+    omics/<组学>/      data/（分析层数据集）、qc/、tables/（统一结果表）、figures/（图件）、details/（旧版格式的明细表）
 
 每个组学由一个运行器实现（:data:`RUNNERS`），各组学之间互不依赖。运行器只通过 :class:`RunContext`
 取得项目、实验和输出目录，不读写进程级全局状态。
+
+``figures`` 步骤由本次运行写出的统一结果表绘图（见 :mod:`omicsweave.visualization`），所以只指定部分步骤时
+须同时包含写出差异结果表的 ``differential`` 或 ``enrichment``。
 """
 from __future__ import annotations
 
@@ -36,6 +39,9 @@ RUNNERS: dict[Omics, str] = {
 }
 ALL = "all"
 METADATA_DIR = "metadata"
+FIGURES = "figures"
+# 写出 tables/differential.parquet 的步骤；figures 读取它
+_TABLE_STEPS = {"differential", "enrichment"}
 
 
 class RunError(Exception):
@@ -211,6 +217,9 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
         unknown = [s for s in steps if s not in known]
         if unknown:
             raise RunError(f"未知步骤 {'、'.join(unknown)}；{'、'.join(o.value for o in chosen)} 可选：{'、'.join(known)}")
+        if FIGURES in steps and not _TABLE_STEPS & set(steps):
+            raise RunError(f"{FIGURES} 步骤根据本次运行写出的差异结果表绘图，请与 differential 一起指定，"
+                           f"如 --steps differential,{FIGURES}")
 
     ctx = start_run(project, experiment, run_id, steps)
     runs: list[OmicsRun] = []

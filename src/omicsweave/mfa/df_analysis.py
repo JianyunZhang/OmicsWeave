@@ -243,6 +243,19 @@ def _section(config: dict | None, name: str) -> dict:
     return (config or {}).get(name, {}) or {}
 
 
+def selection_thresholds(analysis_config: dict | None) -> dict[str, float]:
+    """差异通量的入选阈值（``analysis.differential_flux`` 中的设置或默认值）：pvalue、fdr、log2fc、cohen_d、hedges_g。"""
+    diff_cfg = _section(analysis_config, "differential_flux")
+    cohen_d = float(diff_cfg.get("cohen_d_threshold", 0.5))
+    return {
+        "pvalue": float(diff_cfg.get("pvalue_threshold", 0.05)),
+        "fdr": float(diff_cfg.get("fdr_threshold", 0.10)),
+        "log2fc": float(diff_cfg.get("log2fc_threshold", 0.5)),
+        "cohen_d": cohen_d,
+        "hedges_g": float(diff_cfg.get("hedges_g_threshold", cohen_d)),
+    }
+
+
 def _effective_statistic(
     statistic: str,
     low_n: bool,
@@ -649,14 +662,15 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
     zero_threshold = float(preprocessing_cfg.get("zero_threshold", 1.0e-10))
     statistic = str(diff_cfg.get("statistic", "auto")).lower()
     multiple_testing = str(diff_cfg.get("multiple_testing", "fdr_bh")).lower()
-    pvalue_threshold = float(diff_cfg.get("pvalue_threshold", 0.05))
-    fdr_threshold = float(diff_cfg.get("fdr_threshold", 0.10))
-    log2fc_threshold = float(diff_cfg.get("log2fc_threshold", 0.5))
-    cohen_d_threshold = float(diff_cfg.get("cohen_d_threshold", 0.5))
+    thresholds = selection_thresholds(analysis_config)
+    pvalue_threshold = thresholds["pvalue"]
+    fdr_threshold = thresholds["fdr"]
+    log2fc_threshold = thresholds["log2fc"]
+    cohen_d_threshold = thresholds["cohen_d"]
     # 默认只标注不过滤：可辨识性差是模型/数据问题，交由使用者判断是否剔除。
     # 开启后 UNCONSTRAINED_LABELS（poorly_constrained、bound_pinned）强制不显著。
     require_identifiable = bool(diff_cfg.get("require_identifiable", False))
-    hedges_g_threshold = float(diff_cfg.get("hedges_g_threshold", cohen_d_threshold))
+    hedges_g_threshold = thresholds["hedges_g"]
     stability_cfg = dict(diff_cfg.get("stability", {}) or {})
     stability_enabled = bool(stability_cfg.get("enabled", False))
     stability_use_for_selection = bool(stability_cfg.get("use_for_selection", False))

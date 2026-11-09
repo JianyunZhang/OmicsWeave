@@ -27,6 +27,7 @@ from omicsweave.core.project import project_context
 from omicsweave.core.run import RunError, run_experiment
 from omicsweave.proteomics.run_proteomics_pipeline import load_and_clean_data
 from omicsweave.proteomics.runner import read_protein_matrix
+from tests.visualization.test_volcano import assert_volcanoes
 
 EXP = "prot_exp"
 ANIMALS = {str(i): ("LFD" if i <= 4 else "HFD") for i in range(1, 9)}
@@ -160,6 +161,9 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         self.assertEqual(liver.features.loc["Prot000", "uniprot_id"], "P00000")
         self.assertTrue((prot / "qc" / "liver" / "qc_summary.json").is_file())
         self.assertEqual(self.notes, [])
+
+    def test_volcano_for_each_tissue_and_contrast(self) -> None:
+        assert_volcanoes(self, self.run_dir / "omics" / "proteomics")
 
 
 class ReportInputTest(unittest.TestCase):

@@ -94,7 +94,18 @@ class RunFrameworkTest(unittest.TestCase):
         mfa = run_dir / "omics" / "mfa"
         self.assertTrue((mfa / "qc" / "fitting_loss.parquet").is_file())
         self.assertFalse((mfa / "tables").exists())
+        self.assertFalse((mfa / "figures").exists())
         self.assertEqual(read_manifest(run_dir).parameters["steps"], ["qc"])
+
+    def test_figures_step_needs_the_differential_table(self) -> None:
+        with self.assertRaisesRegex(RunError, "differential,figures"):
+            run_experiment(EXP, ["mfa"], steps=["qc", "figures"], root=self.root)
+        self.assertFalse((self.root / "analysis_results").exists())
+        run_dir, _ = _quiet(run_experiment, EXP, ["mfa"], steps=["differential", "figures"], root=self.root)
+        figures = sorted(p.name for p in (run_dir / "omics" / "mfa" / "figures").iterdir())
+        self.assertIn("volcano_liver_HFD_vs_LFD.png", figures)
+        run_dir, _ = _quiet(run_experiment, EXP, ["mfa"], steps=["differential"], root=self.root)
+        self.assertFalse((run_dir / "omics" / "mfa" / "figures").exists())
 
     def test_each_run_gets_its_own_directory(self) -> None:
         first, _ = _quiet(run_experiment, EXP, ["mfa"], steps=["qc"], root=self.root, run_id="run_a")

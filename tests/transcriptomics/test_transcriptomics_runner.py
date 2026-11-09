@@ -28,6 +28,7 @@ from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
 from omicsweave.core.project import project_context
 from omicsweave.core.run import RunError, run_experiment
+from tests.visualization.test_volcano import assert_volcanoes
 
 try:
     import pydeseq2  # noqa: F401
@@ -196,6 +197,7 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         sizes = pd.read_parquet(tx / "qc" / "library_sizes.parquet")
         self.assertEqual(len(sizes), 16)
         self.assertEqual(self.notes, [])
+        assert_volcanoes(self, tx)
 
 
 class KallistoInputTest(unittest.TestCase):

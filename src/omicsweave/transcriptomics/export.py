@@ -15,7 +15,10 @@ import pandas as pd
 from omicsweave.contract.dataset import ContractError
 from omicsweave.core.model import Omics
 
-SELECTION_RULE = "padj<0.05 and |log2FC|>1"
+# 与旧流程（rnaseq_pipeline、run_wilcoxon_de）判断 significant 的阈值相同
+PADJ_CUTOFF = 0.05
+LOG2FC_CUTOFF = 1.0
+SELECTION_RULE = f"padj<{PADJ_CUTOFF:g} and |log2FC|>{LOG2FC_CUTOFF:g}"
 # 原工具的检验方法名 → 统一表中的 method
 _METHODS = {"pydeseq2": "deseq2", "wilcoxon": "wilcoxon", "wilcoxon_effect_only": "effect_size_only"}
 # 原表中保留为附加列的列：原列名 → 统一表中的列名

@@ -29,6 +29,8 @@
     qc/quant_summary.parquet      kallisto 的比对率（kallisto 输入时）
     tables/differential.parquet   统一差异结果表
     tables/enrichment.parquet     ORA 与预排序 GSEA
+    figures/                      火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
+                                  :mod:`omicsweave.visualization.volcano`；纵轴为校正后 p）
     details/<组织>/                原工具的差异结果表（含 baseMean、lfcSE、未收缩的 log2FC 等）
 """
 from __future__ import annotations
@@ -47,9 +49,10 @@ from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups
 from omicsweave.core.validate import biological_samples
+from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from . import qc_gate
-from .export import de_to_contract
+from .export import LOG2FC_CUTOFF, PADJ_CUTOFF, de_to_contract
 from .normalization import AGGREGATION_LENGTH_SCALED_TPM, VALID_AGGREGATION_METHODS
 from .rnaseq_pipeline import (
     aggregate_counts_to_gene,
@@ -59,7 +62,7 @@ from .rnaseq_pipeline import (
 )
 from .run_wilcoxon_de import run_wilcoxon_analysis
 
-STEPS = ("qc", "differential", "enrichment")
+STEPS = ("qc", "differential", "enrichment", "figures")
 # 与旧流程（enrichment/_run.py、gsea/_run.py）使用的 Enrichr 库相同
 DEFAULT_GENE_SETS = [
     "GO_Biological_Process_2025", "GO_Molecular_Function_2025", "GO_Cellular_Component_2025",
@@ -249,6 +252,9 @@ def run(ctx: RunContext) -> OmicsRun:
         record.parameters["contrasts"] = list(dict.fromkeys(r[0].id for r in results))
         if ctx.wants("enrichment") and results:
             _enrichment(ctx, results, record)
+    if ctx.wants("figures"):
+        record.notes += write_bundle_volcanoes(out, ctx.experiment.config.design.contrasts, metric="padj",
+                                               thresholds=Thresholds(p=PADJ_CUTOFF, log2fc=LOG2FC_CUTOFF))
     return record
 
 

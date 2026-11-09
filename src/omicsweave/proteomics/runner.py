@@ -36,6 +36,8 @@
     qc/<组织>/                     样本 QC 指标、蛋白缺失率、重复相关性、PCA 得分与 QC 图
     tables/differential.parquet    统一差异结果表
     tables/enrichment.parquet      ORA 与预排序 GSEA
+    figures/                       火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
+                                   :mod:`omicsweave.visualization.volcano`；纵轴为校正后 p）
     details/<组织>/<比较>/          旧版格式的差异蛋白表与设计报告
 """
 from __future__ import annotations
@@ -55,6 +57,7 @@ from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 from omicsweave.core.validate import biological_samples
+from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from .differential_analysis import run_differential_analysis
 from .enrichment.gsea import DEFAULT_GENE_SETS, build_ranked_list
@@ -63,7 +66,7 @@ from .export import dp_to_contract
 from .proteomics_qc import generate_qc_outputs
 from .run_proteomics_pipeline import load_and_clean_data, preprocess_data
 
-STEPS = ("qc", "differential", "enrichment")
+STEPS = ("qc", "differential", "enrichment", "figures")
 # 与旧版配置加载器的默认值相同
 _DEFAULTS: dict[str, Any] = {
     "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "fdr_method": "fdr_bh", "dp_method": "limma",
@@ -286,6 +289,9 @@ def run(ctx: RunContext) -> OmicsRun:
         write_differential(pd.concat(tables, ignore_index=True), out / "tables" / "differential.parquet")
     if ctx.wants("enrichment") and enrichment_inputs:
         _enrichment(ctx, settings, enrichment_inputs, record)
+    if ctx.wants("figures"):
+        record.notes += write_bundle_volcanoes(out, experiment.config.design.contrasts, metric="padj",
+                                               thresholds=Thresholds(p=pval_cutoff, log2fc=log2fc_cutoff))
     record.parameters = {**record.parameters, "tissues": [t for t, _, _ in blocks], "covariates": covariates,
                          "contrasts": list(dict.fromkeys(contrasts_run)), "analysis": settings}
     return record

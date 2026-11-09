@@ -18,6 +18,10 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
     qc/fitting_loss.parquet         每个样本的拟合残差分布
     qc/mid_fit_residuals.parquet    实测与模拟 MID 的残差（有 MID 时）
     tables/differential.parquet     统一差异结果表（所有比较 × 所有组织）
+    figures/                        火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
+                                    :mod:`omicsweave.visualization.volcano`）：纵轴为主检验的 p 值，只给效应量的
+                                    比较为 |Hedges' g|；横轴半宽不超过 10（1024 倍），更大的倍数来自接近 0 的
+                                    净通量分母，钉在边界上
     details/                        旧版格式的明细 CSV；各比较的差异通量宽表在 details/contrasts/<比较>/ 下
 
 多示踪剂时另有::
@@ -47,12 +51,21 @@ from omicsweave.contract.tables import validate_differential, write_differential
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from . import multi_tracer
-from .df_analysis import differential_flux, mid_fit_residuals, quality_control, sample_flux_matrix
+from .df_analysis import (
+    differential_flux,
+    mid_fit_residuals,
+    quality_control,
+    sample_flux_matrix,
+    selection_thresholds,
+)
 from .export import differential_flux_to_contract
 
-STEPS = ("qc", "differential")
+STEPS = ("qc", "differential", "figures")
+# 火山图横轴半宽的上限（log2FC = 10，即 1024 倍）：净通量的分母接近 0 时 |log2FC| 可达 20 以上，属于数值假象
+_VOLCANO_X_CAP = 10.0
 # df_analysis.differential_flux 从输出目录读取 sample_flux_matrix 写出的可辨识性表
 _IDENTIFIABILITY = Path("01_df_results", "all_tissues", "flux_matrix", "flux_identifiability.csv")
 
@@ -297,6 +310,12 @@ def run(ctx: RunContext) -> OmicsRun:
             record.notes += _multi_tracer_notes(experiment, tracer_of)
             contrasts_run = _run_multi_tracer(experiment, results, flux_df, all_fits, tissues, labels, tracer_of,
                                               analysis, out, record)
+
+    if ctx.wants("figures"):
+        cut = selection_thresholds(analysis)
+        record.notes += write_bundle_volcanoes(
+            out, experiment.config.design.contrasts, metric="pvalue", x_cap=_VOLCANO_X_CAP,
+            thresholds=Thresholds(p=cut["pvalue"], log2fc=cut["log2fc"], effect_size=cut["hedges_g"]))
 
     record.parameters = {
         "input_format": settings.input.format,

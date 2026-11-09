@@ -31,6 +31,7 @@ from omicsweave.mfa.export import differential_flux_to_contract
 from omicsweave.mfa.mfa_analysis import MFAAnalyser
 from omicsweave.mfa.mfa_experiment_config import load_mfa_config
 from omicsweave.mfa.run_mfa_analysis import run_from_mfa_config
+from tests.visualization.test_volcano import assert_volcanoes
 
 EXP = "mfa_exp"
 UNITS = "nmol/min/g"
@@ -169,6 +170,9 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         outputs = {f.path for f in manifest.files if f.role == "output"}
         self.assertIn("omics/mfa/tables/differential.parquet", outputs)
         self.assertEqual(manifest.parameters["mfa"]["contrasts"], ["treat_vs_control"])
+        # 火山图随默认步骤画出，并登记在运行清单中
+        assert_volcanoes(self, mfa)
+        self.assertIn("omics/mfa/figures/volcano_liver_treat_vs_control.pdf", outputs)
 
     def test_standard_format_input_gives_same_result(self) -> None:
         results = convert_legacy_mfa(self.flux_path, self.mid_path, model_id="toy_model", flux_units=UNITS).results

@@ -24,6 +24,8 @@
     qc/<组织>/                    逐代谢物 QC 指标、样本总信号与归一化因子、预处理摘要
     tables/differential.parquet   统一差异结果表
     tables/enrichment.parquet     KEGG 通路 ORA（显著代谢物，不分上下调）与预排序 GSEA
+    figures/                      火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
+                                  :mod:`omicsweave.visualization.volcano`；纵轴为校正后 p）
     details/<组织>/               旧版格式的差异分析宽表与 PLS-DA 验证摘要
 """
 from __future__ import annotations
@@ -43,6 +45,7 @@ from omicsweave.core.config import Experiment, Project
 from omicsweave.core.idmap.metabolite_id_mapping import annotate_metabolites
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from .data_preprocessing import (
     PreprocessingOptions,
@@ -57,7 +60,7 @@ from .export import differential_to_contract, ora_to_contract
 from .gsea._run import run_gsea
 from .plotting.qc_plots import fit_plsda
 
-STEPS = ("qc", "differential", "enrichment")
+STEPS = ("qc", "differential", "enrichment", "figures")
 _QC_TYPES = {"qc", "pool"}
 _EXCLUDED_TYPES = {"blank", "standard"}
 _DISPLAY_ONLY = {"tissue_labels", "plot_colors"}
@@ -312,6 +315,11 @@ def run(ctx: RunContext) -> OmicsRun:
         write_enrichment(pd.concat(enrichment, ignore_index=True), out / "tables" / "enrichment.parquet")
     elif ctx.wants("enrichment") and differential:
         record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA 与 GSEA")
+    if ctx.wants("figures"):
+        # 要求 VIP 时，阈值线外的点也可能未入选；入选规则写在图下方
+        record.notes += write_bundle_volcanoes(
+            out, experiment.config.design.contrasts, metric="padj",
+            thresholds=Thresholds(p=float(settings["fdr_cutoff"]), log2fc=float(settings["log2fc_cutoff"])))
     record.parameters = {
         "tissues": [b.tissue for b in blocks],
         "contrasts": list(dict.fromkeys(contrasts_run)),
