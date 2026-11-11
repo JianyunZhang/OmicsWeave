@@ -17,11 +17,14 @@ import weakref
 import pandas as pd
 
 from omicsweave.core.idmap.mouse_gene_id_mapping import (
+    ENSEMBL_TO_SYMBOL,
     GENE_ALIAS_LOOKUP,
     GENE_ANNOTATIONS,
+    NCBI_TO_SYMBOL,
 )
 from omicsweave.core.idmap.mouse_protein_id_mapping import (
     MOUSE_PROTEIN_UNIPROT_MAPPING,
+    UNIPROT_TO_SYMBOL,
 )
 from omicsweave.core.idmap.metabolite_id_mapping import lookup_metabolite_ids
 
@@ -53,22 +56,18 @@ class IdentifierMatch:
     match_method_by_index: dict[Any, str]
 
 
-_GENE_SYMBOL_LOWER = {
-    symbol.casefold(): symbol for symbol in GENE_ANNOTATIONS
-}
-_GENE_ALIAS_LOWER = {
-    alias.casefold(): canonical for alias, canonical in GENE_ALIAS_LOOKUP.items()
-}
-_ENSEMBL_TO_GENE = {
-    str(info["ensembl_id"]).upper(): symbol
-    for symbol, info in GENE_ANNOTATIONS.items()
-    if info.get("ensembl_id")
-}
-_NCBI_TO_GENE = {
-    str(info["ncbi_gene_id"]): symbol
-    for symbol, info in GENE_ANNOTATIONS.items()
-    if info.get("ncbi_gene_id")
-}
+def _unique_casefold(pairs: Sequence[tuple[str, str | None]]) -> dict[str, str | None]:
+    """忽略大小写的查找表；大小写折叠后指向不同目标的键不收录（只能精确匹配）。"""
+    targets: dict[str, set[str | None]] = defaultdict(set)
+    for key, target in pairs:
+        targets[key.casefold()].add(target)
+    return {key: next(iter(values)) for key, values in targets.items() if len(values) == 1}
+
+
+_GENE_SYMBOL_LOWER = _unique_casefold([(symbol, symbol) for symbol in GENE_ANNOTATIONS])
+_GENE_ALIAS_LOWER = _unique_casefold(list(GENE_ALIAS_LOOKUP.items()))
+_ENSEMBL_TO_GENE = {gene_id.upper(): symbol for gene_id, symbol in ENSEMBL_TO_SYMBOL.items()}
+_NCBI_TO_GENE = dict(NCBI_TO_SYMBOL)
 _GENE_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
 _PROTEIN_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
 _METABOLITE_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
@@ -147,6 +146,11 @@ def _metabolite_target_key(alias: Any) -> str:
 
 
 def _canonical_gene_symbol(value: Any) -> str | None:
+    text = "" if value is None or (not isinstance(value, str) and pd.isna(value)) else str(value).strip()
+    if text in GENE_ANNOTATIONS:
+        return text
+    if text in GENE_ALIAS_LOOKUP:
+        return GENE_ALIAS_LOOKUP[text]
     normalized = _normalize_name(value)
     if not normalized:
         return None
@@ -282,7 +286,12 @@ def _protein_feature_index(dataframe: pd.DataFrame) -> dict[str, Any]:
             None,
         )
         if canonical:
-            symbol_index[canonical].append((row_index, bool(row_accessions)))
+            # None：数据行没有登记号；空集：登记号都不在注册表中；否则为注册表中这些登记号所属的基因
+            owners = (
+                {UNIPROT_TO_SYMBOL[a] for a in row_accessions if a in UNIPROT_TO_SYMBOL}
+                if row_accessions else None
+            )
+            symbol_index[canonical].append((row_index, owners))
     frozen = {
         "accessions": {
             accession: tuple(rows) for accession, rows in accession_index.items()
@@ -299,7 +308,12 @@ def match_protein_features(
     dataframe: pd.DataFrame,
     proteins: Sequence[str],
 ) -> IdentifierMatch:
-    """用 UniProt 主 accession 优先、规范小鼠基因符号回退匹配蛋白。"""
+    """用 UniProt 登记号优先、规范小鼠基因符号回退匹配蛋白。
+
+    数据行的登记号与注册表一致时按登记号匹配。按符号回退只在数据行没有可信冲突时进行：
+    数据行若带有注册表登记在另一个基因名下的 Swiss-Prot 登记号，说明符号与登记号矛盾，不按符号匹配；
+    数据行的登记号不在注册表中（TrEMBL、亚型、厂商编号）时允许按符号回退。
+    """
     canonical_queries = tuple(dict.fromkeys(
         canonical
         for protein in proteins
@@ -310,13 +324,12 @@ def match_protein_features(
         return IdentifierMatch((), (), {})
 
     query_by_uniprot: dict[str, set[str]] = {}
-    queries_with_uniprot: set[str] = set()
     for query in canonical_queries:
         info = MOUSE_PROTEIN_UNIPROT_MAPPING.get(query, {})
-        accession = str(info.get("uniprot_id") or "").strip().upper()
-        if accession:
-            query_by_uniprot.setdefault(accession, set()).add(query)
-            queries_with_uniprot.add(query)
+        for accession in info.get("uniprot_ids") or (info.get("uniprot_id"),):
+            accession = str(accession or "").strip().upper()
+            if accession:
+                query_by_uniprot.setdefault(accession, set()).add(query)
 
     feature_index = _protein_feature_index(dataframe)
     selected_queries: dict[Any, set[str]] = defaultdict(set)
@@ -326,15 +339,17 @@ def match_protein_features(
             selected_queries[row_index].update(queries)
             methods[row_index] = "uniprot_id"
     for query in canonical_queries:
-        for row_index, row_has_accession in feature_index["symbols"].get(query, ()):
-            if query in queries_with_uniprot and row_has_accession:
-                continue
+        for row_index, row_owners in feature_index["symbols"].get(query, ()):
+            if row_owners is None:
+                method = "canonical_symbol"
+            elif not row_owners:
+                method = "canonical_symbol_unregistered_accession"
+            elif query in row_owners:
+                method = "uniprot_id"
+            else:
+                continue  # 登记号属于另一个基因：符号与登记号矛盾
             selected_queries[row_index].add(query)
-            methods.setdefault(
-                row_index,
-                "canonical_symbol_no_registry_id"
-                if row_has_accession else "canonical_symbol",
-            )
+            methods.setdefault(row_index, method)
 
     matched_indices = [
         row_index for row_index in dataframe.index

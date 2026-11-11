@@ -1,0 +1,34 @@
+{
+  "generated_by": "python -m omicsweave.core.idmap.build_registry",
+  "generated_on": "2026-11-11",
+  "uniprot": {
+    "release": "2026_04",
+    "release_date": "2026-11-04",
+    "query": "https://rest.uniprot.org/uniprotkb/stream?compressed=true&format=tsv&fields=accession,id,gene_primary,gene_synonym,protein_name,ec,xref_mgi,xref_geneid,xref_ensembl&query=(organism_id:10090) AND (reviewed:true)",
+    "file": "uniprot_mouse_sprot.tsv.gz",
+    "sha256": "ae5e7ab06e0341e8d0cb9e8467195fb6432237b3332336b18256606e57debeb5"
+  },
+  "ensembl": {
+    "file": "Mus_musculus.GRCm39.cdna.all.fa.gz",
+    "assembly": "GRCm39",
+    "sha256": "eafd274cdf83d440432ce6d2eccc34571b00cd966bcd5f84bd1fe17bbb8e54ae",
+    "note": "Ensembl 发布号未写入 FASTA；以文件名与 sha256 追溯"
+  },
+  "join": "UniProt 条目按 MGI 登记号对齐到 Ensembl 序列头中的 MGI 符号；对不上时用 UniProt 主基因名",
+  "summary": {
+    "n_genes": 35842,
+    "n_genes_from_ensembl": 35770,
+    "n_proteins": 17129,
+    "n_uniprot_entries": 17285,
+    "n_uniprot_without_gene_name": 156,
+    "n_uniprot_symbol_not_in_ensembl": 72,
+    "n_symbols_with_several_proteins": 36,
+    "n_aliases": 14130,
+    "dropped_aliases": {
+      "ambiguous_alias": 311,
+      "alias_is_official_symbol": 307
+    },
+    "dropped_curated_aliases": {},
+    "casefold_collisions": []
+  }
+}

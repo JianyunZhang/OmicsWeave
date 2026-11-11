@@ -73,7 +73,12 @@ from .feature_resolver import (
     match_metabolite_roles,
     match_protein_features,
 )
-from .audit import MappingIntegrityAudit, audit_mapping_integrity
+from .audit import (
+    MappingIntegrityAudit,
+    RegistryDataAudit,
+    audit_mapping_integrity,
+    audit_registry_against_data,
+)
 
 
 # ===========================================================================
@@ -153,6 +158,8 @@ __all__ = [
     "match_protein_features",
     "MappingIntegrityAudit",
     "audit_mapping_integrity",
+    "RegistryDataAudit",
+    "audit_registry_against_data",
     # --- Convenience ---
     "validate_all_mappings",
 ]

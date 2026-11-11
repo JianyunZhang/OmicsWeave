@@ -371,7 +371,6 @@ GPT_c:
 GLUD_m:
   direct_enzymes:
   - Glud1
-  - Glud2
   upstream_regulators: []
   downstream_enzymes: []
   transporters: []
@@ -394,7 +393,6 @@ GLND_m:
   upstream_regulators: []
   downstream_enzymes:
   - Glud1
-  - Glud2
   transporters: []
   cofactors: []
   description: Glutaminase - 谷氨酰胺酶
@@ -443,14 +441,13 @@ BHBDH_m:
   upstream_regulators: []
   downstream_enzymes:
   - Oxct1
-  - Oxct2
   transporters: []
   cofactors: []
   description: β-Hydroxybutyrate Dehydrogenase - β-羟基丁酸脱氢酶
 G6PDH2R_PGL_GND_c:
   direct_enzymes:
   - G6pd
-  - Pgl
+  - Pgls
   - Rgn
   upstream_regulators: []
   downstream_enzymes:
@@ -807,7 +804,6 @@ PC_m:
 SCOT_m:
   direct_enzymes:
   - Oxct1
-  - Oxct2
   upstream_regulators: []
   downstream_enzymes: []
   transporters: []
@@ -848,7 +844,7 @@ G6PDH_c:
   - Nfe2l2
   - Tp53
   downstream_enzymes:
-  - Pgl
+  - Pgls
   - Rgn
   - Pgd
   transporters: []

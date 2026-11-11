@@ -82,6 +82,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "omicsweave.integration.mappings" = ["*.yaml"]
+"omicsweave.core.idmap" = ["data/*.tsv.gz", "data/*.json"]
 "omicsweave.integration" = ["examples/*.yaml", "examples/*.csv"]
 
 [tool.pytest.ini_options]

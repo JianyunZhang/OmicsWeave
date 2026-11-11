@@ -26,15 +26,16 @@ from omicsweave.integration.loaders.mfa_loader import MFALoader
 
 class GeneFeatureMappingTest(unittest.TestCase):
     def test_gene_alias_case_and_standard_ids_resolve_to_canonical_mouse_gene(self) -> None:
+        # MGI 符号是 Gpi1；UniProt 写作 Gpi，作为别名解析到 Gpi1
         genes = pd.DataFrame({
             "gene": ["GPI", "unresolved"],
-            "ensembl_gene_id": ["", "ENSMUSG00000022143"],
+            "ensembl_gene_id": ["", "ENSMUSG00000036427"],
         })
 
-        matched = match_gene_features(genes, ["Gpi1"])
+        matched = match_gene_features(genes, ["Gpi"])
 
         self.assertEqual(matched.indices, (0, 1))
-        self.assertEqual(matched.matched_queries, ("Gpi",))
+        self.assertEqual(matched.matched_queries, ("Gpi1",))
         self.assertEqual(
             matched.match_method_by_index,
             {0: "canonical_symbol", 1: "ensembl_gene_id"},
@@ -74,7 +75,7 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         matched = match_protein_features(proteins, ["Fbp2", "Gpi"])
 
         self.assertEqual(matched.indices, (0, 1))
-        self.assertEqual(matched.matched_queries, ("Fbp2", "Gpi"))
+        self.assertEqual(matched.matched_queries, ("Fbp2", "Gpi1"))
         self.assertEqual(
             matched.match_method_by_index,
             {0: "uniprot_id", 1: "canonical_symbol"},
@@ -99,7 +100,9 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         self.assertEqual(details["n_opposite"], 0)
         self.assertEqual(details["n_unresolved"], 1)
 
-    def test_symbol_fallback_is_allowed_only_when_query_has_no_uniprot_registry_id(self) -> None:
+    def test_symbol_fallback_is_blocked_only_by_an_accession_registered_to_another_gene(self) -> None:
+        # 第 1 行的登记号不在注册表中（厂商编号）：允许按符号回退；
+        # 第 2 行写着 Fbp2，但 P21550 在注册表中属于 Eno3：符号与登记号矛盾，不按符号匹配
         proteins = pd.DataFrame({
             "protein": ["Uqcrfs1", "Fbp2"],
             "uniprot_id": ["vendor-accession", "P21550"],
@@ -111,7 +114,7 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         self.assertEqual(matched.matched_queries, ("Uqcrfs1",))
         self.assertEqual(
             matched.match_method_by_index,
-            {0: "canonical_symbol_no_registry_id"},
+            {0: "canonical_symbol_unregistered_accession"},
         )
 
     def test_glycerol_phosphate_shuttle_does_not_map_to_glycogen_enzymes(self) -> None:
@@ -154,7 +157,7 @@ class StandardizedFeatureLoaderTest(unittest.TestCase):
             tissue_dir.mkdir(parents=True)
             pd.DataFrame({
                 "gene_symbol": ["Gpi"],
-                "ensembl_gene_id": ["ENSMUSG00000022143"],
+                "ensembl_gene_id": ["ENSMUSG00000036427"],
                 "ncbi_gene_id": ["14751"],
                 "log2fc": [1.2],
                 "pvalue": [0.001],
@@ -176,7 +179,7 @@ class StandardizedFeatureLoaderTest(unittest.TestCase):
             row = loaded["de"]["case_vs_control"]["liver"].iloc[0]
 
             self.assertEqual(row["gene"], "Gpi")
-            self.assertEqual(row["ensembl_gene_id"], "ENSMUSG00000022143")
+            self.assertEqual(row["ensembl_gene_id"], "ENSMUSG00000036427")
             self.assertEqual(str(row["ncbi_gene_id"]), "14751")
 
     def test_mfa_loader_uses_configured_comparisons_as_allowlist(self) -> None:

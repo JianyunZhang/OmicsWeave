@@ -7,6 +7,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
+
 from omicsweave.core.idmap.metabolite_id_mapping import lookup_metabolite_ids
 from omicsweave.core.idmap.mouse_gene_id_mapping import (
     GENE_ALIAS_LOOKUP,
@@ -14,6 +16,7 @@ from omicsweave.core.idmap.mouse_gene_id_mapping import (
 )
 from omicsweave.core.idmap.mouse_protein_id_mapping import (
     MOUSE_PROTEIN_UNIPROT_MAPPING,
+    UNIPROT_TO_SYMBOL,
 )
 from omicsweave.core.idmap.reaction_pathway_mapping import REACTION_REGISTRY
 
@@ -46,18 +49,9 @@ class MappingIntegrityAudit:
 
 
 def _canonical_gene(symbol: str) -> str | None:
-    if symbol in GENE_ANNOTATIONS:
-        return symbol
-    if symbol in GENE_ALIAS_LOOKUP:
-        return GENE_ALIAS_LOOKUP[symbol]
-    symbol_lower = symbol.casefold()
-    for canonical in GENE_ANNOTATIONS:
-        if canonical.casefold() == symbol_lower:
-            return canonical
-    for alias, canonical in GENE_ALIAS_LOOKUP.items():
-        if alias.casefold() == symbol_lower:
-            return canonical
-    return None
+    from .feature_resolver import _canonical_gene_symbol
+
+    return _canonical_gene_symbol(symbol)
 
 
 def _database_ids(name: str) -> set[str]:
@@ -191,4 +185,56 @@ def audit_mapping_integrity() -> MappingIntegrityAudit:
     )
 
 
-__all__ = ["MappingIntegrityAudit", "audit_mapping_integrity"]
+@dataclass(frozen=True)
+class RegistryDataAudit:
+    """注册表与一份蛋白组数据自带登记号的对照。
+
+    只统计“符号能解析为规范基因、且登记号在注册表中”的行；``conflicts`` 为数据行的符号与
+    注册表中该登记号所属基因不一致的行（数据行符号, 登记号, 注册表中的基因）。
+    """
+
+    n_rows: int
+    n_checked: int
+    n_agree: int
+    conflicts: tuple[tuple[str, str, str], ...]
+    n_unregistered_accession: int
+
+    @property
+    def agreement(self) -> float:
+        return self.n_agree / self.n_checked if self.n_checked else float("nan")
+
+
+def audit_registry_against_data(
+    proteins: pd.DataFrame,
+    symbol_column: str = "feature_id",
+    accession_column: str = "uniprot_id",
+) -> RegistryDataAudit:
+    """检查注册表的 UniProt 登记号是否与蛋白组数据自带的“基因符号—登记号”一致。
+
+    蛋白组搜库结果中的登记号与基因名来自同一份 FASTA，是最直接的对照；不一致说明注册表或数据标注有误。
+    蛋白组（``;`` 分隔的多个蛋白）只看第一个成员。
+    """
+    from .feature_resolver import _canonical_gene_symbol
+
+    pairs = proteins[[symbol_column, accession_column]].dropna().drop_duplicates()
+    n_checked = n_agree = n_unregistered = 0
+    conflicts: list[tuple[str, str, str]] = []
+    for symbol_value, accession_value in pairs.itertuples(index=False):
+        symbol = str(symbol_value).split(";")[0].strip()
+        accession = str(accession_value).split(";")[0].strip().upper()
+        canonical = _canonical_gene_symbol(symbol)
+        if not canonical or not accession:
+            continue
+        owner = UNIPROT_TO_SYMBOL.get(accession)
+        if owner is None:
+            n_unregistered += 1
+            continue
+        n_checked += 1
+        if owner == canonical:
+            n_agree += 1
+        else:
+            conflicts.append((symbol, accession, owner))
+    return RegistryDataAudit(len(pairs), n_checked, n_agree, tuple(sorted(conflicts)), n_unregistered)
+
+
+__all__ = ["MappingIntegrityAudit", "audit_mapping_integrity", "RegistryDataAudit", "audit_registry_against_data"]
