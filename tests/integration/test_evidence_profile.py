@@ -81,12 +81,9 @@ class EvidenceProfileTest(unittest.TestCase):
         self.assertEqual(missing["evidence_grade"], "Convergent")
 
     def test_mfa_gate_failure_keeps_other_omics_in_new_profile(self) -> None:
-        flux_id, mapping = next(
-            (flux_id, mapping)
-            for flux_id, mapping in FLUX_GENE_MAPPING.items()
-            if mapping.get("genes")
-        )
-        gene = mapping["genes"][0]
+        # 一个可给出方向证据的反应及其直接酶（近平衡、转运反应的酶量只记关联，不能用来测这条路径）
+        flux_id, gene = "HEX_c", "Hk2"
+        self.assertIn(gene, FLUX_GENE_MAPPING[flux_id]["genes"])
         config = SimpleNamespace(scoring={
             "evidence_profile": {"mfa_inference_unit": "mcmc_fit_points"},
         })

@@ -81,7 +81,7 @@ version = { attr = "omicsweave.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"omicsweave.integration.mappings" = ["*.yaml"]
+"omicsweave.integration.mappings" = ["*.yaml", "data/*.tsv", "data/*.json"]
 "omicsweave.core.idmap" = ["data/*.tsv.gz", "data/*.json"]
 "omicsweave.integration" = ["examples/*.yaml", "examples/*.csv"]
 

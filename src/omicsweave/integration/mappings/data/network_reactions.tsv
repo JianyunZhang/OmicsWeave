@@ -1,0 +1,161 @@
+flux_id	network	module	substrates	products	reversible	reaction_class	compartments	tissue_substrate_names	tissue_product_names	n_variants
+ACACCOA_lyase_m	carbon	ketone_body_utilization_specific_compartmentalized_model	ACACCOA_m	ACCOA_m;ACCOA_m	false	enzymatic	m		acetyl-coa	1
+ACAC_production_m	carbon	gastrointestinal_specific_compartmentalized_model	ACCOA_m;ACCOA_m	ACAC_m	false	enzymatic	m	acetyl-coa		1
+ACC_c	carbon	de_novo_lipogenesis_specific_model	ACCOA_c;CO2	MALCOA_c	false	enzymatic	c;pool	acetyl-coa		1
+ACE_exchange	carbon	basic_tissue_compartmentalized_model	ACE_c	ACE_e	true	exchange	c;e	acetate		1
+ACE_trans	carbon	basic_tissue_compartmentalized_model	ACE_m	ACE_c	true	transport	c;m			1
+ACITL_c	carbon	basic_tissue_compartmentalized_model	CIT_c	OAC_c;ACCOA_c	false	enzymatic	c	citrate	oxaloacetate;acetyl-coa	1
+ACONT_m	carbon	basic_tissue_compartmentalized_model	CIT_m	ICIT_m	true	enzymatic	m	citrate	isocitrate	1
+ACOT_c	carbon	basic_tissue_compartmentalized_model	ACCOA_m	ACE_m	false	enzymatic	m	acetyl-coa	acetate	1
+ACSL_PAL_c	carbon	acylcarnitine_shuttle_specific_model	PAL_c	PALCOA_c	false	enzymatic	c	palmitate		1
+ACSS2_m	carbon	basic_tissue_compartmentalized_model	ACE_m	ACCOA_m	false	enzymatic	m	acetate	acetyl-coa	1
+AGPAT_c	carbon	triglyceride_metabolism_specific_model	LPA_c	PA_c	false	enzymatic	c			1
+AKGD_m	carbon	basic_tissue_compartmentalized_model	AKG_m	SUCCOA_m;CO2	false	enzymatic	m;pool	alpha-ketoglutarate	succinyl-coa	1
+AKGMAL_m	carbon	basic_tissue_compartmentalized_model	MAL_c;AKG_m	MAL_m;AKG_c	true	transport	c;m			1
+ALA_exchange	carbon	basic_tissue_compartmentalized_model	ALA_e	ALA_c	true	exchange	c;e		alanine	1
+ASPGLU_m	carbon	basic_tissue_compartmentalized_model	ASP_m;GLU_c	ASP_c;GLU_m	true	transport	c;m			1
+ASPTA_c	carbon	basic_tissue_compartmentalized_model	ASP_c;AKG_c	OAC_c;GLU_c	true	enzymatic	c	aspartate;alpha-ketoglutarate	oxaloacetate;glutamate	1
+ASPTA_m	carbon	basic_tissue_compartmentalized_model	ASP_m;AKG_m	OAC_m;GLU_m	true	enzymatic	m	aspartate;alpha-ketoglutarate	oxaloacetate;glutamate	1
+ASP_exchange	carbon	basic_tissue_compartmentalized_model	ASP_e	ASP_c	true	exchange	c;e		aspartate	1
+ATGL_c	carbon	triglyceride_metabolism_specific_model	TAG_c	DAG_c	false	enzymatic	c			1
+BHBDH_m	carbon	gastrointestinal_specific_compartmentalized_model	BHB_m	ACAC_m	true	enzymatic	m	3-hydroxybutyrate		1
+BHB_input	carbon	ketone_body_utilization_specific_compartmentalized_model	BHB_e	BHB_c	false	exchange	c;e		3-hydroxybutyrate	1
+BHB_output	carbon	gastrointestinal_specific_compartmentalized_model	BHB_c	BHB_e	false	exchange	c;e	3-hydroxybutyrate		1
+BHB_trans	carbon	gastrointestinal_specific_compartmentalized_model	BHB_c	BHB_m	true	transport	c;m			1
+CACT_PALCAR	carbon	acylcarnitine_shuttle_specific_model	PALCAR_c	PALCAR_m	true	transport	c;m			1
+CIT_trans	carbon	basic_tissue_compartmentalized_model	MAL_m;CIT_c	MAL_c;CIT_m	true	transport	c;m			1
+CPT1_c	carbon	acylcarnitine_shuttle_specific_model	PALCOA_c	PALCAR_c	false	enzymatic	c		palmitoylcarnitine	1
+CPT2_m	carbon	acylcarnitine_shuttle_specific_model	PALCAR_m	PALCOA_m	true	enzymatic	m	palmitoylcarnitine		1
+CRAT_m	carbon	acylcarnitine_shuttle_specific_model	ACCOA_m	ACCAR_m	true	enzymatic	m	acetyl-coa	acetylcarnitine	1
+CS_m	carbon	basic_tissue_compartmentalized_model	OAC_m;ACCOA_m	CIT_m	false	enzymatic	m	oxaloacetate;acetyl-coa	citrate	1
+DGAT_c	carbon	triglyceride_metabolism_specific_model	DAG_c	TAG_c	false	enzymatic	c			1
+ELOVL6_c	carbon	fatty_acid_elongation_desaturation_specific_model	PAL_c;MALCOA_c	STE_c;CO2	false	enzymatic	c;pool	palmitate	stearate	1
+ENO_c	carbon	basic_tissue_compartmentalized_model	2PG_c	PEP_c	true	enzymatic	c	2-phosphoglycerate	phosphoenolpyruvate	1
+FA_esterification_c	carbon	fatty_acid_esterification_specific_model	FA_c	TG_store	false	enzymatic	c;pool			1
+FA_exchange	carbon	basic_tissue_compartmentalized_model	FA_c	FA_e	true	exchange	c;e			1
+FA_hydrolysis_c	carbon	triglyceride_metabolism_specific_model	FA_stock	FA_c	false	pseudo	c;pool			1
+FA_infuse	carbon	serum_fa_infusion_specific_model	FA_inf	FA_e	false	pseudo	e;pool			1
+FA_usage	carbon	basic_tissue_compartmentalized_model	FA_c	ACCOA_m	false	enzymatic	c;m		acetyl-coa	1
+FBA_c	carbon	basic_tissue_compartmentalized_model	FRU16BP_c	DHAP_c;GAP_c	true	enzymatic	c	fructose-1,6-bisphosphate	dihydroxyacetone phosphate;glyceraldehyde-3-phosphate	1
+FBPase_c	carbon	gastrointestinal_specific_compartmentalized_model	FRU16BP_c	FRU6P_c	false	enzymatic	c	fructose-1,6-bisphosphate	fructose-6-phosphate	1
+FUMH_m	carbon	basic_tissue_compartmentalized_model	FUM_m	MAL_m	true	enzymatic	m	fumarate	malate	1
+G3PP_c	carbon	basic_tissue_compartmentalized_model	G3P_c	GLYCEROL_c	false	enzymatic	c	glycerol 3-phosphate	glycerol	1
+G6PDH2R_PGL_GND_c	carbon	basic_tissue_compartmentalized_model	GLC6P_c	RUL5P_c;CO2	false	enzymatic	c;pool	glucose 6-phosphate	ribulose-5-phosphate	1
+G6Pase_c	carbon	gastrointestinal_specific_compartmentalized_model	GLC6P_c	GLC_c	false	enzymatic	c	glucose 6-phosphate	glucose	1
+GAPD_c	carbon	basic_tissue_compartmentalized_model	GAP_c	13BPG_c	true	enzymatic	c	glyceraldehyde-3-phosphate		1
+GK_c	carbon	basic_tissue_compartmentalized_model	GLYCEROL_c	G3P_c	false	enzymatic	c	glycerol	glycerol 3-phosphate	1
+GLC_exchange	carbon	basic_tissue_compartmentalized_model	GLC_e	GLC_c	true	exchange	c;e		glucose	1
+GLC_infuse	carbon	serum_specific_model	GLC_inf	GLC_e	false	pseudo	e;pool			1
+GLND_m	carbon	basic_tissue_compartmentalized_model	GLN_m	GLU_m	false	enzymatic	m	glutamine	glutamate	1
+GLNS_c	carbon	basic_tissue_compartmentalized_model	GLU_c	GLN_c	false	enzymatic	c	glutamate	glutamine	1
+GLN_exchange	carbon	basic_tissue_compartmentalized_model	GLN_e	GLN_c	true	exchange	c;e		glutamine	1
+GLN_trans	carbon	basic_tissue_compartmentalized_model	GLN_c	GLN_m	true	transport	c;m			1
+GLUD_m	carbon	basic_tissue_compartmentalized_model	AKG_m	GLU_m	true	enzymatic	m	alpha-ketoglutarate	glutamate	1
+GLU_exchange	carbon	basic_tissue_compartmentalized_model	GLU_e	GLU_c	true	exchange	c;e		glutamate	1
+GLU_trans	carbon	basic_tissue_compartmentalized_model	GLU_c	GLU_m	true	transport	c;m			1
+GLYCEROL_exchange	carbon	basic_tissue_compartmentalized_model	GLYCEROL_c	GLYCEROL_e	true	exchange	c;e	glycerol		1
+GLYCOGENOLYSIS_c	carbon	gastrointestinal_specific_compartmentalized_model	GLYGN_e	GLC1P_c	false	enzymatic	c;e		glucose-1-phosphate	1
+GLYCOGEN_SYNTHESIS_c	carbon	glycogen_synthesis_specific_model	GLC1P_c	GLYGN_store	false	enzymatic	c;pool	glucose-1-phosphate		1
+GLYCOLYSIS_c	carbon	serum_specific_model	GLC_e	PYR_e;PYR_e	false	extracellular	e			1
+GPAT_c	carbon	triglyceride_metabolism_specific_model	G3P_c	LPA_c	false	enzymatic	c	glycerol 3-phosphate		1
+GPS_c	carbon	basic_tissue_compartmentalized_model	G3P_c	DHAP_c	true	enzymatic	c	glycerol 3-phosphate	dihydroxyacetone phosphate	1
+GPT_c	carbon	basic_tissue_compartmentalized_model	PYR_c;GLU_c	ALA_c;AKG_c	true	enzymatic	c	pyruvate;glutamate	alanine;alpha-ketoglutarate	1
+HEX_c	carbon	basic_tissue_compartmentalized_model	GLC_c	GLC6P_c	false	enzymatic	c	glucose	glucose 6-phosphate	1
+HSL_c	carbon	triglyceride_metabolism_specific_model	DAG_c	MAG_c	false	enzymatic	c			1
+ICDH_m	carbon	basic_tissue_compartmentalized_model	ICIT_m	AKG_m;CO2	false	enzymatic	m;pool	isocitrate	alpha-ketoglutarate	1
+LAC_exchange	carbon	basic_tissue_compartmentalized_model	LAC_c	LAC_e	true	exchange	c;e	lactate		1
+LDH_c	carbon	basic_tissue_compartmentalized_model	PYR_c	LAC_c	true	enzymatic	c	pyruvate	lactate	1
+LDH_e	carbon	serum_specific_model	PYR_e	LAC_e	true	extracellular	e			1
+LIPID_c	carbon	basic_tissue_compartmentalized_model	ACCOA_c	ACCOA_lipid	false	enzymatic	c;pool	acetyl-coa		1
+LIPIN_c	carbon	triglyceride_metabolism_specific_model	PA_c	DAG_c	false	enzymatic	c			1
+MDH_c	carbon	basic_tissue_compartmentalized_model	MAL_c	OAC_c	true	enzymatic	c	malate	oxaloacetate	1
+MDH_m	carbon	basic_tissue_compartmentalized_model	MAL_m	OAC_m	true	enzymatic	m	malate	oxaloacetate	1
+ME2_c	carbon	basic_tissue_compartmentalized_model	MAL_c	PYR_c;CO2	false	enzymatic	c;pool	malate	pyruvate	1
+MGL_c	carbon	triglyceride_metabolism_specific_model	MAG_c	GLYCEROL_c	false	enzymatic	c		glycerol	1
+PAL_TG_hydrolysis_c	carbon	triglyceride_metabolism_specific_model	TGPAL_c	PAL_c	false	enzymatic	c		palmitate	1
+PAL_beta_oxidation	carbon	palmitate_pool_specific_model	PAL_c	ACCOA_m	false	enzymatic	c;m	palmitate	acetyl-coa	1
+PAL_esterification_c	carbon	triglyceride_metabolism_specific_model	PAL_c	TGPAL_c	false	enzymatic	c	palmitate		1
+PAL_exchange	carbon	palmitate_pool_specific_model	PAL_c	PAL_e	true	exchange	c;e	palmitate		1
+PAL_hydrolysis_c	carbon	palmitate_pool_specific_model	PAL_stock	PAL_c	false	pseudo	c;pool			1
+PC_m	carbon	basic_tissue_compartmentalized_model	PYR_m;CO2	OAC_m	false	enzymatic	m;pool	pyruvate	oxaloacetate	1
+PDH_m	carbon	basic_tissue_compartmentalized_model	PYR_m	ACCOA_m;CO2	false	enzymatic	m;pool	pyruvate	acetyl-coa	1
+PEPCK_c	carbon	basic_tissue_compartmentalized_model	OAC_c	PEP_c;CO2	false	enzymatic	c;pool	oxaloacetate	phosphoenolpyruvate	1
+PFK_c	carbon	basic_tissue_compartmentalized_model	FRU6P_c	FRU16BP_c	false	enzymatic	c	fructose-6-phosphate	fructose-1,6-bisphosphate	1
+PGI_c	carbon	basic_tissue_compartmentalized_model	GLC6P_c	FRU6P_c	true	enzymatic	c	glucose 6-phosphate	fructose-6-phosphate	1
+PGK_c	carbon	basic_tissue_compartmentalized_model	13BPG_c	3PG_c	true	enzymatic	c		3-phosphoglycerate	1
+PGMT_c	carbon	gastrointestinal_specific_compartmentalized_model	GLC6P_c	GLC1P_c	true	enzymatic	c	glucose 6-phosphate	glucose-1-phosphate	1
+PGM_c	carbon	basic_tissue_compartmentalized_model	3PG_c	2PG_c	true	enzymatic	c	3-phosphoglycerate	2-phosphoglycerate	1
+PHGDH_PSAT_PSP_c	carbon	basic_tissue_compartmentalized_model	3PG_c	SER_c	false	enzymatic	c	3-phosphoglycerate	serine	1
+PROS_m	carbon	basic_tissue_compartmentalized_model	PYR_m	ACE_m;CO2	false	enzymatic	m;pool	pyruvate	acetate	1
+PYK_c	carbon	basic_tissue_compartmentalized_model	PEP_c	PYR_c	false	enzymatic	c	phosphoenolpyruvate	pyruvate	1
+PYR_exchange	carbon	basic_tissue_compartmentalized_model	PYR_c	PYR_e	true	exchange	c;e	pyruvate		1
+PYR_trans	carbon	basic_tissue_compartmentalized_model	PYR_c	PYR_m	true	transport	c;m			1
+RPE_c	carbon	basic_tissue_compartmentalized_model	RUL5P_c	XYL5P_c	true	enzymatic	c	ribulose-5-phosphate	xylulose 5-phosphate	1
+RPI_c	carbon	basic_tissue_compartmentalized_model	RUL5P_c	RIB5P_c	true	enzymatic	c	ribulose-5-phosphate	ribose-5-phosphate	1
+SCD_PAL_c	carbon	fatty_acid_elongation_desaturation_specific_model	PAL_c	PALO_c	false	enzymatic	c	palmitate	palmitoleate	1
+SCD_STE_c	carbon	fatty_acid_elongation_desaturation_specific_model	STE_c	OLE_c	false	enzymatic	c	stearate	oleate	1
+SCOT_m	carbon	ketone_body_utilization_specific_compartmentalized_model	ACAC_m	ACACCOA_m	false	enzymatic	m			1
+SER_exchange	carbon	basic_tissue_compartmentalized_model	SER_e	SER_c	true	exchange	c;e		serine	1
+SUCD_m	carbon	basic_tissue_compartmentalized_model	SUC_m	FUM_m	true	enzymatic	m	succinate	fumarate	1
+SUCOAS_m	carbon	basic_tissue_compartmentalized_model	SUCCOA_m	SUC_m	false	enzymatic	m	succinyl-coa	succinate	1
+Salvage_c	carbon	basic_tissue_compartmentalized_model	RIB5P_stock	RIB5P_c	false	pseudo	c;pool			1
+TAG_stock_input	carbon	triglyceride_metabolism_specific_model	TAG_stock	TAG_c	false	pseudo	c;pool			1
+TALA_c	carbon	basic_tissue_compartmentalized_model	SED7P_c;GAP_c	FRU6P_c;E4P_c	true	enzymatic	c	sedoheptulose 7-phosphate;glyceraldehyde-3-phosphate	fructose-6-phosphate;erythrose 4-phosphate	1
+TGPAL_stock_input	carbon	triglyceride_metabolism_specific_model	TGPAL_stock	TGPAL_c	false	pseudo	c;pool			1
+TKT1_c	carbon	basic_tissue_compartmentalized_model	XYL5P_c;RIB5P_c	GAP_c;SED7P_c	true	enzymatic	c	xylulose 5-phosphate;ribose-5-phosphate	glyceraldehyde-3-phosphate;sedoheptulose 7-phosphate	1
+TKT2_c	carbon	basic_tissue_compartmentalized_model	XYL5P_c;E4P_c	GAP_c;FRU6P_c	true	enzymatic	c	xylulose 5-phosphate;erythrose 4-phosphate	glyceraldehyde-3-phosphate;fructose-6-phosphate	1
+TPI_c	carbon	basic_tissue_compartmentalized_model	DHAP_c	GAP_c	true	enzymatic	c	dihydroxyacetone phosphate	glyceraldehyde-3-phosphate	1
+lipid_mobilization_c	carbon	adipose_revised_specific_model	LIPID	GLYCEROL_c;FA_c	false	enzymatic	c;pool		glycerol	1
+AA_transamination_c	nitrogen	basic_tissue_nitrogen_model	AA_stock	GLU_c	false	pseudo	c;pool			1
+ADA_c	nitrogen	amino_acid_nucleotide_nitrogen_model	ADO_c	INO_c;NH4_c	false	enzymatic	c	adenosine	inosine	1
+ADSS_ADSL_c	nitrogen	amino_acid_nucleotide_nitrogen_model	IMP_c;ASP_c	AMP_c	false	enzymatic	c	imp;aspartate	amp	1
+ALA_infuse	nitrogen	serum_nitrogen_model	ALA_inf	ALA_e	false	pseudo	e;pool			1
+AMPD_c	nitrogen	amino_acid_nucleotide_nitrogen_model	AMP_c	IMP_c;NH4_c	false	enzymatic	c	amp	imp	1
+AMP_stock_input	nitrogen	amino_acid_nucleotide_nitrogen_model	AMP_stock	AMP_c	false	pseudo	c;pool			1
+ARGN_c	nitrogen	liver_urea_cycle_nitrogen_model	ARG_c	ORN_c;UREA_out	false	enzymatic	c;pool	arginine	ornithine	1
+ARG_exchange	nitrogen	kidney_arginine_synthesis_nitrogen_model	ARG_e	ARG_c	true	exchange	c;e		arginine	1
+ASNS_c	nitrogen	amino_acid_nucleotide_nitrogen_model	ASP_c;GLN_c	ASN_c;GLU_c	false	enzymatic	c	aspartate;glutamine	asparagine;glutamate	1
+ASPG_c	nitrogen	amino_acid_nucleotide_nitrogen_model	ASN_c	ASP_c;NH4_c	false	enzymatic	c	asparagine	aspartate	1
+ASPTA_c	nitrogen	basic_tissue_nitrogen_model	ASP_c	GLU_c	true	enzymatic	c	aspartate	glutamate	1
+ASS_ASL_c	nitrogen	kidney_arginine_synthesis_nitrogen_model	CITR_c;ASP_c	ARG_c	false	enzymatic	c	citrulline;aspartate	arginine	1
+CDA_c	nitrogen	amino_acid_nucleotide_nitrogen_model	CYTD_c	URI_c;NH4_c	false	enzymatic	c	cytidine	uridine	1
+CITR_exchange	nitrogen	kidney_arginine_synthesis_nitrogen_model	CITR_e	CITR_c	true	exchange	c;e		citrulline	1
+CITR_intestinal_synthesis	nitrogen	serum_nitrogen_model	GLN_e;GLN_e	CITR_e;NH4_e	false	pseudo	e			1
+CK_c	nitrogen	amino_acid_nucleotide_nitrogen_model	CRE_c	PCR_c	true	enzymatic	c	creatine	phosphocreatine	1
+CMP_stock_input	nitrogen	amino_acid_nucleotide_nitrogen_model	CMP_stock	CMP_c	false	pseudo	c;pool			1
+CPS1_c	nitrogen	liver_urea_cycle_nitrogen_model	NH4_c	CP_c	false	enzymatic	c			1
+CRE_stock_input	nitrogen	amino_acid_nucleotide_nitrogen_model	CRE_stock	CRE_c	false	pseudo	c;pool			1
+CRN_excretion	nitrogen	serum_nitrogen_model	CRN_e	CRN_out	false	pseudo	e;pool			1
+CRN_formation_c	nitrogen	amino_acid_nucleotide_nitrogen_model	PCR_c	CRN_c	false	enzymatic	c	phosphocreatine	creatinine	1
+CRN_output	nitrogen	amino_acid_nucleotide_nitrogen_model	CRN_c	CRN_e	false	exchange	c;e	creatinine		1
+CTPS_c	nitrogen	amino_acid_nucleotide_nitrogen_model	UMP_c;GLN_c	CMP_c;GLU_c	false	enzymatic	c	ump;glutamine	cmp;glutamate	1
+DCYTD_degradation_c	nitrogen	amino_acid_nucleotide_nitrogen_model	DCYTD_c	PYRIMIDINE_out	false	enzymatic	c;pool	deoxycytidine		1
+GAMT_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GAA_c	CRE_c	false	enzymatic	c	guanidinoacetate	creatine	1
+GATM_c	nitrogen	amino_acid_nucleotide_nitrogen_model	ARG_c;GLY_c	ORN_c;GAA_c	false	enzymatic	c	arginine;glycine	ornithine;guanidinoacetate	1
+GLND_c	nitrogen	basic_tissue_nitrogen_model	GLN_c	GLU_c;NH4_c	false	enzymatic	c	glutamine	glutamate	1
+GLNS_c	nitrogen	basic_tissue_nitrogen_model	GLU_c;NH4_c	GLN_c	false	enzymatic	c	glutamate	glutamine	1
+GLUD_c	nitrogen	basic_tissue_nitrogen_model	GLU_c	NH4_c	true	enzymatic	c	glutamate		1
+GMP_stock_input	nitrogen	amino_acid_nucleotide_nitrogen_model	GMP_stock	GMP_c	false	pseudo	c;pool			1
+GPT_c	nitrogen	basic_tissue_nitrogen_model	ALA_c	GLU_c	true	enzymatic	c	alanine	glutamate	1
+IMPDH_GMPS_c	nitrogen	amino_acid_nucleotide_nitrogen_model	IMP_c;GLN_c	GMP_c;GLU_c	false	enzymatic	c	imp;glutamine	gmp;glutamate	1
+NH4_input	nitrogen	serum_nitrogen_model	NH4_stock	NH4_e	false	pseudo	e;pool			1
+NT5_AMP_c	nitrogen	amino_acid_nucleotide_nitrogen_model	AMP_c	ADO_c	false	enzymatic	c	amp	adenosine	1
+NT5_CMP_c	nitrogen	amino_acid_nucleotide_nitrogen_model	CMP_c	CYTD_c	false	enzymatic	c	cmp	cytidine	1
+NT5_GMP_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GMP_c	GUO_c	false	enzymatic	c	gmp	guanosine	1
+NT5_UMP_c	nitrogen	amino_acid_nucleotide_nitrogen_model	UMP_c	URI_c	false	enzymatic	c	ump	uridine	1
+OAT_c	nitrogen	amino_acid_nucleotide_nitrogen_model	ORN_c	P5C_c;GLU_c	true	enzymatic	c	ornithine	1-pyrroline-5-carboxylate;glutamate	2
+ORN_intestinal_synthesis	nitrogen	serum_nitrogen_model	GLN_e;GLN_e	ORN_e;NH4_e;NH4_e	false	pseudo	e			1
+OTC_c	nitrogen	liver_urea_cycle_nitrogen_model	ORN_c;CP_c	CITR_c	false	enzymatic	c	ornithine	citrulline	1
+P5CDH_c	nitrogen	amino_acid_nucleotide_nitrogen_model	P5C_c	GLU_c	false	enzymatic	c	1-pyrroline-5-carboxylate	glutamate	1
+P5CS_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GLU_c	P5C_c	false	enzymatic	c	glutamate	1-pyrroline-5-carboxylate	1
+PHGDH_PSAT_PSP_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GLU_c	SER_c	false	enzymatic	c	glutamate	serine	1
+PNP_GUO_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GUO_c	PURINE_out	false	enzymatic	c;pool	guanosine		1
+PNP_INO_c	nitrogen	amino_acid_nucleotide_nitrogen_model	INO_c	PURINE_out	false	enzymatic	c;pool	inosine		1
+PRODH_c	nitrogen	amino_acid_nucleotide_nitrogen_model	PRO_c	P5C_c	false	enzymatic	c	proline	1-pyrroline-5-carboxylate	1
+PURINE_DE_NOVO_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GLN_c;GLN_c;GLY_c;ASP_c	IMP_c;GLU_c;GLU_c	false	enzymatic	c	glutamine;glycine;aspartate	imp;glutamate	1
+PYCR_c	nitrogen	amino_acid_nucleotide_nitrogen_model	P5C_c	PRO_c	false	enzymatic	c	1-pyrroline-5-carboxylate	proline	1
+PYRIMIDINE_DE_NOVO_c	nitrogen	amino_acid_nucleotide_nitrogen_model	GLN_c;ASP_c	UMP_c;GLU_c	false	enzymatic	c	glutamine;aspartate	ump;glutamate	1
+RNR_DCYTD_c	nitrogen	amino_acid_nucleotide_nitrogen_model	CMP_c	DCYTD_c	false	enzymatic	c	cmp	deoxycytidine	1
+SHMT_c	nitrogen	amino_acid_nucleotide_nitrogen_model	SER_c	GLY_c	true	enzymatic	c	serine	glycine	1
+UMP_stock_input	nitrogen	amino_acid_nucleotide_nitrogen_model	UMP_stock	UMP_c	false	pseudo	c;pool			1
+URI_degradation_c	nitrogen	amino_acid_nucleotide_nitrogen_model	URI_c	PYRIMIDINE_out	false	enzymatic	c;pool	uridine		1

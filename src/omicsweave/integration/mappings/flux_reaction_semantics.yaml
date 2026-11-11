@@ -1,0 +1,53 @@
+# 各组学层能否为一个反应给出“方向”证据（由 network_annotation.reaction_semantics 读取）。
+#
+# directional     直接酶 / 载体的量与底物 / 产物池的变化，可按与通量同向或反向判为支持或冲突；
+# capacity        它们的变化只表示容量或关联，记为“未解析”，不判支持或冲突；
+# not_assessable  组织组学无法评估（虚拟反应、只在血浆中的反应），证据等级记为 Not-assessable。
+#
+# 默认值按网络注释表中的反应类别给出；overrides 中逐反应的例外优先。修改时写明理由。
+
+defaults:
+  enzymatic: directional
+  transport: capacity
+  exchange: capacity
+  extracellular: not_assessable
+  pseudo: not_assessable
+  unknown: directional
+
+default_reasons:
+  transport: 载体通常双向，且两侧是同一个代谢物池，池大小不提示净方向
+  exchange: 载体双向；组织池大小反映的是平衡状态，不提示摄取或输出的净方向
+  extracellular: 只涉及血浆代谢物，组织中没有对应的酶量或池可测
+  pseudo: 输注、蛋白分解输入、原有储存输入、BIOMASS 等建模用的虚拟反应
+
+overrides:
+  # 近平衡反应：净通量由底物 / 产物比和上下游需求决定，酶量不指示方向（Williamson 1967 Biochem J；
+  # 糖酵解与非氧化磷酸戊糖途径中的可逆步骤）。组学层合适的读数是质量作用比（阶段 2 的派生特征）。
+  LDH_c: {direction_evidence: capacity, reason: 近平衡；读乳酸 / 丙酮酸比}
+  GPS_c: {direction_evidence: capacity, reason: 近平衡；GPD1 可逆，GPD1 与 GPD2 构成的穿梭没有净碳流；读 G3P / DHAP 比}
+  TPI_c: {direction_evidence: capacity, reason: 近平衡}
+  FBA_c: {direction_evidence: capacity, reason: 近平衡}
+  GAPD_c: {direction_evidence: capacity, reason: 近平衡（GAPDH–PGK 体系）}
+  PGK_c: {direction_evidence: capacity, reason: 近平衡（GAPDH–PGK 体系）}
+  PGM_c: {direction_evidence: capacity, reason: 近平衡}
+  ENO_c: {direction_evidence: capacity, reason: 近平衡}
+  PGI_c: {direction_evidence: capacity, reason: 近平衡}
+  PGMT_c: {direction_evidence: capacity, reason: 近平衡}
+  MDH_c: {direction_evidence: capacity, reason: 近平衡}
+  MDH_m: {direction_evidence: capacity, reason: 近平衡}
+  ACONT_m: {direction_evidence: capacity, reason: 近平衡}
+  FUMH_m: {direction_evidence: capacity, reason: 近平衡}
+  SUCOAS_m: {direction_evidence: capacity, reason: 近平衡}
+  GPT_c: {direction_evidence: capacity, reason: 近平衡；读丙氨酸 / 丙酮酸与谷氨酸 / α-酮戊二酸}
+  ASPTA_c: {direction_evidence: capacity, reason: 近平衡}
+  ASPTA_m: {direction_evidence: capacity, reason: 近平衡}
+  GLUD_m: {direction_evidence: capacity, reason: 近平衡（肝线粒体谷氨酸脱氢酶体系，Williamson 1967）}
+  BHBDH_m: {direction_evidence: capacity, reason: 近平衡；读 β-羟丁酸 / 乙酰乙酸比}
+  RPE_c: {direction_evidence: capacity, reason: 近平衡（非氧化磷酸戊糖途径）}
+  RPI_c: {direction_evidence: capacity, reason: 近平衡（非氧化磷酸戊糖途径）}
+  TKT1_c: {direction_evidence: capacity, reason: 近平衡（非氧化磷酸戊糖途径）}
+  TKT2_c: {direction_evidence: capacity, reason: 近平衡（非氧化磷酸戊糖途径）}
+  TALA_c: {direction_evidence: capacity, reason: 近平衡（非氧化磷酸戊糖途径）}
+  # 净方向固定的转运
+  PYR_trans: {direction_evidence: directional, reason: MPC 为质子偶联的线粒体丙酮酸摄取，净方向为胞质 → 线粒体}
+  ASPGLU_m: {direction_evidence: directional, reason: aralar / citrin 为电生性反向转运，在有膜电位的线粒体中净方向为天冬氨酸输出}

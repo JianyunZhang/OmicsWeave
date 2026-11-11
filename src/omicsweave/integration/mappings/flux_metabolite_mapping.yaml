@@ -1,12 +1,12 @@
 CIT_trans:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Citrate
   - Citric acid
-  products:
   - Isocitrate
   - cis-Aconitate
   - Aconitate
-  related:
   - Oxaloacetate
   - Acetyl-CoA
   - Pyruvate
@@ -20,14 +20,16 @@ CIT_trans:
   - Fluoroacetate
 ACONT_m:
   substrates:
+  - citrate
   - Citrate
   - Citric acid
   products:
+  - isocitrate
   - Isocitrate
+  related:
   - Aconitate
   - cis-Aconitate
   - Aconitic acid
-  related:
   - Oxaloacetate
   - Acetyl-CoA
   - alpha-Ketoglutarate
@@ -36,15 +38,17 @@ ACONT_m:
   - Iron
 ICDH_m:
   substrates:
+  - isocitrate
   - Isocitrate
   - Isocitric acid
-  - Isocitrato
   products:
+  - alpha-ketoglutarate
   - alpha-Ketoglutarate
   - Oxoglutarate
+  related:
+  - Isocitrato
   - 2-Oxoglutarate
   - Oxalosuccinate
-  related:
   - Citrate
   - Aconitate
   - Succinyl-CoA
@@ -59,13 +63,15 @@ ICDH_m:
   - Mn
 AKGD_m:
   substrates:
+  - alpha-ketoglutarate
   - alpha-Ketoglutarate
   - Oxoglutarate
-  - 2-Oxoglutarate
-  - Oxoglutaric acid
   products:
+  - succinyl-coa
   - Succinyl-CoA
   related:
+  - 2-Oxoglutarate
+  - Oxoglutaric acid
   - Isocitrate
   - Citrate
   - Succinate
@@ -81,12 +87,14 @@ AKGD_m:
   - NADH
 SUCOAS_m:
   substrates:
+  - succinyl-coa
   - Succinyl-CoA
   products:
+  - succinate
   - Succinate
+  related:
   - Succinic acid
   - GTP
-  related:
   - alpha-Ketoglutarate
   - Oxoglutarate
   - Fumarate
@@ -99,13 +107,15 @@ SUCOAS_m:
   - Methylmalonyl-CoA
 SUCD_m:
   substrates:
+  - succinate
   - Succinate
-  - Succinic acid
-  - Butanedioic acid
   products:
+  - fumarate
   - Fumarate
   - Fumaric acid
   related:
+  - Succinic acid
+  - Butanedioic acid
   - Succinyl-CoA
   - alpha-Ketoglutarate
   - Malate
@@ -119,16 +129,18 @@ SUCD_m:
   - Iron-sulfur
 FUMH_m:
   substrates:
+  - fumarate
   - Fumarate
   - Fumaric acid
+  products:
+  - malate
+  - Malate
+  - L-Malate
+  related:
   - Fumaric
   - Maleate
-  products:
-  - Malate
   - Malic acid
-  - L-Malate
   - Malic
-  related:
   - Succinate
   - Succinyl-CoA
   - Oxaloacetate
@@ -137,15 +149,17 @@ FUMH_m:
   - Aspartate
 MDH_m:
   substrates:
+  - malate
   - Malate
-  - Malic acid
   - L-Malate
-  - Malic
   products:
+  - oxaloacetate
   - Oxaloacetate
-  - OAA
   - Oxaloacetic acid
   related:
+  - Malic acid
+  - Malic
+  - OAA
   - Fumarate
   - Succinate
   - Citrate
@@ -158,16 +172,19 @@ MDH_m:
   - Malate-Aspartate shuttle
 CS_m:
   substrates:
+  - oxaloacetate
+  - acetyl-coa
   - Oxaloacetate
-  - OAA
   - Oxaloacetic acid
   - Acetyl-CoA
-  - Acetyl-coenzyme A
   products:
+  - citrate
   - Citrate
   - Citric acid
-  - Citric
   related:
+  - OAA
+  - Acetyl-coenzyme A
+  - Citric
   - Malate
   - Pyruvate
   - Glucose
@@ -177,27 +194,28 @@ CS_m:
   - CoA
   - Coenzyme A
 AKGMAL_m:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - alpha-Ketoglutarate
   - Oxoglutarate
   - 2-Oxoglutarate
-  products:
   - Malate
   - Malic acid
-  related:
   - Glutamate
   - Aspartate
   - Oxaloacetate
   - Malate-aspartate shuttle
   - Dicarboxylate
 GLC_exchange:
-  substrates:
-  - Glucose
-  - Glc
-  - D-Glucose
+  substrates: []
   products:
-  - Glucose-6-phosphate
+  - glucose
+  - Glucose
+  - D-Glucose
   related:
+  - Glc
+  - Glucose-6-phosphate
   - Blood glucose
   - Fructose
   - Galactose
@@ -211,13 +229,15 @@ GLC_exchange:
   - Lactate
 HEX_c:
   substrates:
+  - glucose
   - Glucose
   products:
+  - glucose 6-phosphate
   - Glucose-6-phosphate
-  - G6P
   - Glucose 6-Phosphate
-  - Glucose-6-P
   related:
+  - G6P
+  - Glucose-6-P
   - ATP
   - ADP
   - Mg
@@ -230,15 +250,17 @@ HEX_c:
   - Mannose-6-phosphate
 PGI_c:
   substrates:
+  - glucose 6-phosphate
   - Glucose-6-phosphate
+  products:
+  - fructose-6-phosphate
+  - Fructose-6-phosphate
+  - Fructose-6-Phosphate
+  related:
   - G6P
   - Glucose-6-P
-  products:
-  - Fructose-6-phosphate
   - F6P
-  - Fructose-6-Phosphate
   - Fructose 6-phosphate
-  related:
   - Glucose
   - Fructose-1,6-bisphosphate
   - FBP
@@ -246,15 +268,17 @@ PGI_c:
   - Mannose-6-phosphate
 PFK_c:
   substrates:
+  - fructose-6-phosphate
   - Fructose-6-phosphate
+  products:
+  - fructose-1,6-bisphosphate
+  - Fructose-1,6-bisphosphate
+  related:
   - F6P
   - Fructose 6-phosphate
-  products:
-  - Fructose-1,6-bisphosphate
   - FBP
   - F1,6BP
   - Fructose 1,6-bisphosphate
-  related:
   - ATP
   - ADP
   - AMP
@@ -269,18 +293,21 @@ PFK_c:
   - F2,6BP
 FBA_c:
   substrates:
+  - fructose-1,6-bisphosphate
   - Fructose-1,6-bisphosphate
+  products:
+  - dihydroxyacetone phosphate
+  - glyceraldehyde-3-phosphate
+  - Glyceraldehyde-3-phosphate
+  - Dihydroxyacetone phosphate
+  related:
   - FBP
   - F1,6BP
   - Fructose bisphosphate
-  products:
-  - Glyceraldehyde-3-phosphate
   - GAP
   - G3P
   - Glyceraldehyde 3-phosphate
-  - Dihydroxyacetone phosphate
   - DHAP
-  related:
   - Fructose-6-phosphate
   - Glucose
   - Pyruvate
@@ -288,13 +315,15 @@ FBA_c:
   - Aldolase
 TPI_c:
   substrates:
+  - dihydroxyacetone phosphate
   - Dihydroxyacetone phosphate
-  - DHAP
   products:
+  - glyceraldehyde-3-phosphate
   - Glyceraldehyde-3-phosphate
+  related:
+  - DHAP
   - GAP
   - G3P
-  related:
   - Fructose-1,6-bisphosphate
   - Pyruvate
   - Lactate
@@ -302,15 +331,16 @@ TPI_c:
   - Glycerol-3-phosphate
 GAPD_c:
   substrates:
+  - glyceraldehyde-3-phosphate
   - Glyceraldehyde-3-phosphate
+  products: []
+  related:
   - GAP
   - G3P
   - Glyceraldehyde 3-phosphate
-  products:
   - 1,3-Bisphosphoglycerate
   - 1,3-BPG
   - Bisphosphoglycerate
-  related:
   - NAD
   - NADH
   - Pi
@@ -320,15 +350,16 @@ GAPD_c:
   - 3-Phosphoglycerate
   - Pyruvate
 PGK_c:
-  substrates:
+  substrates: []
+  products:
+  - 3-phosphoglycerate
+  - 3-Phosphoglycerate
+  related:
   - 1,3-Bisphosphoglycerate
   - 1,3-BPG
-  products:
-  - 3-Phosphoglycerate
   - 3PG
   - 3-PG
   - Phosphoglyceric acid
-  related:
   - ATP
   - ADP
   - Mg
@@ -339,15 +370,17 @@ PGK_c:
   - Pyruvate
 PGM_c:
   substrates:
+  - 3-phosphoglycerate
   - 3-Phosphoglycerate
+  products:
+  - 2-phosphoglycerate
+  - 2-Phosphoglycerate
+  related:
   - 3PG
   - 3-PG
   - Phosphoglyceric acid
-  products:
-  - 2-Phosphoglycerate
   - 2PG
   - 2-PG
-  related:
   - GAP
   - 1,3-BPG
   - PEP
@@ -356,14 +389,16 @@ PGM_c:
   - 2,3-Bisphosphoglycerate
 ENO_c:
   substrates:
+  - 2-phosphoglycerate
   - 2-Phosphoglycerate
+  products:
+  - phosphoenolpyruvate
+  - Phosphoenolpyruvate
+  related:
   - 2PG
   - 2-PG
-  products:
-  - Phosphoenolpyruvate
   - PEP
   - Phosphopyruvate
-  related:
   - Mg
   - Mn
   - Zinc
@@ -374,14 +409,16 @@ ENO_c:
   - Enol
 PYK_c:
   substrates:
+  - phosphoenolpyruvate
   - Phosphoenolpyruvate
-  - PEP
-  - Phosphoenol pyruvate
   products:
+  - pyruvate
   - Pyruvate
-  - Pyr
   - Pyruvic acid
   related:
+  - PEP
+  - Phosphoenol pyruvate
+  - Pyr
   - ATP
   - ADP
   - Mg
@@ -395,16 +432,18 @@ PYK_c:
   - Oxaloacetate
 LDH_c:
   substrates:
+  - pyruvate
   - Pyruvate
-  - Pyr
   - Pyruvic acid
   products:
+  - lactate
   - Lactate
   - Lactic acid
   - L-Lactate
   - D-Lactate
-  - Lactic
   related:
+  - Pyr
+  - Lactic
   - NAD
   - NADH
   - PEP
@@ -413,6 +452,7 @@ LDH_c:
   - LDH
 LAC_exchange:
   substrates:
+  - lactate
   - Lactate
   - Lactic acid
   - L-Lactate
@@ -428,25 +468,26 @@ LAC_exchange:
   - Cori cycle
 PYR_exchange:
   substrates:
+  - pyruvate
   - Pyruvate
   - Pyruvic acid
+  products: []
+  related:
   - Pyr
-  products:
   - Acetyl-CoA
   - Oxaloacetate
-  related:
   - Glucose
   - Lactate
   - Alanine
   - MPC
   - Mitochondrial pyruvate carrier
 PYR_trans:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Pyruvate
   - Pyruvic acid
   - Pyr
-  products: []
-  related:
   - MPC
   - Mitochondrial pyruvate carrier
   - Acetyl-CoA
@@ -455,14 +496,16 @@ PYR_trans:
   - Lactate
 PEPCK_c:
   substrates:
+  - oxaloacetate
   - Oxaloacetate
-  - OAA
   - Oxaloacetic acid
   products:
+  - phosphoenolpyruvate
   - Phosphoenolpyruvate
+  related:
+  - OAA
   - PEP
   - Phosphoenol pyruvate
-  related:
   - GTP
   - GDP
   - ATP
@@ -478,14 +521,16 @@ PEPCK_c:
   - Glucose
 FBPase_c:
   substrates:
+  - fructose-1,6-bisphosphate
   - Fructose-1,6-bisphosphate
+  products:
+  - fructose-6-phosphate
+  - Fructose-6-phosphate
+  related:
   - FBP
   - F1,6BP
-  products:
-  - Fructose-6-phosphate
   - F6P
   - Fructose 6-phosphate
-  related:
   - PEP
   - Oxaloacetate
   - Pyruvate
@@ -498,27 +543,29 @@ FBPase_c:
   - Fructose bisphosphatase
 G6Pase_c:
   substrates:
+  - glucose 6-phosphate
   - Glucose-6-phosphate
-  - G6P
   products:
+  - glucose
   - Glucose
+  related:
+  - G6P
   - Glc
   - Blood glucose
-  related:
   - Fructose-6-phosphate
   - Glycogen
   - Pyruvate
-  - Glycogen
   - Glucose 6-phosphatase
   - G6PC
 GLU_exchange:
-  substrates:
+  substrates: []
+  products:
+  - glutamate
   - Glutamate
   - Glutamic acid
-  - Glu
   - L-Glutamate
-  products: []
   related:
+  - Glu
   - alpha-Ketoglutarate
   - Oxoglutarate
   - Glutamine
@@ -529,13 +576,13 @@ GLU_exchange:
   - NMDA
   - AMPA
 GLU_trans:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Glutamate
   - Glutamic acid
   - Glu
   - L-Glutamate
-  products: []
-  related:
   - alpha-Ketoglutarate
   - Oxoglutarate
   - Glutamine
@@ -545,13 +592,14 @@ GLU_trans:
   - GLAST
   - VGLUT
 GLN_exchange:
-  substrates:
-  - Glutamine
-  - Gln
-  - L-Glutamine
+  substrates: []
   products:
-  - Glutamate
+  - glutamine
+  - Glutamine
+  - L-Glutamine
   related:
+  - Gln
+  - Glutamate
   - alpha-Ketoglutarate
   - Ammonia
   - NH3
@@ -561,25 +609,26 @@ GLN_exchange:
   - Glutaminase
   - Glutamine synthetase
 GLN_trans:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Glutamine
   - Gln
   - L-Glutamine
-  products: []
-  related:
   - Glutamate
   - alpha-Ketoglutarate
   - ASCT2
   - SNAT
   - LAT1
 ASP_exchange:
-  substrates:
+  substrates: []
+  products:
+  - aspartate
   - Aspartate
   - Aspartic acid
-  - Asp
   - L-Aspartate
-  products: []
   related:
+  - Asp
   - Oxaloacetate
   - Fumarate
   - Asparagine
@@ -590,15 +639,19 @@ ASP_exchange:
   - Urea cycle
 ASPTA_c:
   substrates:
-  - Oxaloacetate
-  - OAA
-  - Glutamate
-  - Glutamic acid
-  products:
+  - aspartate
+  - alpha-ketoglutarate
   - Aspartate
   - Aspartic acid
   - alpha-Ketoglutarate
+  products:
+  - oxaloacetate
+  - glutamate
+  - Oxaloacetate
+  - Glutamate
+  - Glutamic acid
   related:
+  - OAA
   - PLP
   - Pyridoxal phosphate
   - Vitamin B6
@@ -608,15 +661,19 @@ ASPTA_c:
   - ALT
 ASPTA_m:
   substrates:
-  - Oxaloacetate
-  - OAA
-  - Glutamate
-  - Glutamic acid
-  products:
+  - aspartate
+  - alpha-ketoglutarate
   - Aspartate
   - Aspartic acid
   - alpha-Ketoglutarate
+  products:
+  - oxaloacetate
+  - glutamate
+  - Oxaloacetate
+  - Glutamate
+  - Glutamic acid
   related:
+  - OAA
   - PLP
   - Pyridoxal phosphate
   - Vitamin B6
@@ -625,14 +682,18 @@ ASPTA_m:
   - Malate-aspartate shuttle
 GPT_c:
   substrates:
+  - pyruvate
+  - glutamate
   - Pyruvate
   - Glutamate
   - Glutamic acid
   products:
+  - alanine
+  - alpha-ketoglutarate
   - Alanine
-  - Ala
   - alpha-Ketoglutarate
   related:
+  - Ala
   - PLP
   - Pyridoxal phosphate
   - Vitamin B6
@@ -641,13 +702,14 @@ GPT_c:
   - Transaminase
   - AST
 ALA_exchange:
-  substrates:
+  substrates: []
+  products:
+  - alanine
   - Alanine
-  - Ala
   - L-Alanine
-  - beta-Alanine
-  products: []
   related:
+  - Ala
+  - beta-Alanine
   - Pyruvate
   - Glutamate
   - Glucose
@@ -655,13 +717,14 @@ ALA_exchange:
   - ALT
   - Cahill cycle
 SER_exchange:
-  substrates:
+  substrates: []
+  products:
+  - serine
   - Serine
-  - Ser
   - L-Serine
   - D-Serine
-  products: []
   related:
+  - Ser
   - 3-Phosphoglycerate
   - Glycine
   - Cysteine
@@ -671,15 +734,17 @@ SER_exchange:
   - One-carbon metabolism
 GLUD_m:
   substrates:
-  - Glutamate
-  - Glutamic acid
-  products:
+  - alpha-ketoglutarate
   - alpha-Ketoglutarate
   - Oxoglutarate
+  products:
+  - glutamate
+  - Glutamate
+  - Glutamic acid
+  related:
   - Ammonia
   - NH3
   - NH4
-  related:
   - NAD
   - NADH
   - NADP
@@ -701,18 +766,20 @@ ASPGLu_m:
   - alpha-Ketoglutarate
   - Malate-aspartate shuttle
 ASPGLU_m:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Aspartate
   - Aspartic acid
-  products:
   - Glutamate
   - Glutamic acid
-  related:
   - Oxaloacetate
   - alpha-Ketoglutarate
   - Malate-aspartate shuttle
 FA_exchange:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Fatty acid
   - Palmitate
   - Palmitic acid
@@ -720,10 +787,8 @@ FA_exchange:
   - Oleic acid
   - Stearate
   - Stearic acid
-  products:
   - Acyl-CoA
   - Acylcarnitine
-  related:
   - Myristate
   - Myristic acid
   - Laurate
@@ -743,30 +808,31 @@ FA_exchange:
   - FFA
   - NEFA
 BHB_trans:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - beta-Hydroxybutyrate
   - 3-Hydroxybutyrate
   - BHBA
   - Hydroxybutyrate
   - D-beta-Hydroxybutyrate
-  products:
   - Acetoacetate
   - AcAc
-  related:
   - Acetyl-CoA
   - Ketone body
   - Ketosis
   - MCT transporter
 BHBDH_m:
   substrates:
+  - 3-hydroxybutyrate
   - beta-Hydroxybutyrate
   - 3-Hydroxybutyrate
+  products: []
+  related:
   - BHBA
   - Hydroxybutyrate
-  products:
   - Acetoacetate
   - AcAc
-  related:
   - NAD
   - NADH
   - Acetyl-CoA
@@ -792,19 +858,21 @@ ACAC_production:
   - HMGCL
 G6PDH2R_PGL_GND_c:
   substrates:
+  - glucose 6-phosphate
   - Glucose-6-phosphate
+  products:
+  - ribulose-5-phosphate
+  - Ribulose-5-phosphate
+  related:
   - G6P
   - NADP
-  products:
   - 6-Phosphogluconate
   - 6PG
   - 6-Phosphogluconic acid
-  - Ribulose-5-phosphate
   - Ru5P
   - NADPH
   - CO2
   - Carbon dioxide
-  related:
   - Ribose-5-phosphate
   - Xylulose-5-phosphate
   - Erythrose-4-phosphate
@@ -814,16 +882,20 @@ G6PDH2R_PGL_GND_c:
   - Pentose phosphate
 TKT1_c:
   substrates:
+  - xylulose 5-phosphate
+  - ribose-5-phosphate
   - Ribose-5-phosphate
-  - R5P
   - Xylulose-5-phosphate
-  - Xu5P
   products:
+  - glyceraldehyde-3-phosphate
+  - sedoheptulose 7-phosphate
   - Sedoheptulose-7-phosphate
-  - S7P
   - Glyceraldehyde-3-phosphate
-  - GAP
   related:
+  - R5P
+  - Xu5P
+  - S7P
+  - GAP
   - Thiamine
   - TPP
   - Thiamine pyrophosphate
@@ -833,16 +905,20 @@ TKT1_c:
   - Pentose
 TKT2_c:
   substrates:
+  - xylulose 5-phosphate
+  - erythrose 4-phosphate
   - Erythrose-4-phosphate
-  - E4P
   - Xylulose-5-phosphate
-  - Xu5P
   products:
+  - glyceraldehyde-3-phosphate
+  - fructose-6-phosphate
   - Fructose-6-phosphate
-  - F6P
   - Glyceraldehyde-3-phosphate
-  - GAP
   related:
+  - E4P
+  - Xu5P
+  - F6P
+  - GAP
   - Thiamine
   - TPP
   - Thiamine pyrophosphate
@@ -852,47 +928,56 @@ TKT2_c:
   - Aromatic amino acid biosynthesis
 TALA_c:
   substrates:
+  - sedoheptulose 7-phosphate
+  - glyceraldehyde-3-phosphate
   - Sedoheptulose-7-phosphate
-  - S7P
   - Glyceraldehyde-3-phosphate
-  - GAP
   products:
+  - fructose-6-phosphate
+  - erythrose 4-phosphate
   - Erythrose-4-phosphate
-  - E4P
   - Fructose-6-phosphate
-  - F6P
   related:
+  - S7P
+  - GAP
+  - E4P
+  - F6P
   - Transaldolase
   - Non-oxidative PPP
   - Pentose phosphate
 RPI_c:
   substrates:
-  - Ribose-5-phosphate
-  - R5P
-  products:
+  - ribulose-5-phosphate
   - Ribulose-5-phosphate
-  - Ru5P
+  products:
+  - ribose-5-phosphate
+  - Ribose-5-phosphate
   related:
+  - R5P
+  - Ru5P
   - RPI
   - Non-oxidative PPP
   - Nucleotide synthesis
 RPE_c:
   substrates:
+  - ribulose-5-phosphate
   - Ribulose-5-phosphate
-  - Ru5P
   products:
+  - xylulose 5-phosphate
   - Xylulose-5-phosphate
-  - Xu5P
   related:
+  - Ru5P
+  - Xu5P
   - RPE
   - Non-oxidative PPP
 GLYCOGENOLYSIS_c:
-  substrates:
-  - Glycogen
+  substrates: []
   products:
+  - glucose-1-phosphate
   - Glucose-1-phosphate
-  - G1P
   related:
+  - Glycogen
+  - G1P
   - Glycogen phosphorylase
   - Debranching enzyme
   - Glucose-6-phosphate
@@ -904,12 +989,14 @@ GLYCOGENOLYSIS_c:
   - Muscle glycogen
 PGMT_c:
   substrates:
-  - Glucose-1-phosphate
-  - G1P
-  products:
+  - glucose 6-phosphate
   - Glucose-6-phosphate
-  - G6P
+  products:
+  - glucose-1-phosphate
+  - Glucose-1-phosphate
   related:
+  - G1P
+  - G6P
   - Glucose-1,6-bisphosphate
   - Glycogen
   - Galactose-1-phosphate
@@ -920,15 +1007,16 @@ PGMT_c:
   - PGM
 GLYCEROL_exchange:
   substrates:
+  - glycerol
   - Glycerol
+  products: []
+  related:
   - Glycerin
   - Triglyceride
   - TAG
-  products:
   - Glycerol-3-phosphate
   - Dihydroxyacetone phosphate
   - DHAP
-  related:
   - Lipolysis
   - Glyceride
   - Gluconeogenesis
@@ -938,12 +1026,14 @@ GLYCEROL_exchange:
   - Glycerol kinase
 GPS_c:
   substrates:
-  - Dihydroxyacetone phosphate
-  - DHAP
-  products:
+  - glycerol 3-phosphate
   - Glycerol-3-phosphate
-  - G3P
+  products:
+  - dihydroxyacetone phosphate
+  - Dihydroxyacetone phosphate
   related:
+  - DHAP
+  - G3P
   - Glycerol
   - NADH
   - NAD
@@ -955,12 +1045,13 @@ GPS_c:
   - Mitochondrial
 ACE_exchange:
   substrates:
+  - acetate
   - Acetate
   - Acetic acid
-  - Acetate ion
-  products:
-  - Acetyl-CoA
+  products: []
   related:
+  - Acetate ion
+  - Acetyl-CoA
   - Acetoacetate
   - Short-chain fatty acid
   - SCFA
@@ -968,11 +1059,11 @@ ACE_exchange:
   - SMCT
   - Monocarboxylate
 ACE_trans:
-  substrates:
-  - Acetate
-  - Acetic acid
+  substrates: []
   products: []
   related:
+  - Acetate
+  - Acetic acid
   - Acetyl-CoA
   - Acetyl-CoA synthetase
   - ACS
@@ -980,13 +1071,16 @@ ACE_trans:
   - Carnitine
 ACITL_c:
   substrates:
+  - citrate
   - Citrate
   - Citric acid
   products:
+  - oxaloacetate
+  - acetyl-coa
   - Acetyl-CoA
   - Oxaloacetate
-  - OAA
   related:
+  - OAA
   - ATP
   - ADP
   - CoA
@@ -1001,14 +1095,15 @@ ACITL_c:
   - Lipogenesis
 LIPID_c:
   substrates:
-  - Fatty acid
+  - acetyl-coa
   - Acetyl-CoA
-  products:
+  products: []
+  related:
+  - Fatty acid
   - Triglyceride
   - TAG
   - Phospholipid
   - Cholesterol
-  related:
   - Lipid
   - Cholesteryl ester
   - Diacylglycerol
@@ -1020,24 +1115,28 @@ LIPID_c:
   - beta-oxidation
 ACOT_c:
   substrates:
-  - Acyl-CoA
+  - acetyl-coa
   - Acetyl-CoA
   products:
+  - acetate
   - Acetate
+  related:
+  - Acyl-CoA
   - Fatty acid
   - CoA
   - Coenzyme A
-  related:
   - ACOT
   - Thioesterase
 PDH_m:
   substrates:
+  - pyruvate
   - Pyruvate
   - Pyruvic acid
   products:
+  - acetyl-coa
   - Acetyl-CoA
-  - CO2
   related:
+  - CO2
   - CoA
   - Coenzyme A
   - NAD
@@ -1056,11 +1155,13 @@ PDH_m:
   - Pyruvate dehydrogenase
 PC_m:
   substrates:
+  - pyruvate
   - Pyruvate
   products:
+  - oxaloacetate
   - Oxaloacetate
-  - OAA
   related:
+  - OAA
   - ATP
   - ADP
   - CO2
@@ -1677,15 +1778,17 @@ FUM1_m:
   - Aspartate
 MDH_c:
   substrates:
+  - malate
   - Malate
-  - Malic acid
   - L-Malate
-  - Malic
   products:
+  - oxaloacetate
   - Oxaloacetate
-  - OAA
   - Oxaloacetic acid
   related:
+  - Malic acid
+  - Malic
+  - OAA
   - Fumarate
   - Succinate
   - Citrate
@@ -1696,16 +1799,18 @@ MDH_c:
   - Malate-aspartate shuttle
 GLND_m:
   substrates:
+  - glutamine
   - Glutamine
-  - Gln
   - L-Glutamine
-  - H2O
   products:
+  - glutamate
   - Glutamate
   - Glutamic acid
+  related:
+  - Gln
+  - H2O
   - NH3
   - Ammonia
-  related:
   - alpha-Ketoglutarate
   - Glutamate dehydrogenase
   - Glutaminase
@@ -1713,17 +1818,19 @@ GLND_m:
   - Nitrogen metabolism
 GLNS_c:
   substrates:
+  - glutamate
   - Glutamate
   - Glutamic acid
+  products:
+  - glutamine
+  - Glutamine
+  - L-Glutamine
+  related:
   - NH3
   - ATP
-  products:
-  - Glutamine
   - Gln
-  - L-Glutamine
   - ADP
   - Pi
-  related:
   - alpha-Ketoglutarate
   - Glutamate dehydrogenase
   - Nitrogen metabolism
@@ -1742,25 +1849,27 @@ BHB_exchange:
   - Ketone body
   - MCT transporter
 BHB_input:
-  substrates:
+  substrates: []
+  products:
+  - 3-hydroxybutyrate
   - beta-Hydroxybutyrate
   - 3-Hydroxybutyrate
+  related:
   - BHBA
   - Hydroxybutyrate
-  products:
   - Acetoacetate
-  related:
   - Acetyl-CoA
   - MCT transporter
   - Ketone utilization
 BHB_output:
   substrates:
+  - 3-hydroxybutyrate
   - beta-Hydroxybutyrate
   - 3-Hydroxybutyrate
-  - BHBA
-  - Hydroxybutyrate
   products: []
   related:
+  - BHBA
+  - Hydroxybutyrate
   - Acetoacetate
   - HMG-CoA
   - HMGCS2
@@ -1778,15 +1887,15 @@ ACAC_trans:
   - MCT
   - SCOT
 SCOT_m:
-  substrates:
+  substrates: []
+  products: []
+  related:
   - Acetoacetate
   - AcAc
   - Succinyl-CoA
-  products:
   - Acetoacetyl-CoA
   - Succinate
   - Succinic acid
-  related:
   - beta-Hydroxybutyrate
   - Acetyl-CoA
   - BHBDH
@@ -1840,3 +1949,64 @@ AKGDH_m:
   - Coenzyme A
   - NAD
   - NADH
+ACACCOA_lyase_m:
+  substrates: []
+  products:
+  - acetyl-coa
+  related: []
+ACAC_production_m:
+  substrates:
+  - acetyl-coa
+  products: []
+  related: []
+ACC_c:
+  substrates:
+  - acetyl-coa
+  products: []
+  related: []
+ACSS2_m:
+  substrates:
+  - acetate
+  products:
+  - acetyl-coa
+  related: []
+FA_usage:
+  substrates: []
+  products:
+  - acetyl-coa
+  related: []
+G3PP_c:
+  substrates:
+  - glycerol 3-phosphate
+  products:
+  - glycerol
+  related: []
+GK_c:
+  substrates:
+  - glycerol
+  products:
+  - glycerol 3-phosphate
+  related: []
+ME2_c:
+  substrates:
+  - malate
+  products:
+  - pyruvate
+  related: []
+PHGDH_PSAT_PSP_c:
+  substrates:
+  - 3-phosphoglycerate
+  products:
+  - serine
+  related: []
+PROS_m:
+  substrates:
+  - pyruvate
+  products:
+  - acetate
+  related: []
+lipid_mobilization_c:
+  substrates: []
+  products:
+  - glycerol
+  related: []

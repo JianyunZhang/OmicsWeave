@@ -55,7 +55,8 @@ def _validate_proteins(mapping: dict[str, Any]) -> list[str]:
 
     warns: list[str] = []
     for rxn_id, entry in mapping.items():
-        for cat in ("direct_enzymes", "upstream_regulators", "downstream_enzymes", "transporters", "cofactors"):
+        for cat in ("direct_enzymes", "upstream_regulators", "downstream_enzymes", "transporters", "cofactors",
+                    "related_isozymes"):
             for protein in entry.get(cat, []):
                 if protein in MOUSE_PROTEIN_UNIPROT_MAPPING:
                     continue
@@ -105,7 +106,8 @@ def get_all_related_proteins(reaction: str) -> Tuple[List[str], Dict]:
     all_proteins: list[str] = []
     categories: dict[str, list[str]] = {}
 
-    for category in ['direct_enzymes', 'upstream_regulators', 'downstream_enzymes', 'transporters', 'cofactors']:
+    for category in ['direct_enzymes', 'upstream_regulators', 'downstream_enzymes', 'transporters', 'cofactors',
+                     'related_isozymes']:
         proteins = mapping.get(category, [])
         categories[category] = proteins
         all_proteins.extend(proteins)

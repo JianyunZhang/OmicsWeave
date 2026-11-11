@@ -982,6 +982,14 @@ REACTION_REGISTRY: Dict[str, ReactionInfo] = {
         'ec_number': None,
         'description': 'Lipid mobilization / lipolysis (aggregate)',
     },
+    'FA_esterification_c': {
+        'kegg_reaction': None,
+        'kegg_pathway': 'map00561',
+        'reactome_id': None,
+        'ec_number': None,
+        'description': 'Fatty acid esterification to triacylglycerol (lumped FA_c -> TG_store; '
+                       'Kennedy pathway GPAT / AGPAT / lipin / DGAT, plus MGAT)',
+    },
     'lipid_mobilization_c': {
         'kegg_reaction': None,
         'kegg_pathway': 'map00561',

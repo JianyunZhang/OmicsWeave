@@ -192,7 +192,11 @@ class ContractAdapterTest(unittest.TestCase):
         self.assertEqual(hexokinase["tx_details"]["concordant_genes"], ["Hk2"])
         self.assertEqual(hexokinase["prot_details"]["concordant_proteins"], ["Hk2"])
         self.assertEqual(hexokinase["metab_details"]["concordant_metabolites"], ["Glucose", "Glucose-6-phosphate"])
-        self.assertGreater(rows.loc[(DIET, "liver", "ACONT_m"), "n_conflicting_layers"], 0)
+        # 乌头酸酶近平衡：ACO2 与通量反向只记为关联，不再判为冲突
+        aconitase = rows.loc[(DIET, "liver", "ACONT_m")]
+        self.assertEqual(aconitase["direction_evidence"], "capacity")
+        self.assertEqual(aconitase["n_conflicting_layers"], 0)
+        self.assertGreaterEqual(aconitase["prot_details"]["n_unresolved"], 1)
         # 药物比较每组 1 只：MFA 与转录组都按效应量判定
         effect_only = rows.loc[(DRUG, "liver", "HEX_c")]
         self.assertEqual((effect_only["mfa_evidence_mode"], effect_only["tx_evidence_mode"]),

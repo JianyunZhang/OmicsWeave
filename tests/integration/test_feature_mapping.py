@@ -121,7 +121,7 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         protein_mapping = REACTION_ENZYME_MAPPING["GPS_c"]
         gene_mapping = FLUX_GENE_MAPPING["GPS_c"]
 
-        self.assertEqual(set(protein_mapping["direct_enzymes"]), {"Gpd1", "Gpd2"})
+        self.assertEqual(set(protein_mapping["direct_enzymes"]), {"Gpd1", "Gpd1l", "Gpd2"})
         self.assertTrue(
             {"Gys1", "Gys2", "Pygb", "Pygm", "Pygl"}.isdisjoint(
                 protein_mapping["direct_enzymes"]
@@ -129,7 +129,7 @@ class ProteinFeatureMappingTest(unittest.TestCase):
         )
         self.assertEqual(
             set(gene_mapping["gene_roles"]["catalytic"]),
-            {"Gpd1", "Gpd2"},
+            {"Gpd1", "Gpd1l", "Gpd2"},
         )
 
     def test_missing_proteomics_comparison_columns_are_no_data_not_signal(self) -> None:

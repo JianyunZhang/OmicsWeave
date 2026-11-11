@@ -31,6 +31,7 @@ from ..mappings import (
     audit_mapping_integrity,
 )
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
+from ..mappings.network_annotation import reaction_semantics
 from .evidence_profile import EvidenceProfileScorer, evidence_table
 
 
@@ -249,13 +250,15 @@ class FluxEvidenceBuilder:
         gene_roles = mapping.get("gene_roles", {}) or {}
         protein_mapping = REACTION_ENZYME_MAPPING.get(flux_id, {})
         protein_direct = list(protein_mapping.get("direct_enzymes", []))
-        if protein_direct:
-            direct_genes = set(protein_direct)
-        else:
-            # 没有蛋白策展条目时才回退到基因映射中的 catalytic。
-            direct_genes = set(gene_roles.get("catalytic", []))
-        direct_genes.update(gene_roles.get("transporter", []))
-        genes = list(dict.fromkeys(genes + list(direct_genes)))
+        # 方向成员与蛋白层一致：直接酶（蛋白表优先，没有蛋白条目时用基因表的 catalytic）；
+        # 只有没有直接酶的转运 / 交换反应，才由载体充当直接执行者。
+        direct_genes = set(protein_direct) if protein_direct else set(gene_roles.get("catalytic", []))
+        carriers = set(protein_mapping.get("transporters", [])) | set(gene_roles.get("transporter", []))
+        if not direct_genes:
+            direct_genes = set(carriers)
+        genes = list(dict.fromkeys(genes + sorted(direct_genes) + sorted(carriers)))
+        if not reaction_semantics(str(flux_id)).directional:
+            direct_genes = set()           # 只表示容量：匹配到的基因全部记为关联，不判支持或冲突
         if not genes:
             return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_mapping"}
 
@@ -491,9 +494,11 @@ class FluxEvidenceBuilder:
             # 运输/交换反应通常没有 EC 对应的直接酶，此时转运蛋白就是直接执行者。
             directional_proteins = list(mapping.get("transporters", []))
         directional_proteins = list(dict.fromkeys(directional_proteins))
+        if not reaction_semantics(str(flux_id)).directional:
+            directional_proteins = []      # 只表示容量：匹配到的蛋白全部记为关联
         all_proteins: list[str] = list(direct_enzymes)
         for key in ("upstream_regulators", "downstream_enzymes",
-                     "transporters", "cofactors"):
+                     "transporters", "cofactors", "related_isozymes"):
             all_proteins.extend(mapping.get(key, []))
         all_proteins = list(dict.fromkeys(all_proteins))
         if not all_proteins:
@@ -866,8 +871,10 @@ class FluxEvidenceBuilder:
         direct_conflict_idx: list[Any] = []
         unresolved_idx: list[Any] = []
         if n_sig > 0 and log2fc_col in sig_df.columns and flux_fc != 0.0:
-            sub_set = set(sub_idx)
-            prod_set = set(prod_idx)
+            # 只表示容量的反应（近平衡、转运、交换）：池大小不提示净方向，底物 / 产物也只记关联
+            directional = reaction_semantics(str(flux_id)).directional
+            sub_set = set(sub_idx) if directional else set()
+            prod_set = set(prod_idx) if directional else set()
             for row_idx, row_fc in pd.to_numeric(sig_df[log2fc_col], errors="coerce").dropna().items():
                 if row_idx in prod_set:
                     expected = (row_fc > 0 and flux_fc > 0) or (row_fc < 0 and flux_fc < 0)
@@ -1025,6 +1032,7 @@ class FluxEvidenceBuilder:
     ) -> dict[str, Any]:
         """一个（反应, 组织, 比较）的各层证据与证据画像；其他组学的证据不受 MFA 显著性判定影响。"""
         gate_passed, mfa_evidence_mode = self._mfa_gate_passed(flux_row)
+        semantics = reaction_semantics(str(flux_row.get("flux_id", "")))
         base_info = {
             "experiment_id": self.experiment_id,
             "estimand_id": self.estimand_id,
@@ -1048,6 +1056,9 @@ class FluxEvidenceBuilder:
             "ec_number": flux_row.get("ec_number", ""),
             "kegg_reaction": flux_row.get("kegg_reaction", ""),
             "reactome_id": flux_row.get("reactome_id", ""),
+            # 网络注释：反应类别与各组学层能否给出方向证据
+            "reaction_class": semantics.reaction_class,
+            "direction_evidence": semantics.direction_evidence,
         }
 
         tx_details = self.transcriptomics_evidence(flux_row, tx_df)
@@ -1093,6 +1104,9 @@ class FluxEvidenceBuilder:
             "metab_details": metab_details,
         }
         record.update(self.evidence_profile_scorer.summarize(self.evidence_profile_scorer.build_records(record)))
+        if not semantics.assessable:
+            # 虚拟反应与只在血浆中的反应：组织组学无从评估，不参与证据排序
+            record["evidence_grade"] = "Not-assessable"
         return record
 
     # ---- main entry point ----

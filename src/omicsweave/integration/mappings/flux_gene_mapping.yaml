@@ -247,28 +247,15 @@ LDH_c:
   - Ldha
   - Ldhb
   - Ldhc
-  - Mdh1
-  - Mdh2
-  - Got1
-  - Got2
-  - Hif1a
   - Vhl
-  - Slc16a1
-  - Slc16a1
+  - Hif1a
   gene_roles:
     catalytic:
     - Ldha
     - Ldhb
     - Ldhc
-    - Mdh1
-    - Mdh2
-    - Got1
-    - Got2
     regulatory:
     - Vhl
-    transporter:
-    - Slc16a1
-    - Slc16a1
     transcription_factor:
     - Hif1a
   pathway: Glycolysis
@@ -279,25 +266,17 @@ LAC_exchange:
   - Slc16a3
   - Slc16a7
   - Bsg
-  - Bsg
   - Ldha
   - Ldhb
-  - Car9
-  - Car2
-  - Slc4a1
   gene_roles:
-    catalytic:
-    - Ldha
-    - Ldhb
-    - Car9
-    - Car2
     transporter:
     - Slc16a1
     - Slc16a3
     - Slc16a7
     - Bsg
-    - Bsg
-    - Slc4a1
+    downstream:
+    - Ldha
+    - Ldhb
   pathway: Glycolysis
   description: Lactate transport
 PGMT_c:
@@ -703,44 +682,20 @@ FA_exchange:
   - Slc27a2
   - Slc27a3
   - Slc27a4
-  - Fabp1
-  - Fabp2
-  - Fabp3
-  - Fabp4
-  - Fabp5
-  - Fabp6
-  - Fabp7
-  - Slc27a1
-  - Slc27a2
-  - Slc27a3
-  - Slc27a4
   - Slc27a5
   - Slc27a6
   - Ppara
   - Ppard
-  - Ppard
   - Srebf1
-  - Lpl
-  - Lipe
-  - Mgll
+  - Acsl1
+  - Acsl3
+  - Acsl4
+  - Cpt1a
+  - Cpt1b
+  - Cpt2
   gene_roles:
-    catalytic:
-    - Lpl
-    - Lipe
-    - Mgll
     transporter:
     - Cd36
-    - Slc27a1
-    - Slc27a2
-    - Slc27a3
-    - Slc27a4
-    - Fabp1
-    - Fabp2
-    - Fabp3
-    - Fabp4
-    - Fabp5
-    - Fabp6
-    - Fabp7
     - Slc27a1
     - Slc27a2
     - Slc27a3
@@ -750,8 +705,14 @@ FA_exchange:
     transcription_factor:
     - Ppara
     - Ppard
-    - Ppard
     - Srebf1
+    downstream:
+    - Acsl1
+    - Acsl3
+    - Acsl4
+    - Cpt1a
+    - Cpt1b
+    - Cpt2
   pathway: Fatty Acid Metabolism
   description: Fatty acid uptake/transport
 FAO_m:
@@ -1108,36 +1069,37 @@ GLU_exchange:
   - Slc1a1
   - Slc1a2
   - Slc1a3
+  - Slc1a4
   - Slc1a5
-  - Slc7a11
-  - Slc3a2
+  - Slc1a6
+  - Slc1a7
   - Glud1
   - Gls
   - Gls2
   gene_roles:
-    catalytic:
-    - Glud1
-    - Gls
-    - Gls2
     transporter:
     - Slc1a1
     - Slc1a2
     - Slc1a3
+    - Slc1a4
     - Slc1a5
-    - Slc7a11
-    - Slc3a2
+    - Slc1a6
+    - Slc1a7
+    downstream:
+    - Glud1
+    - Gls
+    - Gls2
   pathway: Amino Acid Metabolism
   description: Glutamate exchange
 GLN_exchange:
   genes:
   - Slc1a5
+  - Slc7a5
+  - Slc7a8
   - Slc38a1
   - Slc38a2
   - Slc38a3
   - Slc38a5
-  - Glul
-  - Gls
-  - Gls2
   - Mtor
   - Rptor
   - Rraga
@@ -1145,11 +1107,18 @@ GLN_exchange:
   - Rragc
   - Rragd
   - Myc
+  - Glul
+  - Gls
+  - Gls2
   gene_roles:
-    catalytic:
-    - Glul
-    - Gls
-    - Gls2
+    transporter:
+    - Slc1a5
+    - Slc7a5
+    - Slc7a8
+    - Slc38a1
+    - Slc38a2
+    - Slc38a3
+    - Slc38a5
     regulatory:
     - Mtor
     - Rptor
@@ -1157,14 +1126,12 @@ GLN_exchange:
     - Rragb
     - Rragc
     - Rragd
-    transporter:
-    - Slc1a5
-    - Slc38a1
-    - Slc38a2
-    - Slc38a3
-    - Slc38a5
     transcription_factor:
     - Myc
+    downstream:
+    - Glul
+    - Gls
+    - Gls2
   pathway: Amino Acid Metabolism
   description: Glutamine exchange
 GLN_trans:
@@ -1224,59 +1191,37 @@ ASP_exchange:
   description: Aspartate exchange
 ALA_exchange:
   genes:
-  - Slc7a1
-  - Slc7a2
-  - Slc7a5
   - Slc38a2
+  - Slc38a4
+  - Slc1a4
+  - Slc1a5
   - Gpt
   - Gpt2
-  - Pck1
-  - Pc
   gene_roles:
-    catalytic:
+    transporter:
+    - Slc38a2
+    - Slc38a4
+    - Slc1a4
+    - Slc1a5
+    downstream:
     - Gpt
     - Gpt2
-    - Pck1
-    - Pc
-    transporter:
-    - Slc7a1
-    - Slc7a2
-    - Slc7a5
-    - Slc38a2
   pathway: Amino Acid Metabolism
   description: Alanine exchange
 ASPTA_m:
   genes:
   - Got2
-  - Mdh2
-  - Slc25a12
-  - Slc25a13
-  - Glud1
-  - Gls2
   gene_roles:
     catalytic:
     - Got2
-    - Mdh2
-    - Glud1
-    - Gls2
-    transporter:
-    - Slc25a12
-    - Slc25a13
   pathway: Amino Acid Metabolism
   description: Aspartate transaminase (mitochondrial)
 ASPTA_c:
   genes:
   - Got1
-  - Mdh1
-  - Slc25a12
-  - Slc25a13
   gene_roles:
     catalytic:
     - Got1
-    - Mdh1
-    transporter:
-    - Slc25a12
-    - Slc25a13
   pathway: Amino Acid Metabolism
   description: Aspartate transaminase (cytosolic)
 AKGMAL_m:
@@ -1305,98 +1250,58 @@ AKGMAL_m:
   description: Alpha-Ketoglutarate-malate metabolism
 GLND_m:
   genes:
-  - Glul
   - Gls
   - Gls2
   - Glud1
-  - Cps1
-  - Otc
   gene_roles:
     catalytic:
-    - Glul
     - Gls
     - Gls2
+    downstream:
     - Glud1
-    - Cps1
-    - Otc
   pathway: Amino Acid Metabolism
   description: Glutamine metabolism
 GLNS_c:
   genes:
   - Glul
-  - Slc1a5
-  - Slc38a1
-  - Cps1
-  - Ass1
   gene_roles:
     catalytic:
     - Glul
-    - Cps1
-    - Ass1
-    transporter:
-    - Slc1a5
-    - Slc38a1
   pathway: Amino Acid Metabolism
   description: Glutamine synthesis
 GLUD_m:
   genes:
   - Glud1
-  - Gls
-  - Gls2
-  - Glul
-  - Ogdh
-  - Idh3a
   gene_roles:
     catalytic:
     - Glud1
-    - Gls
-    - Gls2
-    - Glul
-    - Ogdh
-    - Idh3a
   pathway: Amino Acid Metabolism
   description: Glutamate dehydrogenase
 ASPGLU_m:
   genes:
+  - Slc25a12
+  - Slc25a13
+  - Got1
   - Got2
-  - Slc1a1
-  - Slc1a2
-  - Slc1a3
-  - Glud1
-  - Mdh2
   gene_roles:
-    catalytic:
-    - Got2
-    - Glud1
-    - Mdh2
     transporter:
-    - Slc1a1
-    - Slc1a2
-    - Slc1a3
+    - Slc25a12
+    - Slc25a13
+    downstream:
+    - Got1
+    - Got2
   pathway: Amino Acid Metabolism
   description: Aspartate-glutamate metabolism
 GPS_c:
   genes:
   - Gpd1
+  - Gpd1l
   - Gpd2
-  - Gk
-  - Gpam
-  - Agpat1
-  - Agpat2
-  - Uqcrfs1
-  - Cyc1
   gene_roles:
     catalytic:
     - Gpd1
+    - Gpd1l
     - Gpd2
-    upstream:
-    - Gk
-    downstream:
-    - Gpam
-    - Agpat1
-    - Agpat2
-    - Uqcrfs1
-    - Cyc1
   pathway: Glycerol Metabolism
   description: Glycerol-3-phosphate shuttle
 GLYCEROL_exchange:
@@ -1405,25 +1310,13 @@ GLYCEROL_exchange:
   - Aqp7
   - Aqp9
   - Gk
-  - Gpd1
-  - Gpd2
-  - Pnpla2
-  - Pnpla2
-  - Lipe
-  - Mgll
   gene_roles:
-    catalytic:
-    - Gk
-    - Gpd1
-    - Gpd2
-    - Pnpla2
-    - Pnpla2
-    - Lipe
-    - Mgll
     transporter:
     - Aqp3
     - Aqp7
     - Aqp9
+    downstream:
+    - Gk
   pathway: Glycerol Metabolism
   description: Glycerol transport
 ACE_exchange:
@@ -1493,33 +1386,14 @@ ACITL_c:
   description: ATP citrate lyase
 PYR_exchange:
   genes:
-  - Mpc1
-  - Mpc2
   - Slc16a1
   - Slc16a3
-  - Pdha1
-  - Pdhb
-  - Dlat
-  - Dld
-  - Pdk1
-  - Pdk2
-  - Pdk3
-  - Pdk4
+  - Slc16a7
   gene_roles:
-    catalytic:
-    - Pdha1
-    - Pdhb
-    - Dlat
-    - Dld
-    - Pdk1
-    - Pdk2
-    - Pdk3
-    - Pdk4
     transporter:
-    - Mpc1
-    - Mpc2
     - Slc16a1
     - Slc16a3
+    - Slc16a7
   pathway: Pyruvate Metabolism
   description: Pyruvate transport
 PDH_m:
@@ -1555,46 +1429,40 @@ PDH_m:
   description: Pyruvate dehydrogenase
 PC_m:
   genes:
-  - Pc
-  - Hlcs
-  - Pck1
-  - Pck2
-  - Fbp1
-  - Fbp2
+  - Pcx
+  - Mpc1
+  - Mpc2
   - Ppara
+  - Cs
+  - Pck1
   gene_roles:
     catalytic:
-    - Pc
-    - Hlcs
-    - Pck1
-    - Pck2
-    - Fbp1
-    - Fbp2
+    - Pcx
+    transporter:
+    - Mpc1
+    - Mpc2
     transcription_factor:
     - Ppara
+    downstream:
+    - Cs
+    - Pck1
   pathway: Gluconeogenesis
   description: Pyruvate carboxylase
 PEPCK_c:
   genes:
   - Pck1
-  - Pck2
   - Foxo1
   - Creb1
   - Crtc2
   - Hnf4a
   - Ppara
   - Pparg
-  - Pparg
-  - Pc
   - Fbp1
-  - G6pc
+  - Fbp2
+  - Pck2
   gene_roles:
     catalytic:
     - Pck1
-    - Pck2
-    - Pc
-    - Fbp1
-    - G6pc
     transcription_factor:
     - Foxo1
     - Creb1
@@ -1602,7 +1470,10 @@ PEPCK_c:
     - Hnf4a
     - Ppara
     - Pparg
-    - Pparg
+    downstream:
+    - Fbp1
+    - Fbp2
+    - Pck2
   pathway: Gluconeogenesis
   description: Phosphoenolpyruvate carboxykinase
 G6Pase_c:
@@ -1646,41 +1517,40 @@ G6Pase_c:
   description: Glucose-6-phosphatase
 LIPID_c:
   genes:
-  - Gpam
-  - Gpam
-  - Agpat1
-  - Agpat2
-  - Agpat3
-  - Dgat1
-  - Dgat2
-  - Chka
-  - Chkb
-  - Pcyt1a
-  - Pcyt2
+  - Acaca
+  - Acacb
+  - Fasn
   - Srebf1
   - Srebf2
   - Mlxipl
   - Pparg
   - Nr1h3
+  - Scd1
+  - Scd2
+  - Fads1
+  - Fads2
+  - Elovl6
   gene_roles:
     catalytic:
-    - Gpam
-    - Gpam
-    - Agpat1
-    - Agpat2
-    - Agpat3
-    - Dgat1
-    - Dgat2
-    - Chka
-    - Chkb
-    - Pcyt1a
-    - Pcyt2
+    - Acaca
+    - Acacb
+    - Fasn
+    regulatory:
+    - Srebf1
+    - Srebf2
+    - Mlxipl
     transcription_factor:
     - Srebf1
     - Srebf2
     - Mlxipl
     - Pparg
     - Nr1h3
+    downstream:
+    - Scd1
+    - Scd2
+    - Fads1
+    - Fads2
+    - Elovl6
   pathway: Lipid Synthesis
   description: Triglyceride synthesis
 BIOMASS_REACTION_6:
@@ -1817,25 +1687,19 @@ GAPD_c:
   description: Glyceraldehyde phosphate dehydrogenase
 SER_exchange:
   genes:
+  - Slc1a4
+  - Slc1a5
   - Phgdh
   - Psat1
   - Psph
-  - Shmt1
-  - Shmt2
-  - Slc1a4
-  - Slc1a5
-  - Slc38a5
   gene_roles:
-    catalytic:
-    - Phgdh
-    - Psat1
-    - Psph
-    - Shmt1
-    - Shmt2
     transporter:
     - Slc1a4
     - Slc1a5
-    - Slc38a5
+    downstream:
+    - Phgdh
+    - Psat1
+    - Psph
   pathway: Nucleotide Metabolism
   description: Serine exchange / Serine biosynthesis pathway
 SCOT_m:
@@ -1903,13 +1767,11 @@ ME2_m:
 GK_c:
   genes:
   - Gk
-  - Gk2
   gene_roles:
     catalytic:
     - Gk
-    - Gk2
   pathway: Glycerol Metabolism
-  description: Glycerol kinase
+  description: Glycerol kinase - 甘油激酶
 G3PD_m:
   genes:
   - Gpd2
@@ -2076,6 +1938,7 @@ GPT_c:
   gene_roles:
     catalytic:
     - Gpt
+    downstream:
     - Gpt2
   pathway: Amino Acid Metabolism
   description: Alanine transaminase (ALT)
@@ -2117,10 +1980,15 @@ ME_m:
   description: Malic enzyme (mitochondrial, NAD+ dependent)
 ME2_c:
   genes:
+  - Me1
   - Me2
+  - Me3
   gene_roles:
     catalytic:
+    - Me1
+    downstream:
     - Me2
+    - Me3
   pathway: Pyruvate Metabolism
   description: Malic enzyme 2 (mitochondrial, NAD+)
 GLYCOGENOLYSIS_c:
@@ -2174,14 +2042,17 @@ PYR_trans:
   genes:
   - Mpc1
   - Mpc2
-  - Slc16a1
-  - Slc16a3
+  - Pdha1
+  - Pdhb
+  - Pcx
   gene_roles:
     transporter:
     - Mpc1
     - Mpc2
-    - Slc16a1
-    - Slc16a3
+    downstream:
+    - Pdha1
+    - Pdhb
+    - Pcx
   pathway: Pyruvate Metabolism
   description: Pyruvate transmembrane transport (MPC complex)
 GLY_exchange:
@@ -2203,3 +2074,64 @@ GLY_exchange:
     - Slc7a1
   pathway: Amino Acid Metabolism
   description: Glycine exchange / glycine metabolism
+G3PP_c:
+  genes:
+  - Pgp
+  gene_roles:
+    catalytic:
+    - Pgp
+  pathway: Glycerol Metabolism
+  description: Glycerol-3-phosphate phosphatase (PGP) - 甘油-3-磷酸磷酸酶
+FA_esterification_c:
+  genes:
+  - Gpam
+  - Gpat3
+  - Gpat4
+  - Agpat2
+  - Lpin1
+  - Lpin2
+  - Dgat1
+  - Dgat2
+  - Mogat1
+  gene_roles:
+    catalytic:
+    - Gpam
+    - Gpat3
+    - Gpat4
+    - Agpat2
+    - Lpin1
+    - Lpin2
+    - Dgat1
+    - Dgat2
+    - Mogat1
+  pathway: Lipid Metabolism
+  description: Fatty acid esterification to triacylglycerol (lumped) - 脂肪酸酯化
+lipid_mobilization_c:
+  genes:
+  - Pnpla2
+  - Lipe
+  - Mgll
+  - Abhd5
+  - G0s2
+  gene_roles:
+    catalytic:
+    - Pnpla2
+    - Lipe
+    - Mgll
+    regulatory:
+    - Abhd5
+    - G0s2
+  pathway: Lipid Metabolism
+  description: Lipolysis (ATGL / HSL / MGL) - 脂解
+PHGDH_PSAT_PSP_c:
+  genes:
+  - Phgdh
+  - Psat1
+  - Psph
+  gene_roles:
+    catalytic:
+    - Phgdh
+    - Psat1
+    - Psph
+  pathway: Amino Acid Metabolism
+  description: Serine synthesis (PHGDH / PSAT1 / PSPH) - 丝氨酸从头合成

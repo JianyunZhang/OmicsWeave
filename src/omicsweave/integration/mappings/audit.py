@@ -31,6 +31,7 @@ PROTEIN_ROLES = (
     "downstream_enzymes",
     "transporters",
     "cofactors",
+    "related_isozymes",
 )
 METABOLITE_ROLES = ("substrates", "products", "related")
 

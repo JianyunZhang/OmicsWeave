@@ -1,0 +1,61 @@
+{
+  "generated_by": "python -m omicsweave.integration.mappings.network_annotation",
+  "generated_on": "2026-11-11",
+  "model_id": "dio_multi_tissue",
+  "networks": {
+    "carbon": {
+      "folder": "obesity_adjusted_seven_tissues_network",
+      "git_commit": "8a7816bd4ffde5d019f14a1711a8b4ecd05bda32",
+      "sha256_of_modules": "412416e2fb057f817feb648423c4849b824708a4c6fb49b01bc62d163fbc38b3"
+    },
+    "nitrogen": {
+      "folder": "obesity_nitrogen_network",
+      "git_commit": "8a7816bd4ffde5d019f14a1711a8b4ecd05bda32",
+      "sha256_of_modules": "9943a0db6295deb516c5334b4a0e1f2df2acdd8438aabebaabcd2efa0ac4e849"
+    }
+  },
+  "standard_names": {
+    "file": "model_metabolite_to_standard_name_dict.py",
+    "sha256": "d7f148f8020c44ae7f717c16bfcf71c8b443ed6fa8f7e88ba9bb897db59c1525"
+  },
+  "note": "网络源码只做 ast 静态解析，不执行；f-string 生成的反应（BIOMASS 等）不在表中，按 ID 规则判为虚拟反应",
+  "summary": {
+    "n_reactions": {
+      "carbon": 107,
+      "nitrogen": 53
+    },
+    "reaction_classes": {
+      "enzymatic": 114,
+      "transport": 9,
+      "exchange": 17,
+      "extracellular": 2,
+      "pseudo": 18
+    },
+    "reactions_with_several_definitions": [
+      "nitrogen:OAT_c"
+    ],
+    "tissue_metabolites_without_standard_name": [
+      "13BPG",
+      "ACAC",
+      "ACACCOA",
+      "CP",
+      "DAG",
+      "FA",
+      "LPA",
+      "MAG",
+      "MALCOA",
+      "NH4",
+      "PA",
+      "PALCOA",
+      "TAG",
+      "TGPAL"
+    ],
+    "standard_names_without_database_id": [
+      "acetylcarnitine",
+      "oleate",
+      "palmitoleate",
+      "palmitoylcarnitine",
+      "stearate"
+    ]
+  }
+}
