@@ -75,6 +75,23 @@ def differential_to_contract(table: pd.DataFrame, *, contrast_id: str, contrast_
     return out.reset_index(drop=True)
 
 
+def derived_differential_to_contract(table: pd.DataFrame, definitions: pd.DataFrame, *, units: str,
+                                     selection_rule: str, **kwargs) -> pd.DataFrame:
+    """派生特征（``derived_features``）的差异表 → 统一差异结果表，附 ``feature_type`` 与定义列。
+
+    ``table`` 是 :func:`analyze_differential_metabolites` 对派生矩阵的一个比较的输出，特征 ID 列为 ``derived_id``、
+    名称列为 ``derived_name``；``definitions`` 为派生数据集的 features 表。其余参数同 :func:`differential_to_contract`。
+    """
+    out = differential_to_contract(table, feature_id_column="derived_id", feature_name_column="derived_name",
+                                   selection_rule=selection_rule, **kwargs)
+    out["units"] = units
+    lookup = definitions.reindex(out["feature_id"])
+    for column in ("feature_type", "definition", "related_reaction", "readout"):
+        out[column] = lookup[column].astype(str).to_numpy()
+    out["n_members"] = pd.to_numeric(lookup["n_members"], errors="coerce").astype("Int64").to_numpy()
+    return out
+
+
 def ora_to_contract(result: pd.DataFrame, *, contrast_id: str, contrast_role: str, tissue: str, query: str,
                     gene_set_library: str = "KEGG", padj_method: str = "fdr_bh") -> pd.DataFrame:
     """``query`` 为参与 ORA 的显著代谢物集合：up / down / all。"""

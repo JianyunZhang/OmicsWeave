@@ -37,6 +37,8 @@ class ValueType(str, Enum):
     CONCENTRATION = "concentration"
     MID_FRACTION = "mid_fraction"
     FLUX = "flux"
+    # 由测得特征按样本计算的派生量（如代谢组的脂质类别总量、质量作用比）；定义写在 features 中
+    DERIVED = "derived"
 
 
 class ContractError(ValueError):

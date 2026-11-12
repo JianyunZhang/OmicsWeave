@@ -60,6 +60,9 @@ class MetabolomicsConfig:
     gsea_max_set_size: int = 500
     gsea_permutation_num: int = 1000
     gsea_rank_metric: str = "welch_t"
+    # 派生特征（脂质类别总量、质量作用比，见 omicsweave.metabolomics.derived_features）；只用于统一运行器
+    derived_features: bool = True
+    lipid_class_min_species: int = 3
 
 
 # ---------------------------------------------------------------------------

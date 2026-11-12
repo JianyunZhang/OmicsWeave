@@ -22,7 +22,12 @@
 
     data/<组织>/                  预处理后的 log2 归一化峰面积（分析层数据集；只含生物学样本）
     qc/<组织>/                    逐代谢物 QC 指标、样本总信号与归一化因子、预处理摘要
+    derived/<组织>/               派生特征（脂质类别总量、质量作用比；log2，定义见 features.parquet），
+                                  见 :mod:`omicsweave.metabolomics.derived_features`
     tables/differential.parquet   统一差异结果表
+    tables/derived_differential.parquet
+                                  派生特征的差异结果（同一 Welch t 检验；按组织 × 比较 × 特征类型单独做 BH 校正，
+                                  不并入测得代谢物的 FDR，不要求 VIP）。由 analysis 的 derived_features 开关控制
     tables/enrichment.parquet     KEGG 通路 ORA（显著代谢物，不分上下调）与预排序 GSEA
     figures/                      火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
                                   :mod:`omicsweave.visualization.volcano`；纵轴为校正后 p）
@@ -31,7 +36,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import MISSING, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +52,7 @@ from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
+from .derived_features import UNITS, DerivedFeatures, derive_features
 from .data_preprocessing import (
     PreprocessingOptions,
     classify_data_columns,
@@ -56,7 +62,7 @@ from .data_preprocessing import (
 from .differential_analysis import DifferentialAnalysisOptions, analyze_differential_metabolites
 from .enrichment._run import calculate_pathway_enrichment
 from .experiment_config import MetabolomicsConfig
-from .export import differential_to_contract, ora_to_contract
+from .export import derived_differential_to_contract, differential_to_contract, ora_to_contract
 from .gsea._run import run_gsea
 from .plotting.qc_plots import fit_plsda
 
@@ -195,6 +201,32 @@ def _split_kegg_terms(rows: pd.DataFrame) -> pd.DataFrame:
     return rows.assign(term_id=parts.str[0], term_name=parts.str[1].fillna(rows["term_name"]))
 
 
+def _derived_differential(derived: DerivedFeatures, tissue: str, groups: dict[str, str], contrast, options, *,
+                          fdr_method: str, settings: dict[str, Any]) -> list[pd.DataFrame]:
+    """派生特征的一个比较：每种特征类型单独检验与校正（与测得代谢物同一个 Welch t 检验，不要求 VIP）。"""
+    levels = (contrast.numerator, contrast.denominator)
+    members = {level: [s for s, g in groups.items() if g == level] for level in levels}
+    derived_options = replace(options, require_vip_for_significance=False)
+    out = []
+    for feature_type, definitions in derived.features.groupby("feature_type", sort=True):
+        ids = definitions.index
+        values = derived.matrix.loc[ids, list(groups)]
+        table = pd.concat([pd.DataFrame({"derived_id": ids, "derived_name": definitions["feature_name"].to_numpy()},
+                                        index=ids), values], axis=1)
+        result = analyze_differential_metabolites(table, groups, [(*levels, contrast.id)], options=derived_options,
+                                                  metadata_columns=["derived_id", "derived_name"])
+        means = {level: values[cols].mean(axis=1) for level, cols in members.items()}
+        rule = (f"padj<{settings['fdr_cutoff']} and |log2FC|>{settings['log2fc_cutoff']}"
+                f"（{feature_type} 单独做 BH 校正，不要求 VIP）")
+        out.append(derived_differential_to_contract(
+            result.contrasts[contrast.id], definitions, units=UNITS[feature_type], selection_rule=rule,
+            contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
+            mean_numerator=means[contrast.numerator], mean_denominator=means[contrast.denominator],
+            n_numerator=len(members[contrast.numerator]), n_denominator=len(members[contrast.denominator]),
+            fdr_method=fdr_method))
+    return out
+
+
 def run(ctx: RunContext) -> OmicsRun:
     experiment = ctx.experiment
     spec = experiment.config.omics.metabolomics.input
@@ -218,7 +250,8 @@ def run(ctx: RunContext) -> OmicsRun:
         min_observations_per_group=int(settings["min_observations_per_group"]),
     )
     want_differential = ctx.wants("differential") or ctx.wants("enrichment")
-    differential, enrichment, contrasts_run = [], [], []
+    differential, enrichment, contrasts_run, derived_rows = [], [], [], []
+    derived_counts: dict[str, dict[str, int]] = {}
 
     for block in blocks:
         tissue = block.tissue
@@ -245,6 +278,21 @@ def run(ctx: RunContext) -> OmicsRun:
                            normalization=pre.summary["normalization_method"], feature_id_type=feature_id,
                            source={"file": block.path.name, "detection_rule": pre.summary["detection_rule"]})
         write_dataset(out / "data" / tissue, Dataset(matrix, _features(processed, block.annotations, ids), meta))
+
+        derived = None
+        if settings["derived_features"]:
+            derived = derive_features(processed, block.biological, feature_id_column=feature_id, name_column=name,
+                                      min_species=int(settings["lipid_class_min_species"]))
+            record.notes += [f"代谢组 {tissue} 的派生特征：{note}" for note in derived.notes]
+            if derived.empty:
+                derived = None
+            else:
+                derived_counts[tissue] = {str(k): int(v) for k, v in
+                                          derived.features["feature_type"].value_counts().sort_index().items()}
+                write_dataset(out / "derived" / tissue, Dataset(derived.matrix, derived.features, DatasetMeta(
+                    omics=Omics.METABOLOMICS, tissue=tissue, value_type=ValueType.DERIVED, scale="log2",
+                    normalization=pre.summary["normalization_method"], feature_id_type="derived_feature",
+                    source={"from": f"data/{tissue}", "module": "omicsweave.metabolomics.derived_features"})))
 
         if ctx.wants("qc"):
             qc_dir = out / "qc" / tissue
@@ -291,6 +339,9 @@ def run(ctx: RunContext) -> OmicsRun:
                 n_numerator=len(members[contrast.numerator]), n_denominator=len(members[contrast.denominator]),
                 fdr_method=fdr_method, selection_rule=rule))
             contrasts_run.append(contrast.id)
+            if derived is not None:
+                derived_rows += _derived_differential(derived, tissue, groups, contrast, options,
+                                                      fdr_method=fdr_method, settings=settings)
             if ctx.wants("enrichment") and "kegg_map" in result.combined.columns:
                 ora = calculate_pathway_enrichment(
                     result.combined, significance_col=f"Significant_{contrast.id}", feature_col=feature_id,
@@ -311,6 +362,9 @@ def run(ctx: RunContext) -> OmicsRun:
 
     if differential:
         write_differential(pd.concat(differential, ignore_index=True), out / "tables" / "differential.parquet")
+    if derived_rows:
+        write_differential(pd.concat(derived_rows, ignore_index=True),
+                           out / "tables" / "derived_differential.parquet")
     if enrichment:
         write_enrichment(pd.concat(enrichment, ignore_index=True), out / "tables" / "enrichment.parquet")
     elif ctx.wants("enrichment") and differential:
@@ -323,6 +377,7 @@ def run(ctx: RunContext) -> OmicsRun:
     record.parameters = {
         "tissues": [b.tissue for b in blocks],
         "contrasts": list(dict.fromkeys(contrasts_run)),
+        "derived_features": derived_counts,
         "analysis": settings,
     }
     return record

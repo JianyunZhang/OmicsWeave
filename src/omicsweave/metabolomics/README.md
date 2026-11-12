@@ -41,6 +41,8 @@ input:
 预处理、PLS-DA、差异检验、KEGG ORA 与代谢物集 GSEA 沿用本模块的函数，同一份数据与下面的旧流程结果逐值一致；图件与解读报告暂时只在旧流程中提供。
 结果写入结果包的 `omics/metabolomics/`：`data/<组织>/`（预处理后的数据集）、`qc/<组织>/`、`tables/differential.parquet`、`tables/enrichment.parquet`。
 
+派生特征（`analysis.derived_features`，默认开启）：每个组织另写 `derived/<组织>/`（脂质类别总量与质量作用比，log2，定义见 features），差异结果写入 `tables/derived_differential.parquet`。检验与测得代谢物相同（Welch t），但每种特征类型在组织 × 比较内单独做 BH 校正、不要求 VIP；脂质类别按 LIPID MAPS 简写从名称解析，分子种少于 `lipid_class_min_species`（默认 3）的类别不计算；比值的组分按数据表自带的 HMDB / KEGG ID 匹配。定义与注意事项见 `derived_features.py` 的模块说明。
+
 旧版 `--input/--output/--legacy-mode` 已移除。旧实现硬编码小鼠编号与分组，且重复了一套不完整统计逻辑；调用者应迁移到 `config.yaml + groups.yaml`。
 
 ## 六个分析步骤
