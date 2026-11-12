@@ -31,13 +31,36 @@ from ..mappings import (
     audit_mapping_integrity,
 )
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
-from ..mappings.network_annotation import reaction_semantics
+from ..mappings.network_annotation import lipid_pool_roles, reaction_semantics
 from .evidence_profile import EvidenceProfileScorer, evidence_table
 
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
+
+def _derived_indices(flux_id: str, metab_df: pd.DataFrame) -> dict[str, list[Any]]:
+    """代谢组派生特征在一个反应中的角色：脂质类别总量按网络中的脂质池作底物 / 产物，质量作用比按
+    ``related_reaction`` 记为关联（比值反映氧化还原等状态，不提示净通量方向）。"""
+    out: dict[str, list[Any]] = {"substrates": [], "products": [], "related": []}
+    if metab_df is None or "feature_type" not in metab_df.columns:
+        return out
+    types = metab_df["feature_type"].fillna("").astype(str)
+    pools = lipid_pool_roles(flux_id)
+    if pools["substrates"] or pools["products"]:
+        ids = metab_df["metabolite_id"].fillna("").astype(str) if "metabolite_id" in metab_df.columns \
+            else pd.Series("", index=metab_df.index)
+        for index in metab_df.index[types.eq("lipid_class_total")]:
+            lipid_class = ids[index].split(":", 1)[-1]
+            if lipid_class in pools["substrates"]:
+                out["substrates"].append(index)
+            elif lipid_class in pools["products"]:
+                out["products"].append(index)
+    if "related_reaction" in metab_df.columns:
+        related = metab_df["related_reaction"].fillna("").astype(str)
+        out["related"] += list(metab_df.index[types.eq("mass_action_ratio") & related.eq(flux_id)])
+    return out
 
 def _simes_probability(values: pd.Series) -> float:
     """Simes 聚合，减少“映射对象越多越容易取到极小 p 值”的偏倚。"""
@@ -748,6 +771,8 @@ class FluxEvidenceBuilder:
             return {"n_metabolites_checked": 0, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_data"}
 
         flux_id = flux_row.get("flux_id", "")
+        derived_idx = _derived_indices(str(flux_id), metab_df)
+        has_derived = any(derived_idx.values())
 
         roles = get_metabolite_roles(flux_id)
         if roles is None:
@@ -756,6 +781,8 @@ class FluxEvidenceBuilder:
                 roles = {"substrates": [], "products": [], "related": flat}
             elif isinstance(flat, dict):
                 roles = flat
+            elif has_derived:
+                roles = {"substrates": [], "products": [], "related": []}
             else:
                 return {"n_metabolites_checked": 0, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_mapping"}
 
@@ -765,17 +792,19 @@ class FluxEvidenceBuilder:
         all_metabs = substrates + products + related
         n_checked = len(all_metabs)
 
-        if not all_metabs:
+        if not all_metabs and not has_derived:
             return {"n_metabolites_checked": 0, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_mapping"}
 
         if "compound" not in metab_df.columns:
             return {"n_metabolites_checked": n_checked, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_data"}
 
-        matched_roles = match_metabolite_roles(metab_df, roles)
-        n_checked = sum(matched_roles.target_count_by_role.values())
-        sub_idx = list(matched_roles.indices_by_role["substrates"])
-        prod_idx = list(matched_roles.indices_by_role["products"])
-        rel_idx = list(matched_roles.indices_by_role["related"])
+        # 派生特征不参与按名称 / ID 的匹配，只按反应注释挂到底物 / 产物 / 关联上
+        measured = metab_df[metab_df["feature_type"].isna()] if "feature_type" in metab_df.columns else metab_df
+        matched_roles = match_metabolite_roles(measured, roles)
+        n_checked = sum(matched_roles.target_count_by_role.values()) + sum(map(len, derived_idx.values()))
+        sub_idx = list(matched_roles.indices_by_role["substrates"]) + derived_idx["substrates"]
+        prod_idx = list(matched_roles.indices_by_role["products"]) + derived_idx["products"]
+        rel_idx = list(matched_roles.indices_by_role["related"]) + derived_idx["related"]
         all_idx = list(dict.fromkeys(sub_idx + prod_idx + rel_idx))
 
         if not all_idx:
@@ -941,6 +970,8 @@ class FluxEvidenceBuilder:
             "sig_metabolites": sig_metab_list,
             "concordant_metabolites": sorted(set(
                 sig_df.loc[direct_support_idx, "compound"].dropna().astype(str))),
+            "derived_readouts": [f"{metab_df.at[index, 'compound']} ({role})"
+                                 for role, indices in derived_idx.items() for index in indices],
             "evidence_mode": metab_evidence_mode,
         }
         return details

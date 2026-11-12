@@ -58,6 +58,8 @@ _GENE_ID_COLUMNS = {"ensembl_gene_id": "ensembl_gene_id", "ensembl_id": "ensembl
 _PROTEIN_IDS = {"uniprot_id": "uniprot_id"}
 _METABOLITE_IDS = {"hmdb": "hmdb_id", "kegg_compound": "kegg_compound", "chebi": "chebi_id"}
 _MFA_ANNOTATIONS = ("kegg_pathway", "ec_number", "kegg_reaction", "reactome_id")
+# 代谢组派生特征（脂质类别总量、质量作用比）的差异结果，与 differential.parquet 同目录
+DERIVED_TABLE = "derived_differential.parquet"
 # 证据画像中各层与通量方向一致的特征
 _CONCORDANT = {"tx_details": ("concordant_genes", "tx_concordant_features"),
                "prot_details": ("concordant_proteins", "prot_concordant_features"),
@@ -158,13 +160,20 @@ def proteomics_frames(diff: pd.DataFrame) -> dict[str, pd.DataFrame]:
                          "evidence": "evidence"})
 
 
-def metabolomics_frames(diff: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """代谢组差异结果 → ``{组织: 每行一个代谢物}``，列同旧流程的代谢组宽表（``log2fc_<比较>`` 等）。"""
+def metabolomics_frames(diff: pd.DataFrame, derived: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
+    """代谢组差异结果 → ``{组织: 每行一个代谢物}``，列同旧流程的代谢组宽表（``log2fc_<比较>`` 等）。
+
+    ``derived`` 为代谢组派生特征的差异结果（``derived_differential.parquet``：脂质类别总量、质量作用比），
+    与测得代谢物并入同一张宽表，以 ``feature_type`` 与 ``related_reaction`` 列区分；``metabolite_id`` 为特征 ID。
+    """
+    if derived is not None and not derived.empty:
+        diff = pd.concat([diff, derived], ignore_index=True)
     ids = diff["feature_id"].astype(str)
     names = diff["feature_name"].fillna(ids) if "feature_name" in diff.columns else ids
     diff = diff.assign(compound=names.astype(str), n_eff=_n_eff(diff))
-    return _wide_frames(diff, {"compound": "compound", **_METABOLITE_IDS},
-                        {"log2fc": "log2fc", "pvalue": "pval", "padj": "fdr", "n_eff": "n_eff"})
+    identity = {"compound": "compound", **_METABOLITE_IDS, "feature_id": "metabolite_id",
+                **{c: c for c in ("feature_type", "related_reaction") if c in diff.columns}}
+    return _wide_frames(diff, identity, {"log2fc": "log2fc", "pvalue": "pval", "padj": "fdr", "n_eff": "n_eff"})
 
 
 def _transcriptomics_id_types(source: Path) -> dict[str, str]:
@@ -208,13 +217,15 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         raise RunError(f"{MODE.value} 需要 MFA 与至少 1 个其他组学的差异结果；结果包 {source.name} 中有：{found}。"
                        f"请先对启用的组学运行 omicsweave run（含 differential 步骤）")
     tables = {omics: read_differential(path) for omics, path in paths.items()}
+    derived_path = source / "omics" / Omics.METABOLOMICS.value / "tables" / DERIVED_TABLE
+    derived = read_differential(derived_path) if derived_path.is_file() else None
     empty = pd.DataFrame(columns=["contrast_id", "tissue", "feature_id", "evidence_level"])
 
     tissue_map = {str(k): str(v) for k, v in (params["tissue_map"] or {}).items()}
     mfa = mfa_frames(tables[Omics.MFA.value], tissue_map)
     tx = transcriptomics_frames(tables.get(Omics.TRANSCRIPTOMICS.value, empty), _transcriptomics_id_types(source))
     prot = proteomics_frames(tables.get(Omics.PROTEOMICS.value, empty))
-    metab = metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty))
+    metab = metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty), derived)
 
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={},
                                                   scoring=scoring_config(params, tables[Omics.MFA.value])))
@@ -227,8 +238,9 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     builder.get_evidence_table().to_parquet(out / "flux_evidence_table.parquet", index=False)
     builder.aggregate_by_pathway(profile).to_parquet(out / "flux_pathway_profile.parquet", index=False)
 
-    record = IntegrationRun(MODE, inputs=list(paths.values()),
-                            parameters={**params, "omics": sorted(paths)})
+    record = IntegrationRun(MODE, inputs=list(paths.values()) + ([derived_path] if derived is not None else []),
+                            parameters={**params, "omics": sorted(paths),
+                                        "derived_metabolomics_features": derived is not None})
     other_tissues = {t for frames in tx.values() for t in frames} | set(prot) | set(metab)
     unmatched = sorted({t for frame in mfa.values() for t in frame["tissue"]} - other_tissues)
     if unmatched:

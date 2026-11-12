@@ -277,6 +277,25 @@ def reaction_semantics(flux_id: str) -> ReactionSemantics:
     return ReactionSemantics(flux_id, cls, str(evidence), str(reason), reaction is not None)
 
 
+# ── 脂质池 → 脂质类别总量（代谢组派生特征） ──────────────────────────────────────────────────────────────────
+
+# 网络中没有单独测定的脂质池（甘油三酯储存、脂肪组织的 LIPID）和分步 TG 模块中的中间体，对应代谢组派生特征
+# ``class_total:<类别>``（见 omicsweave.metabolomics.derived_features）。
+LIPID_POOL_CLASSES = {"TG_store": "TG", "LIPID": "TG", "TAG": "TG", "DAG": "DG", "MAG": "MG", "PA": "PA", "LPA": "LPA"}
+
+
+def lipid_pool_roles(flux_id: str) -> dict[str, set[str]]:
+    """一个反应以哪些脂质类别总量为底物 / 产物（两侧都出现的类别不计）。"""
+    reaction = network_reactions().get(flux_id)
+    if reaction is None:
+        return {"substrates": set(), "products": set()}
+    side = lambda species: {LIPID_POOL_CLASSES[b] for m in species
+                            if (b := split_metabolite(m)[0]) in LIPID_POOL_CLASSES}
+    substrates, products = side(reaction.substrates), side(reaction.products)
+    shared = substrates & products
+    return {"substrates": substrates - shared, "products": products - shared}
+
+
 # ── 代谢物角色与网络化学计量同步 ────────────────────────────────────────────────────────────────────────────────
 
 def _metabolite_ids(name: str) -> frozenset[str]:
