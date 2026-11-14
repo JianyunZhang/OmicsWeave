@@ -14,11 +14,13 @@ import matplotlib.pyplot as plt
 
 from . import _config as cfg
 
-GRADE_ORDER = ["Replicated", "Convergent", "Single-layer", "Exploratory", "Conflicting", "No-signal",
-               "Not-assessable"]
+# 锚定等级在前，锚点不成立时的组学一致性等级（Omics-*）在后
+GRADE_ORDER = ["Replicated", "Convergent", "Single-layer", "Exploratory", "Conflicting", "Omics-concordant",
+               "Omics-single-layer", "Omics-discordant", "No-signal", "Not-assessable"]
 _DEFAULT_GRADE_COLORS = {
     "Replicated": "#1B7837", "Convergent": "#5AAE61", "Single-layer": "#A6DBA0", "Exploratory": "#F4A582",
-    "Conflicting": "#B2182B", "No-signal": "#D9D9D9", "Not-assessable": "#F0F0F0",
+    "Conflicting": "#B2182B", "Omics-concordant": "#4393C3", "Omics-single-layer": "#92C5DE",
+    "Omics-discordant": "#D6604D", "No-signal": "#D9D9D9", "Not-assessable": "#F0F0F0",
 }
 
 

@@ -8,6 +8,7 @@
     manifest.json     运行 ID、命令、配置哈希、输入输出文件的校验值
     metadata/         subjects / samples（Parquet）与展开后的实验配置
     omics/<组学>/      data/（分析层数据集）、qc/、tables/（统一结果表）、figures/（图件）、details/（旧版格式的明细表）
+    qc/               contrast_reliability.parquet：样本 QC 标记对各（组学, 组织, 比较）的影响（见 core.reliability）
 
 每个组学由一个运行器实现（:data:`RUNNERS`），各组学之间互不依赖。运行器只通过 :class:`RunContext`
 取得项目、实验和输出目录，不读写进程级全局状态。
@@ -229,6 +230,10 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
             runs.append(func(ctx))
         except RunError as exc:
             raise RunError(f"{o.value} 运行失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
+
+    # 样本 QC 标记 → 组学 × 组织 × 比较的可靠性（qc/contrast_reliability.parquet）
+    from .reliability import write_run_reliability
+    notes += write_run_reliability(experiment, ctx.run_dir)
 
     finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command,
                parameters={"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}})

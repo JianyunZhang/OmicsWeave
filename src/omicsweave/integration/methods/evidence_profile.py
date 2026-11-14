@@ -3,6 +3,12 @@
 
 该模块只接受标准化后的层级证据，负责把统计可信度、效应强度、映射质量、
 数据可靠性和方向关系整合为可解释的多维结果。旧的 0--4 分矩阵不属于本模块。
+
+证据等级取决于锚点状态（``anchor_state``）：只有锚点（MFA 差异通量）成立时，其他组学才按锚点方向判支持或冲突，
+给出 Convergent / Single-layer / Exploratory / Conflicting；锚点不成立（未通过显著性判定、证据不足、任一组少于
+2 只、不可辨识、示踪剂不一致或 QC 混杂）时，改为判断各组学之间相互是否一致，用单独的等级词汇
+Omics-concordant / Omics-single-layer / Omics-discordant，与锚定等级不混用。各组学提示的方向
+（直接酶 / 转运体升 → 通量升，产物升 → 通量升，底物升 → 通量降）与锚点的符号无关。
 """
 
 from __future__ import annotations
@@ -30,6 +36,19 @@ _COUNT_KEYS = {
     "proteomics": ("n_proteins_checked", "n_proteins_found"),
     "metabolomics": ("n_metabolites_checked", "n_metabolites_found"),
 }
+
+# 锚点类型：目前只有 MFA 差异通量（预先登记的预期方向、参考层待结论台账 G12 接入）
+ANCHOR_TYPE_MFA = "mfa_flux"
+# 锚点状态：前两种允许按锚点方向判支持 / 冲突（effect_only 受设计等级限制，最多为 Exploratory）
+ANCHORED_STATES = frozenset({"established", "effect_only"})
+ANCHOR_STATES = ("established", "effect_only", "not_established", "insufficient", "not_identifiable",
+                 "tracer_conflict", "qc_confounded", "qc_insufficient")
+ANCHORED_GRADES = ("Convergent", "Single-layer", "Exploratory", "Conflicting")
+OMICS_ONLY_GRADES = ("Omics-concordant", "Omics-single-layer", "Omics-discordant")
+EVIDENCE_GRADES = (*ANCHORED_GRADES, *OMICS_ONLY_GRADES, "No-signal", "Not-assessable")
+# 可靠性表中使该（组学, 组织, 比较）的方向证据不可评估的状态（omicsweave.core.reliability）
+QC_BLOCKED = frozenset({"qc_confounded", "qc_insufficient"})
+_UNIDENTIFIABLE = {"poorly_constrained", "bound_pinned", "not_identifiable"}
 
 _CONCORDANT_KEYS = {
     "transcriptomics": "concordant_genes",
@@ -95,6 +114,8 @@ class EvidenceProfileConfig:
     mapping_quality: dict[str, float]
     mode_reliability: dict[str, float]
     quality_reliability: dict[str, float]
+    # 用户显式配置的层级 QC 因子：覆盖可靠性表中该层的数值（QC 混杂造成的不可评估不被覆盖）
+    quality_reliability_override: dict[str, float]
     n_eff_by_layer: dict[str, float]
     mfa_inference_unit: str
     design_grade_override: str | None
@@ -140,6 +161,8 @@ class EvidenceProfileConfig:
                 "metabolomics": 1.0,
                 **raw.get("quality_reliability", {}),
             },
+            quality_reliability_override={str(k): float(v) for k, v in
+                                          (raw.get("quality_reliability") or {}).items()},
             n_eff_by_layer={
                 str(key): float(value)
                 for key, value in raw.get("n_eff_by_layer", {}).items()
@@ -154,12 +177,47 @@ class EvidenceProfileConfig:
 class EvidenceProfileScorer:
     """把四层标准化证据整合为 EvidenceTable 和多维证据画像。"""
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None,
+                 reliability: pd.DataFrame | None = None) -> None:
+        """``reliability``：组学 × 组织 × 比较的 QC 可靠性表（列 ``omics``、``tissue``、``contrast_id``、
+        ``reliability``、``status``、``reason``，见 :mod:`omicsweave.core.reliability`）。"""
         self.config = EvidenceProfileConfig.from_dict(config)
+        self._reliability: dict[tuple[str, str, str], tuple[float, str, str]] = {}
+        if reliability is not None and not reliability.empty:
+            for row in reliability.itertuples(index=False):
+                self._reliability[(str(row.omics), str(row.tissue), str(row.contrast_id))] = (
+                    _as_float(row.reliability), str(row.status), str(row.reason or ""))
 
     def build_records(self, scored_record: dict[str, Any]) -> list[dict[str, Any]]:
-        """为单个反应构建四行标准化 EvidenceTable 记录。"""
-        return [self._build_layer_record(scored_record, layer) for layer in LAYERS]
+        """为单个反应构建四行标准化 EvidenceTable 记录；每行都带上该反应的锚点状态。"""
+        anchor_state = self.anchor_state(scored_record)
+        return [{**self._build_layer_record(scored_record, layer), "anchor_state": anchor_state}
+                for layer in LAYERS]
+
+    def anchor_state(self, record: dict[str, Any]) -> str:
+        """MFA 锚点的状态（:data:`ANCHOR_STATES`）。
+
+        依次检查：可靠性表中 MFA 层被 QC 判为不可评估；不可辨识（差异结果的 ``flags`` 含 ``not_identifiable``，或
+        ``identifiability`` 为 poorly_constrained / bound_pinned）；多示踪剂方向不一致；证据等级为 insufficient 或
+        较小组少于 2 只（没有 ``n_min_group`` 时，总样本量不超过 3 即视为有一组少于 2 只）；未通过显著性判定。
+        通过判定的反应按判定路径记为 established（统计检验）或 effect_only（效应量）。
+        """
+        qc = self._reliability.get(("mfa", str(record.get("tissue", "")), str(record.get("comparison", ""))))
+        if qc and qc[1] in QC_BLOCKED:
+            return qc[1]
+        flags = {f.strip() for f in str(record.get("mfa_flags") or "").split(";")}
+        if "not_identifiable" in flags or str(record.get("identifiability") or "") in _UNIDENTIFIABLE:
+            return "not_identifiable"
+        if "tracer_conflict" in flags or str(record.get("tracer_evidence") or "") == "multi_tracer_conflict":
+            return "tracer_conflict"
+        n_min = _as_float(record.get("n_min_group"))
+        n_eff = _as_float(record.get("n_eff"))
+        low_n = n_min < 2 if np.isfinite(n_min) else (np.isfinite(n_eff) and n_eff <= 3)
+        if str(record.get("mfa_evidence_level") or "") == "insufficient" or low_n:
+            return "insufficient"
+        if not bool(record.get("gate_passed", False)):
+            return "not_established"
+        return "established" if record.get("mfa_evidence_mode") == "statistical_test" else "effect_only"
 
     def summarize(self, records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         """汇总单个反应的支持、冲突、覆盖、稳定性和证据等级。"""
@@ -167,6 +225,7 @@ class EvidenceProfileScorer:
         if table.empty:
             return self._empty_profile()
 
+        anchor_state = str(table["anchor_state"].iloc[0]) if "anchor_state" in table.columns else "established"
         assessable = table[table["assessment_status"].isin(ASSESSABLE_STATUSES)]
         n_assessable = len(assessable)
         coverage_score = float(table["coverage_value"].mean())
@@ -192,16 +251,24 @@ class EvidenceProfileScorer:
             selection_probability=selection_probability,
             direction_stability=direction_stability,
         )
-        evidence_grade = self._evidence_grade(
-            n_assessable=n_assessable,
-            n_supporting=n_supporting,
-            n_conflicting=n_conflicting,
-            support_score=support_score,
-            conflict_score=conflict_score,
-            design_grade=design_grade,
-        )
+        omics_direction, directional = self._omics_direction(assessable)
+        if anchor_state in ANCHORED_STATES:
+            evidence_grade = self._evidence_grade(
+                n_assessable=n_assessable,
+                n_supporting=n_supporting,
+                n_conflicting=n_conflicting,
+                support_score=support_score,
+                conflict_score=conflict_score,
+                design_grade=design_grade,
+            )
+        else:
+            evidence_grade = self._omics_only_grade(assessable, omics_direction, directional)
 
         return {
+            "anchor_type": ANCHOR_TYPE_MFA,
+            "anchor_state": anchor_state,
+            "omics_direction": omics_direction,
+            "n_omics_directional_layers": directional,
             "support_score": round(_clip01(support_score), 4),
             "conflict_score": round(_clip01(conflict_score), 4),
             "coverage_score": round(_clip01(coverage_score), 4),
@@ -242,6 +309,12 @@ class EvidenceProfileScorer:
             n_conflict = max(n_signal - n_support - int(details.get("n_unresolved", 0) or 0), 0)
 
         status = self._assessment_status(mode, n_signal, n_support, n_conflict)
+        quality_reliability, qc_status, qc_reason = self._layer_quality(layer, scored_record)
+        if qc_status in QC_BLOCKED:
+            status = qc_status         # 质量问题与比较混杂：该层不判支持或冲突
+        n_up = int(details.get("n_implied_up", 0) or 0)
+        n_down = int(details.get("n_implied_down", 0) or 0)
+        implied_direction = "mixed" if n_up and n_down else "up" if n_up else "down" if n_down else "none"
         support_effect = abs(_as_float(details.get("support_effect")))
         conflict_effect = abs(_as_float(details.get("conflict_effect")))
         representative_effect = _as_float(details.get("representative_effect"))
@@ -259,7 +332,6 @@ class EvidenceProfileScorer:
         se = _as_float(details.get("se"))
         n_eff = self._n_eff(layer, details.get("n_eff"))
         mapping_quality = self._mapping_quality(layer, details)
-        quality_reliability = self._quality_reliability(layer)
         reliability = self._data_reliability(
             mode, n_eff, qvalue, se, quality_reliability
         )
@@ -292,6 +364,8 @@ class EvidenceProfileScorer:
             * mapping_quality
             * reliability
         )
+        if qc_status in QC_BLOCKED:
+            support_evidence = conflict_evidence = 0.0
 
         if status == "mixed":
             relative_effect = support_effect - conflict_effect
@@ -332,11 +406,15 @@ class EvidenceProfileScorer:
             ),
             "n_ambiguous": int(details.get("n_ambiguous", 0) or 0),
             "ambiguous_features": _format_ambiguous_features(details),
-            "data_reason": str(details.get("data_reason", "") or ""),
+            "data_reason": ";".join(r for r in (str(details.get("data_reason", "") or ""), qc_reason) if r),
             "quality_reliability": quality_reliability,
+            "qc_status": qc_status,
             "data_reliability": reliability,
             "evidence_mode": mode,
             "assessment_status": status,
+            "implied_direction": implied_direction,
+            "n_implied_up": n_up,
+            "n_implied_down": n_down,
             "sign_certainty": sign_certainty,
             "effect_strength": max(support_strength, conflict_strength),
             "support_evidence": _clip01(support_evidence),
@@ -374,7 +452,9 @@ class EvidenceProfileScorer:
             abs(effect),
             max(float(self.config.effect_scales.get("mfa", 1.0)), np.finfo(float).eps),
         )
-        quality_reliability = self._quality_reliability("mfa")
+        quality_reliability, qc_status, qc_reason = self._layer_quality("mfa", scored_record)
+        if qc_status in QC_BLOCKED:
+            status, n_signal, gate_passed = qc_status, 0, False
         reliability = self._data_reliability(
             mode, n_eff, qvalue, se, quality_reliability
         )
@@ -401,10 +481,15 @@ class EvidenceProfileScorer:
             "direction": "up" if effect > 0 else "down" if effect < 0 else "none",
             "direction_relation": "anchor" if gate_passed else "no_signal",
             "mapping_quality": 1.0,
+            **({"data_reason": qc_reason} if qc_reason else {}),
             "quality_reliability": quality_reliability,
+            "qc_status": qc_status,
             "data_reliability": reliability,
             "evidence_mode": mode,
             "assessment_status": status,
+            "implied_direction": "none",
+            "n_implied_up": 0,
+            "n_implied_down": 0,
             "sign_certainty": sign_certainty,
             "effect_strength": effect_strength,
             "support_evidence": _clip01(support_evidence),
@@ -530,10 +615,47 @@ class EvidenceProfileScorer:
             base * n_factor * uncertainty_factor * _clip01(quality_reliability)
         )
 
-    def _quality_reliability(self, layer: str) -> float:
-        """返回审核后显式配置的层级 QC 因子；默认不降权。"""
-        value = _as_float(self.config.quality_reliability.get(layer, 1.0))
-        return _clip01(value) if np.isfinite(value) else 1.0
+    def _layer_quality(self, layer: str, record: dict[str, Any]) -> tuple[float, str, str]:
+        """该层在（组织, 比较）上的 QC 因子、可靠性状态与原因。
+
+        因子优先取用户显式配置的 ``quality_reliability``（覆盖项），其次取可靠性表，都没有时为 1。
+        可靠性状态只来自可靠性表；qc_confounded / qc_insufficient 使该层不可评估，覆盖项不改变这一点。
+        """
+        qc = self._reliability.get((layer, str(record.get("tissue", "")), str(record.get("comparison", ""))))
+        status, reason = (qc[1], qc[2]) if qc else ("", "")
+        if layer in self.config.quality_reliability_override:
+            value = _as_float(self.config.quality_reliability_override[layer])
+        elif qc:
+            value = qc[0]
+        else:
+            value = 1.0
+        return (_clip01(value) if np.isfinite(value) else 1.0), status, reason
+
+    @staticmethod
+    def _omics_direction(assessable: pd.DataFrame) -> tuple[str, int]:
+        """各组学层（不含锚点层）提示的通量方向与给出方向提示的层数；与锚点符号无关。"""
+        if assessable.empty or "implied_direction" not in assessable.columns:
+            return "none", 0
+        omics = assessable[assessable["layer"] != "mfa"]
+        directions = omics["implied_direction"][omics["implied_direction"].isin(["up", "down", "mixed"])]
+        if directions.empty:
+            return "none", 0
+        values = set(directions)
+        if "mixed" in values or {"up", "down"} <= values:
+            return "mixed", len(directions)
+        return values.pop(), len(directions)
+
+    @staticmethod
+    def _omics_only_grade(assessable: pd.DataFrame, omics_direction: str, directional: int) -> str:
+        """锚点不成立时的等级：只看各组学层之间是否一致。没有任何组学给出方向提示时，No-signal / Not-assessable
+        的含义与锚定时相同（按包括 MFA 在内的可评估层数判断），旧等级的含义不变。"""
+        if assessable.empty:
+            return "Not-assessable"
+        if directional == 0:
+            return "No-signal"
+        if omics_direction == "mixed":
+            return "Omics-discordant"
+        return "Omics-concordant" if directional >= 2 else "Omics-single-layer"
 
     @staticmethod
     def _sign_certainty(
@@ -641,6 +763,10 @@ class EvidenceProfileScorer:
     @staticmethod
     def _empty_profile() -> dict[str, Any]:
         return {
+            "anchor_type": ANCHOR_TYPE_MFA,
+            "anchor_state": "not_established",
+            "omics_direction": "none",
+            "n_omics_directional_layers": 0,
             "support_score": 0.0,
             "conflict_score": 0.0,
             "coverage_score": 0.0,
@@ -682,9 +808,14 @@ def evidence_table(records: Iterable[dict[str, Any]]) -> pd.DataFrame:
         "ambiguous_features",
         "data_reason",
         "quality_reliability",
+        "qc_status",
         "data_reliability",
         "evidence_mode",
+        "anchor_state",
         "assessment_status",
+        "implied_direction",
+        "n_implied_up",
+        "n_implied_down",
         "sign_certainty",
         "effect_strength",
         "support_evidence",

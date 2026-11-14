@@ -11,6 +11,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
     omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode flux_anchored,pathway_convergence] [--source 运行ID]
     omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
+    omicsweave [--project-dir DIR] diff 运行A 运行B [--experiment 实验ID] [--output 目录]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
@@ -117,6 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--format", choices=["xlsx", "tsv"], default="xlsx", help="导出格式，默认 xlsx")
     export.add_argument("--output", default=None, help="输出文件（xlsx）或目录（tsv），默认写在结果包的 exports/ 下")
 
+    diff = modules.add_parser("diff", help="逐表对照两个结果包，报告是否逐值相同、差值分布与等级转移")
+    diff.add_argument("run_a", help="结果包 A：运行 ID 或结果包目录")
+    diff.add_argument("run_b", help="结果包 B：运行 ID 或结果包目录")
+    diff.add_argument("--experiment", default=None, help="按运行 ID 查找时限定实验，默认在全部实验中查找")
+    diff.add_argument("--output", default=None, help="把对照明细写到该目录（tables / columns / transitions.tsv）")
+    diff.add_argument("--atol", type=float, default=1e-12, help="数值相同的绝对容差，默认 1e-12")
+    diff.add_argument("--rtol", type=float, default=1e-9, help="数值相同的相对容差，默认 1e-9")
+
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
         action_parsers = module_parser.add_subparsers(dest="action", metavar="<动作>", required=True)
@@ -208,8 +217,44 @@ def _run_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_bundle(value: str, experiment: str | None) -> Path:
+    """结果包目录，或在 ``<paths.results>/<实验>/`` 下按运行 ID 查找。"""
+    from omicsweave.contract.dataset import ContractError
+    from omicsweave.contract.manifest import MANIFEST_FILE
+    from omicsweave.core.config import load_project
+
+    path = Path(value)
+    if path.is_dir() and (path / MANIFEST_FILE).is_file():
+        return path
+    results = load_project(project_dir()).path("results")
+    pattern = f"{experiment}/{value}" if experiment else f"*/{value}"
+    found = [p for p in results.glob(pattern) if (p / MANIFEST_FILE).is_file()]
+    if len(found) != 1:
+        problem = "找不到" if not found else f"在多个实验中都有（{'、'.join(p.parent.name for p in found)}），请用 --experiment 指定"
+        raise ContractError(f"结果包 {value} {problem}")
+    return found[0]
+
+
+def _run_diff(args: argparse.Namespace) -> int:
+    """0：逐值相同；1：有差异；2：无法对照。"""
+    from omicsweave.contract.dataset import ContractError
+    from omicsweave.contract.diff import diff_bundles, format_report, write_report
+    from omicsweave.core.config import ConfigError
+
+    try:
+        a, b = (_resolve_bundle(v, args.experiment) for v in (args.run_a, args.run_b))
+        result = diff_bundles(a, b, atol=args.atol, rtol=args.rtol)
+    except (ConfigError, ContractError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
+    print(format_report(result))
+    if args.output:
+        print(f"明细：{write_report(result, args.output)}")
+    return 0 if result.identical else 1
+
+
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
-             "integrate": _run_integrate, "export": _run_export}
+             "integrate": _run_integrate, "export": _run_export, "diff": _run_diff}
 
 
 def main(argv: list[str] | None = None) -> None:

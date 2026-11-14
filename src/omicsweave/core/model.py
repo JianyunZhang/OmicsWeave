@@ -63,6 +63,7 @@ class IntegrationMode(str, Enum):
     FLUX_ANCHORED = "flux_anchored"
     PATHWAY_CONVERGENCE = "pathway_convergence"
     SAMPLE_LEVEL = "sample_level"
+    REVERSAL = "reversal"            # design.reversal_pairs 的逐特征逆转判定
 
 
 class _Strict(BaseModel):

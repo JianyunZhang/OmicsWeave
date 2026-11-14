@@ -32,7 +32,7 @@ from ..mappings import (
 )
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
 from ..mappings.network_annotation import lipid_pool_roles, reaction_semantics
-from .evidence_profile import EvidenceProfileScorer, evidence_table
+from .evidence_profile import ANCHORED_STATES, EvidenceProfileScorer, evidence_table
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,12 @@ def _derived_indices(flux_id: str, metab_df: pd.DataFrame) -> dict[str, list[Any
         related = metab_df["related_reaction"].fillna("").astype(str)
         out["related"] += list(metab_df.index[types.eq("mass_action_ratio") & related.eq(flux_id)])
     return out
+
+def _implied_counts(signs: pd.Series) -> dict[str, int]:
+    """方向成员各自提示的通量方向（+1 升、-1 降）计数；与通量点估计的符号无关，供无锚点时的组学一致性判定。"""
+    values = pd.to_numeric(signs, errors="coerce").dropna()
+    return {"n_implied_up": int((values > 0).sum()), "n_implied_down": int((values < 0).sum())}
+
 
 def _simes_probability(values: pd.Series) -> float:
     """Simes 聚合，减少“映射对象越多越容易取到极小 p 值”的偏倚。"""
@@ -249,7 +255,9 @@ class FluxEvidenceBuilder:
             "log2fc_large", log2fc_tiers[1],
         )
 
-        self.evidence_profile_scorer = EvidenceProfileScorer(scoring.get("evidence_profile", {}))
+        # 组学 × 组织 × 比较的 QC 可靠性表（omicsweave.core.reliability）；没有时各层不因 QC 降权
+        self.evidence_profile_scorer = EvidenceProfileScorer(
+            scoring.get("evidence_profile", {}), reliability=getattr(config, "contrast_reliability", None))
         self._evidence_table = evidence_table([])
 
     # ---- 各组学证据 ----
@@ -394,6 +402,8 @@ class FluxEvidenceBuilder:
         indirect_sig = sig_df.loc[
             [index for index in sig_df.index if index not in direct_indices]
         ]
+        implied = _implied_counts(direct_sig[log2fc_col] if log2fc_col in direct_sig.columns
+                                  else pd.Series(dtype=float))
         n_concordant = 0
         n_opposite = 0
         support_effect = float("nan")
@@ -451,6 +461,7 @@ class FluxEvidenceBuilder:
         if not has_concordant:
             return {
                 **tx_stat_summary,
+                **implied,
                 "n_genes_checked": len(genes),
                 "n_genes_found": len(matched_genes),
                 "n_direct_genes": len(matched_direct_genes),
@@ -475,6 +486,7 @@ class FluxEvidenceBuilder:
 
         details = {
             **tx_stat_summary,
+            **implied,
             "n_genes_checked": len(genes),
             "n_genes_found": len(matched_genes),
             "n_direct_genes": len(matched_direct_genes),
@@ -653,6 +665,8 @@ class FluxEvidenceBuilder:
         indirect_sig = sig_df.loc[
             [index for index in sig_df.index if index not in direct_indices]
         ]
+        implied = _implied_counts(direct_sig[log2fc_col] if log2fc_col in direct_sig.columns
+                                  else pd.Series(dtype=float))
         has_concordant = False
         concordant_proteins_list: list[str] = []
         n_concordant = 0
@@ -712,6 +726,7 @@ class FluxEvidenceBuilder:
         if not has_concordant:
             return {
                 **prot_stat_summary,
+                **implied,
                 "n_proteins_checked": len(all_proteins),
                 "n_proteins_found": len(matched),
                 "n_direct_enzymes": len(matched_direct),
@@ -736,6 +751,7 @@ class FluxEvidenceBuilder:
 
         details = {
             **prot_stat_summary,
+            **implied,
             "n_proteins_checked": len(all_proteins),
             "n_proteins_found": len(matched),
             "n_direct_enzymes": len(matched_direct),
@@ -919,6 +935,15 @@ class FluxEvidenceBuilder:
         elif n_sig > 0:
             unresolved_idx = list(sig_df.index)
 
+        # 不依赖通量符号的方向提示：产物升 → 通量升，底物升 → 通量降（只表示容量的反应不提示方向）
+        implied_signs: list[float] = []
+        if n_sig > 0 and log2fc_col in sig_df.columns and reaction_semantics(str(flux_id)).directional:
+            for row_idx, row_fc in pd.to_numeric(sig_df[log2fc_col], errors="coerce").dropna().items():
+                if row_idx in set(prod_idx):
+                    implied_signs.append(float(np.sign(row_fc)))
+                elif row_idx in set(sub_idx):
+                    implied_signs.append(-float(np.sign(row_fc)))
+
         support_effect = float("nan")
         conflict_effect = float("nan")
         if direct_support_idx:
@@ -950,6 +975,7 @@ class FluxEvidenceBuilder:
 
         details = {
             **metab_stat_summary,
+            **_implied_counts(pd.Series(implied_signs, dtype=float)),
             "n_metabolites_checked": n_checked,
             "n_metabolites_found": len(all_idx),
             "n_ambiguous": len(matched_roles.ambiguous_indices),
@@ -1090,6 +1116,12 @@ class FluxEvidenceBuilder:
             # 网络注释：反应类别与各组学层能否给出方向证据
             "reaction_class": semantics.reaction_class,
             "direction_evidence": semantics.direction_evidence,
+            # 锚点状态的依据（统一差异结果表中的 MFA 证据等级、较小组的样本量、可辨识性与示踪剂一致性）
+            "mfa_evidence_level": flux_row.get("mfa_evidence_level", ""),
+            "n_min_group": _series_numeric_value(flux_row, ["n_min_group"]),
+            "identifiability": flux_row.get("identifiability", ""),
+            "mfa_flags": flux_row.get("mfa_flags", ""),
+            "tracer_evidence": flux_row.get("tracer_evidence", ""),
         }
 
         tx_details = self.transcriptomics_evidence(flux_row, tx_df)
@@ -1232,6 +1264,9 @@ class FluxEvidenceBuilder:
                 "n_convergent": int((g["evidence_grade"] == "Convergent").sum()),
                 "n_conflicting": int((g["evidence_grade"] == "Conflicting").sum()),
                 "n_exploratory": int((g["evidence_grade"] == "Exploratory").sum()),
+                "n_anchor_established": int(g["anchor_state"].isin(ANCHORED_STATES).sum())
+                if "anchor_state" in g.columns else 0,
+                "n_omics_concordant": int((g["evidence_grade"] == "Omics-concordant").sum()),
             })
 
         group_columns = ["comparison", "tissue", "pathway"]

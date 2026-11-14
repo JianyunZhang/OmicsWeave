@@ -40,4 +40,4 @@ omics:
 
 integration:
   enabled: true
-  modes: [pathway_convergence, sample_level]
+  modes: [pathway_convergence, sample_level, reversal]

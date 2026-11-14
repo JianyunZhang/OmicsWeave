@@ -30,6 +30,9 @@ from .statistics.nonparametric import min_achievable_pvalue
 SUBJECT_COLUMNS = ("subject_id",)
 SAMPLE_COLUMNS = ("sample_id", "subject_id", "omics", "tissue")
 SAMPLE_TYPES = {"sample", "qc", "blank", "pool", "standard"}
+# 样本表的人工 QC 标记列，由 omicsweave.core.reliability 读取
+QC_FLAG_COLUMN = "qc_flag"
+QC_FLAG_VALUES = ("flag", "exclude")
 MIN_REPLICATES = 2
 
 
@@ -116,6 +119,11 @@ def _check_tables(exp: Experiment, out: _Collector) -> bool:
         bad_types = set(exp.samples["sample_type"]) - SAMPLE_TYPES - {""}
         if bad_types:
             out.error(f"samples.tsv 中的 sample_type 取值无法识别：{_preview(bad_types)}（可选：{'、'.join(sorted(SAMPLE_TYPES))}）")
+    if QC_FLAG_COLUMN in exp.samples.columns:
+        bad_flags = set(exp.samples[QC_FLAG_COLUMN]) - set(QC_FLAG_VALUES) - {""}
+        if bad_flags:
+            out.error(f"samples.tsv 中的 {QC_FLAG_COLUMN} 取值无法识别：{_preview(bad_flags)}"
+                      f"（可选：{'、'.join(QC_FLAG_VALUES)}，或留空）")
     blank_tissue = exp.samples["tissue"] == ""
     if blank_tissue.any():
         out.error(f"samples.tsv 有 {int(blank_tissue.sum())} 行的 tissue 为空")
@@ -313,6 +321,9 @@ def _check_integration(exp: Experiment, out: _Collector) -> None:
     enabled = exp.config.omics.enabled()
     if not integration.modes:
         out.warning("integration 已启用，但没有指定 modes")
+    if exp.config.design.reversal_pairs and IntegrationMode.REVERSAL not in integration.modes:
+        out.warning("声明了 design.reversal_pairs，但 integration.modes 中没有 reversal，逆转判定不会运行"
+                    "（也可用 omicsweave integrate --mode reversal 单独运行）")
     for mode in integration.modes:
         if mode is IntegrationMode.FLUX_ANCHORED:
             if Omics.MFA not in enabled:
@@ -322,6 +333,9 @@ def _check_integration(exp: Experiment, out: _Collector) -> None:
         elif mode is IntegrationMode.PATHWAY_CONVERGENCE:
             if len(enabled) < 2:
                 out.error("pathway_convergence 需要至少启用 2 个组学")
+        elif mode is IntegrationMode.REVERSAL:
+            if not exp.config.design.reversal_pairs:
+                out.error("reversal 需要在 design.reversal_pairs 中声明（疾病效应, 处理效应）配对")
         elif mode is IntegrationMode.SAMPLE_LEVEL:
             subjects_by_omics = {
                 o: set(exp.samples.loc[exp.samples["omics"] == o.value, "subject_id"]) for o in enabled

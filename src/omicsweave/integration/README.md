@@ -122,7 +122,24 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
   `fallback_mode`、`evidence_profile` 与旧配置的 `scoring` 同义（`evidence_profile.mfa_inference_unit` 默认取 MFA 结果的推断单位），
   `tissue_map` 把 MFA 的组织名对应到其他组学。与旧命令的差别：MFA 的 p 值与 FDR 取差异分析的主检验路径
   （旧加载器总是优先取 Mann-Whitney）；蛋白组、代谢组的有效样本量取自统一结果表的 `n_numerator + n_denominator`。
+  证据等级随锚点状态而定（见下文“锚点状态与证据等级”）；样本 QC 标记按（组学, 组织, 比较）降权或判为不可评估，
+  明细写在 `integration/flux_anchored/qc/contrast_reliability.parquet`（参数 `qc_imbalance`，见“质量信息与可靠性”）。
+- `reversal`（已接入）：对 `design.reversal_pairs` 的每个配对，逐特征（含代谢组派生特征）计算疾病效应、处理效应、
+  逆转指数及区间，分为 reversed / partially_reversed / over_reversed / aggravated / not_reversed / undetermined。
+  “未逆转”须通过等效性检验（双单侧检验，界限为疾病效应的 `equivalence_margin` 倍，默认 0.5），低功效的不显著结果
+  只能是 undetermined；疾病效应本身未建立（padj ≥ `alpha`）时不做判定。输出 `tables/reversal.parquet` 与
+  `tables/reversal_summary.parquet`。通路层面的逆转与析因交互项尚未实现（需要公式模型）。
 - `sample_level`：待接入，暂用下文的旧命令。
+
+结果包工具：
+
+```bash
+omicsweave diff <运行A> <运行B> [--experiment <id>] [--output <目录>]   # 0 相同 / 1 有差异 / 2 无法对照
+```
+
+`diff` 按主键对齐每张表后逐格比较，报告逐值相同与否、变化的列、数值差值分布与 `evidence_grade` 等分类列的转移计数。
+课题脚本读取结果包用 `omicsweave.contract.query`（`read_table(实验, "differential", omics="mfa")`、
+`open_run(实验, "latest")`），读出的表在 `attrs["run_id"]` 中记录实际读取的运行，不必写死运行 ID。
 
 ---
 
@@ -289,9 +306,30 @@ layer_evidence =
 | `coverage_score` | 0–1 | 四个组学层实际完成数据、映射和检测匹配的比例 |
 | `stability_*` | 0–1 或缺失 | 生物学重复 bootstrap 的选择概率和方向稳定性；无原始重复值时不填充 |
 | `design_grade` | A/B/C/D | 独立于生物学一致性的实验设计质量 |
-| `evidence_grade` | 分类 | Convergent、Single-layer、Exploratory、Conflicting、No-signal 或 Not-assessable |
+| `anchor_type` / `anchor_state` | 分类 | 锚点类型（目前为 `mfa_flux`）与状态，见下文 |
+| `omics_direction` | up/down/mixed/none | 各组学层提示的通量方向，与锚点符号无关 |
+| `evidence_grade` | 分类 | 锚点成立时：Convergent、Single-layer、Exploratory、Conflicting；锚点不成立时：Omics-concordant、Omics-single-layer、Omics-discordant；以及 No-signal、Not-assessable |
 
 `Replicated` 只应在至少两个 estimand 可比的实验完成跨实验复现后赋值；单实验的证据构建器不会自行产生该标签。
+
+### 锚点状态与证据等级
+
+其他组学只有在锚点成立时才按锚点方向判支持或冲突。`anchor_state` 依次判定：
+
+| 状态 | 条件 | 等级词汇 |
+|---|---|---|
+| `qc_confounded` / `qc_insufficient` | 可靠性表中 MFA 层在该（组织, 比较）不可评估 | 组学一致性 |
+| `not_identifiable` | 差异结果 `flags` 含 `not_identifiable`，或可辨识性为 poorly_constrained / bound_pinned | 组学一致性 |
+| `tracer_conflict` | 多示踪剂方向不一致 | 组学一致性 |
+| `insufficient` | MFA 证据等级为 insufficient，或较小组少于 2 只 | 组学一致性 |
+| `not_established` | 未通过 MFA 显著性判定 | 组学一致性 |
+| `effect_only` | 按效应量通过判定（设计等级 D，最多 Exploratory） | 锚定 |
+| `established` | 按统计检验通过判定 | 锚定 |
+
+组学一致性等级只看各组学层提示的通量方向是否一致：直接酶 / 转运体升 → 通量升，产物升 → 通量升，底物升 → 通量降。
+≥ 2 层同向为 Omics-concordant，1 层为 Omics-single-layer，层间或层内方向相反为 Omics-discordant。这些方向与锚点的
+符号无关（把锚点符号翻转，组学一致性等级不变，有测试保证）。`support_score`、`conflict_score` 仍按通量点估计的方向计算，
+锚点不成立时只作参考。EvidenceTable 每层另有 `implied_direction`、`n_implied_up`、`n_implied_down` 与 `anchor_state`。
 
 ### 当前实施边界
 
@@ -324,27 +362,39 @@ batch_qc:
 `harmonization_report.md`。单批数据标为 `single_batch`，混淆设计标为 `confounded`
 并拒绝校正，不会伪造跨批可靠性。
 
-审核人员可在单实验配置中显式应用已经审核的层级质量因子；默认均为 1：
+### 质量信息与可靠性
 
-```yaml
-params:
-  scoring:
-    evidence_profile:
-      quality_reliability:
-        mfa: 1.0
-        transcriptomics: 1.0
-        proteomics: 1.0
-        metabolomics: 1.0
+样本层面的 QC 结论写在样本表中，按（组学, 组织, 比较）自动变成可靠性（`omicsweave.core.reliability`）：
+
+```text
+sample_id        subject_id  omics            tissue  qc_flag  qc_reason
+rna_liver_m63    m63         transcriptomics  liver   flag     线粒体读数占比 54%
 ```
 
-该因子会独立写入 EvidenceTable 的 `quality_reliability` 并乘入
-`data_reliability`。`batch_qc.csv` 的 `suggested_batch_reliability` 只是审核建议，
-不会被流程自动复制到评分配置，避免把未经确认的诊断结果再次计权。
+`qc_flag` 取 `flag` 或 `exclude`（留空为正常）；各组学的 `qc/sample_quality.parquet`（样本身份与组成 QC 的输出）中
+`flag` 非空的样本同样计入。规则：两组都没有标记 → `ok`；两组标记比例相差 ≥ `qc_imbalance`（默认 0.5）→ `qc_confounded`；
+去掉标记样本后有一组少于 2 只 → `qc_insufficient`；否则 `downweighted`，可靠性为可用样本占比。后两种不可评估的状态使该层
+不判支持或冲突（MFA 层则锚点不成立）。`omicsweave run` 结束时写出结果包的 `qc/contrast_reliability.parquet`，并在不可评估的
+差异结果行的 `flags` 中加上状态；整合按当前样本表重新计算，所以改样本表后只需重跑整合。
+
+审核人员在配置中显式给出的层级因子作为覆盖项，替换可靠性表中该层的数值（不解除不可评估）：
+
+```yaml
+integration:
+  parameters:
+    flux_anchored:
+      evidence_profile:
+        quality_reliability: {transcriptomics: 0.5}
+```
+
+该因子写入 EvidenceTable 的 `quality_reliability` 并乘入 `data_reliability`，可靠性状态写在 `qc_status`。
+`batch_qc.csv` 的 `suggested_batch_reliability` 只是审核建议，不会被流程自动复制到评分配置。
 
 ## MFA 显著性判定（方向锚点）
 
 通过判定的 MFA 差异反应在证据画像中 MFA 层记为 support，作为其他组学方向判断的锚点；未通过的反应 MFA 层记为 no_signal，
-其他组学照常评估。旧版在此之上的 0–4 加和总分、固定权重与 High/Medium/Low 置信度已在阶段 2.8 删除，不再输出 `legacy_*` 字段。
+其他组学照常评估，但只给组学一致性等级。通过判定是锚点成立的必要条件而非充分条件：样本量、可辨识性、示踪剂一致性与 QC
+也要满足（见“锚点状态与证据等级”）。旧版在此之上的 0–4 加和总分、固定权重与 High/Medium/Low 置信度已在阶段 2.8 删除，不再输出 `legacy_*` 字段。
 
 **判定条件：FDR < 0.05 且 |Cohen's d| > 0.8（大效应量）**。样本量不足以给出 p 值时（如每组 1 只），|Cohen's d| ≥ 0.8 且
 |log2FC| ≥ 0.58 按 `effect_size_only` 通过（`fallback_mode`）。

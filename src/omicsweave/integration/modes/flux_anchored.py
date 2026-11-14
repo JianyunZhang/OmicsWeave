@@ -22,11 +22,18 @@
 （证据画像的阈值与权重；``mfa_inference_unit`` 默认取 MFA 结果的推断单位），含义同旧流程配置中的
 ``scoring``；``tissue_map`` 把 MFA 的组织名映射到其他组学的组织名。
 
-输出（``integration/flux_anchored/tables/``）：
+证据等级取决于锚点状态（``anchor_state``）：MFA 的证据等级为 insufficient、较小组少于 2 只、不可辨识
+（``flags`` / ``identifiability``）、示踪剂方向不一致或 QC 不可评估时，锚点不成立，只给组学之间一致性的等级
+（Omics-*，见 :mod:`omicsweave.integration.methods.evidence_profile`）。样本 QC 标记（样本表的 ``qc_flag`` 与各组学的
+``qc/sample_quality.parquet``）按当前样本表计算为（组学, 组织, 比较）的可靠性（:mod:`omicsweave.core.reliability`，
+参数 ``qc_imbalance``），降权或使该层不可评估。
 
-- ``flux_evidence_profile.parquet``：每个（反应, 组织, 比较）一行的证据画像，另列出各层与通量方向一致的特征；
-- ``flux_evidence_table.parquet``：每个（反应, 组织, 比较, 层）一行的证据长表；
-- ``flux_pathway_profile.parquet``：按（比较, 组织, 通路）汇总的证据画像。
+输出（``integration/flux_anchored/``）：
+
+- ``tables/flux_evidence_profile.parquet``：每个（反应, 组织, 比较）一行的证据画像，另列出各层与通量方向一致的特征；
+- ``tables/flux_evidence_table.parquet``：每个（反应, 组织, 比较, 层）一行的证据长表；
+- ``tables/flux_pathway_profile.parquet``：按（比较, 组织, 通路）汇总的证据画像；
+- ``qc/contrast_reliability.parquet``：本次整合使用的可靠性表。
 """
 from __future__ import annotations
 
@@ -41,6 +48,7 @@ import pandas as pd
 from omicsweave.contract.dataset import META_FILE
 from omicsweave.contract.tables import read_differential
 from omicsweave.core.model import IntegrationMode, Omics
+from omicsweave.core.reliability import DEFAULT_IMBALANCE, QC_DIR, RELIABILITY_FILE, build_reliability, summary_note
 from omicsweave.core.run import RunContext, RunError
 
 from ..integrate import IntegrationRun, mode_dir
@@ -49,8 +57,10 @@ from ..methods.flux_evidence import FluxEvidenceBuilder
 MODE = IntegrationMode.FLUX_ANCHORED
 DEFAULTS: dict[str, Any] = {
     "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "omics_cutoffs": {}, "fallback_mode": {},
-    "evidence_profile": {}, "tissue_map": {},
+    "evidence_profile": {}, "tissue_map": {}, "qc_imbalance": DEFAULT_IMBALANCE,
 }
+# 不传给证据构建器的参数
+_MODE_ONLY = ("tissue_map", "qc_imbalance")
 # 转录组 feature_id_type → 证据构建器按 ID 匹配基因的列；其余类型按基因符号匹配
 _GENE_ID_COLUMNS = {"ensembl_gene_id": "ensembl_gene_id", "ensembl_id": "ensembl_gene_id",
                     "ncbi_gene_id": "ncbi_gene_id", "entrez_id": "ncbi_gene_id"}
@@ -97,7 +107,14 @@ def mfa_frames(diff: pd.DataFrame, tissue_map: dict[str, str] | None = None) -> 
             "n_eff": _n_eff(rows),
             "selection_probability": _numeric(rows, "selection_probability"),
             "direction_stability": _numeric(rows, "direction_stability"),
+            # 锚点状态的依据（证据画像的 anchor_state）
+            "mfa_evidence_level": rows["evidence_level"].astype(str) if "evidence_level" in rows.columns else "",
+            "n_min_group": rows[["n_numerator", "n_denominator"]].min(axis=1),
+            "mfa_flags": rows["flags"].fillna("").astype(str) if "flags" in rows.columns else "",
         })
+        for column in ("identifiability", "tracer_evidence"):
+            if column in rows.columns:
+                frame[column] = rows[column].fillna("").astype(str).to_numpy()
         for column in _MFA_ANNOTATIONS:
             if column in rows.columns:
                 frame[column] = rows[column]
@@ -196,7 +213,7 @@ def profile_table(profile: pd.DataFrame, roles: dict[str, str]) -> pd.DataFrame:
 
 def scoring_config(params: dict[str, Any], mfa: pd.DataFrame) -> dict[str, Any]:
     """证据构建器的 ``scoring``；MFA 推断单位默认取差异结果中的 ``inference_unit``（各行一致时）。"""
-    scoring = {k: v for k, v in params.items() if k != "tissue_map"}
+    scoring = {k: v for k, v in params.items() if k not in _MODE_ONLY}
     profile = dict(scoring.get("evidence_profile") or {})
     units = mfa["inference_unit"].dropna().unique() if "inference_unit" in mfa.columns else []
     if "mfa_inference_unit" not in profile and len(units) == 1:
@@ -227,8 +244,18 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     prot = proteomics_frames(tables.get(Omics.PROTEOMICS.value, empty))
     metab = metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty), derived)
 
+    # 样本 QC 标记 → 各层（组织, 比较）的可靠性；按当前样本表计算，写入本次整合的结果包
+    reliability, quality_inputs = build_reliability(ctx.experiment, source, tables, float(params["qc_imbalance"]))
+    qc_dir = mode_dir(ctx, MODE) / QC_DIR
+    qc_dir.mkdir(parents=True)
+    reliability.to_parquet(qc_dir / RELIABILITY_FILE, index=False)
+    mapped = reliability.copy()
+    is_mfa = mapped["omics"] == Omics.MFA.value
+    mapped.loc[is_mfa, "tissue"] = mapped.loc[is_mfa, "tissue"].map(lambda t: tissue_map.get(t, t))
+
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={},
-                                                  scoring=scoring_config(params, tables[Omics.MFA.value])))
+                                                  scoring=scoring_config(params, tables[Omics.MFA.value]),
+                                                  contrast_reliability=mapped))
     profile = builder.build_all(mfa, tx, prot, metab)
     roles = dict(zip(tables[Omics.MFA.value]["contrast_id"].astype(str),
                      tables[Omics.MFA.value]["contrast_role"].astype(str)))
@@ -238,9 +265,13 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     builder.get_evidence_table().to_parquet(out / "flux_evidence_table.parquet", index=False)
     builder.aggregate_by_pathway(profile).to_parquet(out / "flux_pathway_profile.parquet", index=False)
 
-    record = IntegrationRun(MODE, inputs=list(paths.values()) + ([derived_path] if derived is not None else []),
+    record = IntegrationRun(MODE, inputs=list(paths.values()) + ([derived_path] if derived is not None else [])
+                            + quality_inputs,
                             parameters={**params, "omics": sorted(paths),
                                         "derived_metabolomics_features": derived is not None})
+    note = summary_note(reliability)
+    if note:
+        record.notes.append(note)
     other_tissues = {t for frames in tx.values() for t in frames} | set(prot) | set(metab)
     unmatched = sorted({t for frame in mfa.values() for t in frame["tissue"]} - other_tissues)
     if unmatched:

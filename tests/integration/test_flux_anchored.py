@@ -174,7 +174,9 @@ class ContractAdapterTest(unittest.TestCase):
         cls.legacy_profile, cls.legacy_evidence = build(*legacy_inputs())
 
     def test_same_evidence_as_legacy_shaped_inputs(self) -> None:
-        scalar = [c for c in self.legacy_profile.columns if not c.endswith("_details")]
+        # 统一结果表另外透传锚点状态的原始依据（旧加载器没有这些列）；由它们得出的 anchor_state 与等级仍须一致
+        passthrough = {"mfa_evidence_level", "n_min_group", "mfa_flags", "identifiability", "tracer_evidence"}
+        scalar = [c for c in self.legacy_profile.columns if not c.endswith("_details") and c not in passthrough]
         self.assertEqual(sorted(self.profile.columns), sorted(self.legacy_profile.columns))
         pd.testing.assert_frame_equal(by_key(self.profile[scalar]), by_key(self.legacy_profile[scalar]),
                                       check_dtype=False)

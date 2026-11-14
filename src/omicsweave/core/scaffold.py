@@ -52,7 +52,7 @@ design:
        subset: {{treatment: Saline}}, role: disease_effect}}
     - {{id: Drug_vs_Saline_in_HFD, factor: treatment, numerator: Drug, denominator: Saline,
        subset: {{diet: HFD}}, role: treatment_effect}}
-  reversal_pairs:                   # 疾病效应被治疗逆转时，候选结果会标记 reversal
+  reversal_pairs:                   # 整合模式 reversal 逐特征判定处理是否逆转了疾病效应
     - {{disease: HFD_vs_LFD, treatment: Drug_vs_Saline_in_HFD}}
   stratify_by: [tissue]             # 各组织分别分析
   covariates: []                    # 例如 [batch]
@@ -78,7 +78,7 @@ omics:                              # 按需启用；input.level 为 raw（下�
 
 integration:
   enabled: false
-  modes: []                         # flux_anchored / pathway_convergence / sample_level
+  modes: []                         # flux_anchored / pathway_convergence / sample_level / reversal
 """
 
 SUBJECTS_HEADER = "subject_id\tdiet\ttreatment\tsex\n"

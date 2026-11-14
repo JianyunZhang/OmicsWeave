@@ -23,6 +23,7 @@ from omicsweave.core.run import RunContext, RunError, finish_run, load_validated
 MODES: dict[IntegrationMode, str] = {
     IntegrationMode.FLUX_ANCHORED: "omicsweave.integration.modes.flux_anchored:run",
     IntegrationMode.PATHWAY_CONVERGENCE: "omicsweave.integration.modes.pathway_convergence:run",
+    IntegrationMode.REVERSAL: "omicsweave.integration.modes.reversal:run",
 }
 
 

@@ -160,8 +160,8 @@ def generate_report(
             lines.append("### Evidence Grade Distribution\n\n")
             lines.append("| Evidence grade | Count | Percentage |\n|---|---|---|\n")
             grade_order = [
-                "Replicated", "Convergent", "Single-layer", "Exploratory",
-                "Conflicting", "No-signal", "Not-assessable",
+                "Replicated", "Convergent", "Single-layer", "Exploratory", "Conflicting",
+                "Omics-concordant", "Omics-single-layer", "Omics-discordant", "No-signal", "Not-assessable",
             ]
             for grade in grade_order:
                 n_grade = int(grade_counts.get(grade, 0))
