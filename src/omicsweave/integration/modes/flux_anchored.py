@@ -58,9 +58,10 @@ MODE = IntegrationMode.FLUX_ANCHORED
 DEFAULTS: dict[str, Any] = {
     "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "omics_cutoffs": {}, "fallback_mode": {},
     "evidence_profile": {}, "tissue_map": {}, "qc_imbalance": DEFAULT_IMBALANCE,
+    "isozyme": {"minor_share": 0.2}, "decoys": {"replicates": 0, "seed": 20261115},
 }
 # 不传给证据构建器的参数
-_MODE_ONLY = ("tissue_map", "qc_imbalance")
+_MODE_ONLY = ("tissue_map", "qc_imbalance", "decoys")
 # 转录组 feature_id_type → 证据构建器按 ID 匹配基因的列；其余类型按基因符号匹配
 _GENE_ID_COLUMNS = {"ensembl_gene_id": "ensembl_gene_id", "ensembl_id": "ensembl_gene_id",
                     "ncbi_gene_id": "ncbi_gene_id", "entrez_id": "ncbi_gene_id"}
@@ -107,6 +108,7 @@ def mfa_frames(diff: pd.DataFrame, tissue_map: dict[str, str] | None = None) -> 
             "n_eff": _n_eff(rows),
             "selection_probability": _numeric(rows, "selection_probability"),
             "direction_stability": _numeric(rows, "direction_stability"),
+            "lfsr": _numeric(rows, "lfsr"),
             # 锚点状态的依据（证据画像的 anchor_state）
             "mfa_evidence_level": rows["evidence_level"].astype(str) if "evidence_level" in rows.columns else "",
             "n_min_group": rows[["n_numerator", "n_denominator"]].min(axis=1),
@@ -138,6 +140,8 @@ def transcriptomics_frames(diff: pd.DataFrame, id_types: dict[str, str] | None =
             "evidence_level": rows["evidence_level"] if "evidence_level" in rows.columns else "",
             "lfcSE": _numeric(rows, "lfc_se"),
             "n_eff": _n_eff(rows),
+            "lfsr": _numeric(rows, "lfsr"),
+            "base_mean": _numeric(rows, "base_mean"),      # 同工酶加权的丰度
         })
         id_column = _GENE_ID_COLUMNS.get(id_types.get(str(tissue), ""))
         if id_column:
@@ -168,13 +172,16 @@ def _wide_frames(diff: pd.DataFrame, identity: dict[str, str], stats: dict[str, 
 def proteomics_frames(diff: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """蛋白组差异结果 → ``{组织: 每行一个蛋白}``，列同旧流程的蛋白组宽表（``log2fc_<比较>`` 等）。"""
     diff = diff.assign(n_eff=_n_eff(diff))
+    # 同工酶加权的丰度：各比较两组均值（log2 强度）的平均，换回线性尺度
+    level = (_numeric(diff, "mean_numerator") + _numeric(diff, "mean_denominator")) / 2
+    diff["abundance"] = np.power(2.0, level.groupby([diff["tissue"], diff["feature_id"]]).transform("mean"))
     if "evidence_level" in diff.columns:
         # 旧流程的蛋白组宽表中，经过检验的蛋白记为 inferential
         diff["evidence"] = np.where(diff["evidence_level"].eq("statistical_test"), "inferential",
                                     diff["evidence_level"].astype(str))
-    return _wide_frames(diff, {"feature_id": "protein", **_PROTEIN_IDS},
+    return _wide_frames(diff, {"feature_id": "protein", **_PROTEIN_IDS, "abundance": "abundance"},
                         {"log2fc": "log2fc", "pvalue": "pval", "padj": "padj", "lfc_se": "se", "n_eff": "n_eff",
-                         "evidence": "evidence"})
+                         "evidence": "evidence", "lfsr": "lfsr"})
 
 
 def metabolomics_frames(diff: pd.DataFrame, derived: pd.DataFrame | None = None) -> dict[str, pd.DataFrame]:
@@ -188,9 +195,13 @@ def metabolomics_frames(diff: pd.DataFrame, derived: pd.DataFrame | None = None)
     ids = diff["feature_id"].astype(str)
     names = diff["feature_name"].fillna(ids) if "feature_name" in diff.columns else ids
     diff = diff.assign(compound=names.astype(str), n_eff=_n_eff(diff))
-    identity = {"compound": "compound", **_METABOLITE_IDS, "feature_id": "metabolite_id",
+    # 诱饵映射（E3）按丰度匹配：各比较两组均值（log2 归一化峰面积）的平均，换回线性尺度
+    level = (_numeric(diff, "mean_numerator") + _numeric(diff, "mean_denominator")) / 2
+    diff["abundance"] = np.power(2.0, level.groupby([diff["tissue"], diff["feature_id"]]).transform("mean"))
+    identity = {"compound": "compound", **_METABOLITE_IDS, "feature_id": "metabolite_id", "abundance": "abundance",
                 **{c: c for c in ("feature_type", "related_reaction") if c in diff.columns}}
-    return _wide_frames(diff, identity, {"log2fc": "log2fc", "pvalue": "pval", "padj": "fdr", "n_eff": "n_eff"})
+    return _wide_frames(diff, identity, {"log2fc": "log2fc", "pvalue": "pval", "padj": "fdr", "n_eff": "n_eff",
+                                         "lfsr": "lfsr"})
 
 
 def _transcriptomics_id_types(source: Path) -> dict[str, str]:
@@ -198,6 +209,44 @@ def _transcriptomics_id_types(source: Path) -> dict[str, str]:
     for path in sorted(source.glob(f"omics/{Omics.TRANSCRIPTOMICS.value}/data/*/{META_FILE}")):
         types[path.parent.name] = str(json.loads(path.read_text(encoding="utf-8")).get("feature_id_type", ""))
     return types
+
+
+ROBUSTNESS_TABLE = "robustness.parquet"
+_LAYER_OMICS = {"tx_details": ("transcriptomics", "concordant_genes"), "prot_details": ("proteomics", "concordant_proteins"),
+                "metab_details": ("metabolomics", "concordant_metabolites")}
+
+
+def single_subject_features(source: Path, tables: dict[str, pd.DataFrame]) -> tuple[set, list[Path]]:
+    """源结果包中由单只动物驱动的入选特征（E5）：{(组学, 组织, 比较, 特征 ID 或名称)}。"""
+    keys, paths = set(), sorted(source.glob(f"omics/*/tables/{ROBUSTNESS_TABLE}"))
+    for path in paths:
+        omics = path.parent.parent.name
+        robust = pd.read_parquet(path)
+        robust = robust[robust["single_subject_driven"]]
+        names = {}
+        diff = tables.get(omics)
+        if diff is not None and "feature_name" in diff.columns:
+            names = dict(zip(diff["feature_id"].astype(str), diff["feature_name"].astype(str)))
+        for contrast, tissue, feature in zip(robust["contrast_id"], robust["tissue"], robust["feature_id"]):
+            keys.add((omics, str(tissue), str(contrast), str(feature)))
+            if str(feature) in names:
+                keys.add((omics, str(tissue), str(contrast), names[str(feature)]))
+    return keys, paths
+
+
+def single_subject_layers(profile: pd.DataFrame, flagged: set) -> pd.Series:
+    """每个反应中，与通量方向一致的特征全部由单只动物驱动的层（以分号分隔）。"""
+    def layers(row: pd.Series) -> str:
+        hit = []
+        for details, (omics, key) in _LAYER_OMICS.items():
+            features = (row.get(details) or {}).get(key, []) or []
+            if features and all((omics, str(row["tissue"]), str(row["comparison"]), str(f)) in flagged
+                                for f in features):
+                hit.append(omics)
+        return ";".join(hit)
+    if profile.empty or not flagged:
+        return pd.Series("", index=profile.index)
+    return profile.apply(layers, axis=1)
 
 
 def profile_table(profile: pd.DataFrame, roles: dict[str, str]) -> pd.DataFrame:
@@ -208,6 +257,14 @@ def profile_table(profile: pd.DataFrame, roles: dict[str, str]) -> pd.DataFrame:
     out.insert(int(out.columns.get_loc("comparison")) + 1, "contrast_role", out["comparison"].map(roles))
     for details, (key, column) in _CONCORDANT.items():
         out[column] = profile[details].map(lambda d: ";".join(str(f) for f in (d or {}).get(key, [])))
+    # 同工酶加权（G7）：各层容量变化的加权值，以及支持只来自次要同工酶而被撤销的层
+    for details, prefix in (("tx_details", "tx"), ("prot_details", "prot")):
+        out[f"{prefix}_weighted_capacity_change"] = profile[details].map(
+            lambda d: (d or {}).get("weighted_capacity_change", np.nan))
+        out[f"{prefix}_major_member"] = profile[details].map(lambda d: (d or {}).get("major_member", ""))
+    out["minor_isozyme_driven_layers"] = profile.apply(lambda r: ";".join(
+        omics for details, omics in (("tx_details", "transcriptomics"), ("prot_details", "proteomics"))
+        if (r[details] or {}).get("minor_isozyme_driven")), axis=1)
     return out
 
 
@@ -257,6 +314,9 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
                                                   scoring=scoring_config(params, tables[Omics.MFA.value]),
                                                   contrast_reliability=mapped))
     profile = builder.build_all(mfa, tx, prot, metab)
+    flagged, robustness_inputs = single_subject_features(source, tables)
+    if not profile.empty:
+        profile["single_subject_driven_layers"] = single_subject_layers(profile, flagged)
     roles = dict(zip(tables[Omics.MFA.value]["contrast_id"].astype(str),
                      tables[Omics.MFA.value]["contrast_role"].astype(str)))
     out = mode_dir(ctx, MODE) / "tables"
@@ -265,13 +325,31 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     builder.get_evidence_table().to_parquet(out / "flux_evidence_table.parquet", index=False)
     builder.aggregate_by_pathway(profile).to_parquet(out / "flux_pathway_profile.parquet", index=False)
 
+    decoys = {**DEFAULTS["decoys"], **(params["decoys"] or {})}
+    params["decoys"] = decoys
+    decoy_summary = None
+    if int(decoys["replicates"]) > 0:
+        from ..evaluation.decoys import decoy_evaluation
+
+        detail, decoy_summary = decoy_evaluation(builder, mfa, tx, prot, metab, builder.get_evidence_table(),
+                                                 replicates=int(decoys["replicates"]), seed=int(decoys["seed"]))
+        evaluation = mode_dir(ctx, MODE) / "evaluation"
+        evaluation.mkdir(parents=True)
+        detail.to_parquet(evaluation / "decoy_evidence.parquet", index=False)
+        decoy_summary.to_parquet(evaluation / "decoy_summary.parquet", index=False)
+
     record = IntegrationRun(MODE, inputs=list(paths.values()) + ([derived_path] if derived is not None else [])
-                            + quality_inputs,
+                            + quality_inputs + robustness_inputs,
                             parameters={**params, "omics": sorted(paths),
                                         "derived_metabolomics_features": derived is not None})
     note = summary_note(reliability)
     if note:
         record.notes.append(note)
+    if decoy_summary is not None and not decoy_summary.empty:
+        rows = decoy_summary[decoy_summary["subset"] == "all_directional"]
+        record.notes.append("诱饵映射（E3）的假证据比例：" + "；".join(
+            f"{r.layer} 目标支持 {r.target_support_rate:.1%}、诱饵支持 {r.decoy_support_rate:.1%}"
+            for r in rows.itertuples()) + "；明细见 evaluation/")
     other_tissues = {t for frames in tx.values() for t in frames} | set(prot) | set(metab)
     unmatched = sorted({t for frame in mfa.values() for t in frame["tissue"]} - other_tissues)
     if unmatched:

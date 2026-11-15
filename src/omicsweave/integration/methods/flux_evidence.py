@@ -23,15 +23,14 @@ import pandas as pd
 from ..mappings import (
     FLUX_GENE_MAPPING,
     REACTION_ENZYME_MAPPING,
-    FLUX_METABOLITE_MAPPING,
-    get_metabolite_roles,
     match_gene_features,
     match_metabolite_roles,
     match_protein_features,
     audit_mapping_integrity,
 )
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
-from ..mappings.network_annotation import lipid_pool_roles, reaction_semantics
+from ..mappings.model_package import DEFAULT_PACKAGE
+from ..mappings.network_annotation import lipid_pool_roles
 from .evidence_profile import ANCHORED_STATES, EvidenceProfileScorer, evidence_table
 
 
@@ -40,14 +39,15 @@ from .evidence_profile import ANCHORED_STATES, EvidenceProfileScorer, evidence_t
 # ---------------------------------------------------------------------------
 
 
-def _derived_indices(flux_id: str, metab_df: pd.DataFrame) -> dict[str, list[Any]]:
+def _derived_indices(flux_id: str, metab_df: pd.DataFrame,
+                     pools: dict[str, set[str]] | None = None) -> dict[str, list[Any]]:
     """代谢组派生特征在一个反应中的角色：脂质类别总量按网络中的脂质池作底物 / 产物，质量作用比按
     ``related_reaction`` 记为关联（比值反映氧化还原等状态，不提示净通量方向）。"""
     out: dict[str, list[Any]] = {"substrates": [], "products": [], "related": []}
     if metab_df is None or "feature_type" not in metab_df.columns:
         return out
     types = metab_df["feature_type"].fillna("").astype(str)
-    pools = lipid_pool_roles(flux_id)
+    pools = lipid_pool_roles(flux_id) if pools is None else pools
     if pools["substrates"] or pools["products"]:
         ids = metab_df["metabolite_id"].fillna("").astype(str) if "metabolite_id" in metab_df.columns \
             else pd.Series("", index=metab_df.index)
@@ -59,13 +59,49 @@ def _derived_indices(flux_id: str, metab_df: pd.DataFrame) -> dict[str, list[Any
                 out["products"].append(index)
     if "related_reaction" in metab_df.columns:
         related = metab_df["related_reaction"].fillna("").astype(str)
-        out["related"] += list(metab_df.index[types.eq("mass_action_ratio") & related.eq(flux_id)])
+        # 质量作用比与由网络生成的一步反应产物 / 底物比（G8）都只记为关联
+        ratio = types.isin(["mass_action_ratio", "step_ratio"])
+        out["related"] += list(metab_df.index[ratio & related.eq(flux_id)])
     return out
 
 def _implied_counts(signs: pd.Series) -> dict[str, int]:
     """方向成员各自提示的通量方向（+1 升、-1 降）计数；与通量点估计的符号无关，供无锚点时的组学一致性判定。"""
     values = pd.to_numeric(signs, errors="coerce").dropna()
     return {"n_implied_up": int((values > 0).sum()), "n_implied_down": int((values < 0).sum())}
+
+
+def _isozyme_check(direct: pd.DataFrame, fc_col: str, abundance_col: str, name_col: str, flux_fc: float,
+                   concordant: list[str], minor_share: float) -> dict[str, Any]:
+    """同工酶加权（G7）：方向成员按该组织中的平均丰度占比加权，给出容量变化的加权值。
+
+    与通量同向的成员全部是丰度占比低于 ``minor_share`` 的次要同工酶，而占比最高的主要同工酶方向相反时，
+    记 ``minor_isozyme_driven``（调用方据此不计为支持）。没有丰度列或匹配到的方向成员少于 2 个时不判断。
+    """
+    if abundance_col not in direct.columns or fc_col not in direct.columns or len(direct) < 2:
+        return {}
+    abundance = pd.to_numeric(direct[abundance_col], errors="coerce")
+    fc = pd.to_numeric(direct[fc_col], errors="coerce")
+    usable = abundance.gt(0) & fc.notna()
+    if usable.sum() < 2:
+        return {}
+    share = abundance[usable] / abundance[usable].sum()
+    names = direct.loc[share.index, name_col].astype(str)
+    major = share.idxmax()
+    concordant_share = share[names.isin(concordant)]
+    driven = bool(not concordant_share.empty and concordant_share.max() < minor_share
+                  and names[major] not in concordant and fc[major] != 0 and np.sign(fc[major]) == -np.sign(flux_fc))
+    return {"weighted_capacity_change": float((share * fc[usable]).sum()), "major_member": names[major],
+            "major_share": round(float(share.max()), 4), "minor_isozyme_driven": driven}
+
+
+def _demote_minor_support(details: dict[str, Any], iso: dict[str, Any], concordant_key: str) -> dict[str, Any]:
+    """次要同工酶驱动的支持改记为未解析（不判支持）。"""
+    details.update(iso)
+    if iso.get("minor_isozyme_driven"):
+        moved = int(details.get("n_concordant", 0) or 0)
+        details.update({"n_concordant": 0, concordant_key: [], "support_effect": float("nan"),
+                        "n_unresolved": int(details.get("n_unresolved", 0) or 0) + moved})
+    return details
 
 
 def _simes_probability(values: pd.Series) -> float:
@@ -109,6 +145,7 @@ def _row_evidence_summary(
     qvalue_candidates: list[str],
     pvalue_candidates: list[str],
     se_candidates: list[str] | None = None,
+    lfsr_candidates: list[str] | None = None,
     n_eff_candidates: list[str] | None = None,
     n_batches_candidates: list[str] | None = None,
     batch_ids_candidates: list[str] | None = None,
@@ -142,7 +179,7 @@ def _row_evidence_summary(
     if probability_col:
         summary["qvalue"] = _simes_probability(matched_df[probability_col])
 
-    lfsr_col = _first_numeric_column(effect_source, ["lfsr", "local_false_sign_rate"])
+    lfsr_col = _first_numeric_column(effect_source, (lfsr_candidates or []) + ["lfsr", "local_false_sign_rate"])
     if lfsr_col:
         lfsr_values = pd.to_numeric(effect_source[lfsr_col], errors="coerce").dropna()
         if not lfsr_values.empty:
@@ -225,6 +262,8 @@ class FluxEvidenceBuilder:
     """
 
     def __init__(self, config: Any) -> None:
+        # 反应知识（成员、语义、脂质池）来自模型包；默认为现有的策展映射（mappings.model_package）
+        self.package = getattr(config, "package", None) or DEFAULT_PACKAGE
         self.mapping_audit = audit_mapping_integrity()
         self.mapping_audit.raise_for_errors()
         self.experiment_id = str(getattr(config, "experiment_id", ""))
@@ -256,6 +295,8 @@ class FluxEvidenceBuilder:
         )
 
         # 组学 × 组织 × 比较的 QC 可靠性表（omicsweave.core.reliability）；没有时各层不因 QC 降权
+        # 同工酶加权：次要同工酶（丰度占比低于该值）单独支持、主要同工酶反向时不计为支持
+        self.minor_share: float = float((scoring.get("isozyme") or {}).get("minor_share", 0.2))
         self.evidence_profile_scorer = EvidenceProfileScorer(
             scoring.get("evidence_profile", {}), reliability=getattr(config, "contrast_reliability", None))
         self._evidence_table = evidence_table([])
@@ -276,10 +317,10 @@ class FluxEvidenceBuilder:
             return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_data"}
 
         flux_id = flux_row.get("flux_id", "")
-        mapping = FLUX_GENE_MAPPING.get(flux_id, {})
+        mapping = self.package.gene_mapping(flux_id)
         genes = list(dict.fromkeys(mapping.get("genes", [])))
         gene_roles = mapping.get("gene_roles", {}) or {}
-        protein_mapping = REACTION_ENZYME_MAPPING.get(flux_id, {})
+        protein_mapping = self.package.enzyme_mapping(flux_id)
         protein_direct = list(protein_mapping.get("direct_enzymes", []))
         # 方向成员与蛋白层一致：直接酶（蛋白表优先，没有蛋白条目时用基因表的 catalytic）；
         # 只有没有直接酶的转运 / 交换反应，才由载体充当直接执行者。
@@ -288,7 +329,7 @@ class FluxEvidenceBuilder:
         if not direct_genes:
             direct_genes = set(carriers)
         genes = list(dict.fromkeys(genes + sorted(direct_genes) + sorted(carriers)))
-        if not reaction_semantics(str(flux_id)).directional:
+        if not self.package.semantics(str(flux_id)).directional:
             direct_genes = set()           # 只表示容量：匹配到的基因全部记为关联，不判支持或冲突
         if not genes:
             return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_mapping"}
@@ -507,6 +548,10 @@ class FluxEvidenceBuilder:
             ),
             "evidence_mode": tx_evidence_mode,
         }
+        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices]]
+        details = _demote_minor_support(details, _isozyme_check(
+            direct_rows, log2fc_col, "base_mean", gene_column, flux_fc, concordant_genes_list, self.minor_share),
+            "concordant_genes")
         return details
 
     def proteomics_evidence(
@@ -522,14 +567,14 @@ class FluxEvidenceBuilder:
             return {"n_proteins_checked": 0, "n_sig": 0, "sig_proteins": [], "concordant_proteins": [], "evidence_mode": "no_data"}
 
         flux_id = flux_row.get("flux_id", "")
-        mapping = REACTION_ENZYME_MAPPING.get(flux_id, {})
+        mapping = self.package.enzyme_mapping(flux_id)
         direct_enzymes: list[str] = list(mapping.get("direct_enzymes", []))
         directional_proteins = list(direct_enzymes)
         if not directional_proteins:
             # 运输/交换反应通常没有 EC 对应的直接酶，此时转运蛋白就是直接执行者。
             directional_proteins = list(mapping.get("transporters", []))
         directional_proteins = list(dict.fromkeys(directional_proteins))
-        if not reaction_semantics(str(flux_id)).directional:
+        if not self.package.semantics(str(flux_id)).directional:
             directional_proteins = []      # 只表示容量：匹配到的蛋白全部记为关联
         all_proteins: list[str] = list(direct_enzymes)
         for key in ("upstream_regulators", "downstream_enzymes",
@@ -634,6 +679,7 @@ class FluxEvidenceBuilder:
             qvalue_candidates=[padj_col, "padj", "qvalue", "fdr"],
             pvalue_candidates=[pval_col, "pvalue", "pval"],
             se_candidates=[f"se_{comparison}"],
+            lfsr_candidates=[f"lfsr_{comparison}"],
             n_eff_candidates=[f"n_eff_{comparison}"],
             n_batches_candidates=[f"n_batches_{comparison}"],
             batch_ids_candidates=[f"batch_ids_{comparison}"],
@@ -772,6 +818,10 @@ class FluxEvidenceBuilder:
             ),
             "evidence_mode": prot_evidence_mode,
         }
+        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices]]
+        details = _demote_minor_support(details, _isozyme_check(
+            direct_rows, log2fc_col, "abundance", protein_column, flux_fc, concordant_proteins_list, self.minor_share),
+            "concordant_proteins")
         return details
 
     def metabolomics_evidence(
@@ -787,12 +837,12 @@ class FluxEvidenceBuilder:
             return {"n_metabolites_checked": 0, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_data"}
 
         flux_id = flux_row.get("flux_id", "")
-        derived_idx = _derived_indices(str(flux_id), metab_df)
+        derived_idx = _derived_indices(str(flux_id), metab_df, self.package.lipid_pools(str(flux_id)))
         has_derived = any(derived_idx.values())
 
-        roles = get_metabolite_roles(flux_id)
-        if roles is None:
-            flat = FLUX_METABOLITE_MAPPING.get(flux_id, [])
+        roles = self.package.metabolite_roles(flux_id)
+        if roles is None or isinstance(roles, list):
+            flat = roles if roles is not None else []
             if isinstance(flat, list):
                 roles = {"substrates": [], "products": [], "related": flat}
             elif isinstance(flat, dict):
@@ -917,7 +967,7 @@ class FluxEvidenceBuilder:
         unresolved_idx: list[Any] = []
         if n_sig > 0 and log2fc_col in sig_df.columns and flux_fc != 0.0:
             # 只表示容量的反应（近平衡、转运、交换）：池大小不提示净方向，底物 / 产物也只记关联
-            directional = reaction_semantics(str(flux_id)).directional
+            directional = self.package.semantics(str(flux_id)).directional
             sub_set = set(sub_idx) if directional else set()
             prod_set = set(prod_idx) if directional else set()
             for row_idx, row_fc in pd.to_numeric(sig_df[log2fc_col], errors="coerce").dropna().items():
@@ -937,7 +987,7 @@ class FluxEvidenceBuilder:
 
         # 不依赖通量符号的方向提示：产物升 → 通量升，底物升 → 通量降（只表示容量的反应不提示方向）
         implied_signs: list[float] = []
-        if n_sig > 0 and log2fc_col in sig_df.columns and reaction_semantics(str(flux_id)).directional:
+        if n_sig > 0 and log2fc_col in sig_df.columns and self.package.semantics(str(flux_id)).directional:
             for row_idx, row_fc in pd.to_numeric(sig_df[log2fc_col], errors="coerce").dropna().items():
                 if row_idx in set(prod_idx):
                     implied_signs.append(float(np.sign(row_fc)))
@@ -964,6 +1014,7 @@ class FluxEvidenceBuilder:
             qvalue_candidates=[fdr_col, "qvalue", "fdr"],
             pvalue_candidates=[pval_col, "pvalue", "pval"],
             se_candidates=[f"se_{comparison}"],
+            lfsr_candidates=[f"lfsr_{comparison}"],
             n_eff_candidates=[f"n_eff_{comparison}"],
             n_batches_candidates=[f"n_batches_{comparison}"],
             batch_ids_candidates=[f"batch_ids_{comparison}"],
@@ -1089,7 +1140,7 @@ class FluxEvidenceBuilder:
     ) -> dict[str, Any]:
         """一个（反应, 组织, 比较）的各层证据与证据画像；其他组学的证据不受 MFA 显著性判定影响。"""
         gate_passed, mfa_evidence_mode = self._mfa_gate_passed(flux_row)
-        semantics = reaction_semantics(str(flux_row.get("flux_id", "")))
+        semantics = self.package.semantics(str(flux_row.get("flux_id", "")))
         base_info = {
             "experiment_id": self.experiment_id,
             "estimand_id": self.estimand_id,

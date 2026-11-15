@@ -231,9 +231,10 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
         except RunError as exc:
             raise RunError(f"{o.value} 运行失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
 
-    # 样本 QC 标记 → 组学 × 组织 × 比较的可靠性（qc/contrast_reliability.parquet）
-    from .reliability import write_run_reliability
-    notes += write_run_reliability(experiment, ctx.run_dir)
+    # 后处理：派生特征、公式模型、可检出效应、稳健性与样本 QC 可靠性（omicsweave.stats.post）
+    if not steps or _TABLE_STEPS & set(steps):
+        from omicsweave.stats.post import postprocess
+        notes += postprocess(experiment, ctx.run_dir)
 
     finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command,
                parameters={"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}})

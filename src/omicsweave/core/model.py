@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Literal
 
@@ -102,12 +103,42 @@ class ProjectDefaults(_Strict):
     random_seed: int | None = None
 
 
+class ReplicationSource(_Strict):
+    """复现组中的一个来源：某个项目（默认为本项目，可为另一个项目目录的相对或绝对路径）中某个实验的某个比较。"""
+    project: str | None = None
+    experiment: str
+    contrast: str
+    run: str = "latest"
+    tissue_map: dict[str, str] = Field(default_factory=dict)   # 该来源的组织名 → 共同的组织名
+
+
+class ReplicationSet(_Strict):
+    """估计对象相同、可以互相复现的一组比较（G6，``omicsweave replicate``）。"""
+    id: str = Field(pattern=ID_PATTERN)
+    sources: list[ReplicationSource] = Field(min_length=2)
+    # 允许的跨层对应，如 [[proteomics, transcriptomics]]：一个来源的蛋白对另一个来源的 RNA（按基因符号）
+    cross_layer: list[list[Omics]] = Field(default_factory=list)
+    # 至少在几个来源中同向（部分合取检验的 u），默认为全部来源
+    min_sources: int | None = Field(default=None, ge=2)
+    alpha: float = Field(0.05, gt=0, lt=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> ReplicationSet:
+        if self.min_sources is not None and self.min_sources > len(self.sources):
+            raise ValueError(f"min_sources（{self.min_sources}）大于来源数（{len(self.sources)}）")
+        for pair in self.cross_layer:
+            if len(pair) != 2 or pair[0] == pair[1]:
+                raise ValueError("cross_layer 的每一项应为两个不同的组学，如 [proteomics, transcriptomics]")
+        return self
+
+
 class ProjectConfig(_Strict):
     schema_version: Literal[1] = SCHEMA_VERSION
     project: ProjectInfo
     defaults: ProjectDefaults = Field(default_factory=ProjectDefaults)
     # 相对于项目目录的实验目录；留空时自动查找 paths.experiments 下含 experiment.yaml 的目录
     experiments: list[str] = Field(default_factory=list)
+    replication: list[ReplicationSet] = Field(default_factory=list)
 
 
 # ── experiment.yaml ───────────────────────────────────────────────────────
@@ -170,6 +201,63 @@ class ReversalPair(_Strict):
     treatment: str
 
 
+_TERM = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\s*[:*]\s*[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def formula_terms(formula: str) -> list[tuple[str, ...]]:
+    """``~ a + b + a:b`` / ``~ a * b`` → [(a,), (b,), (a, b)]：主效应与交互项，按出现顺序去重。"""
+    body = formula.strip()
+    if not body.startswith("~"):
+        raise ValueError(f"公式应以 ~ 开头：{formula!r}")
+    terms: list[tuple[str, ...]] = []
+    for part in body[1:].split("+"):
+        part = part.strip()
+        if not part or not _TERM.match(part):
+            raise ValueError(f"公式 {formula!r} 中无法识别的项：{part!r}（支持 a、a:b、a*b）")
+        if "*" in part:
+            names = [n.strip() for n in part.split("*")]
+            expanded = [(n,) for n in names] + [tuple(names)]
+        else:
+            expanded = [tuple(n.strip() for n in part.split(":"))]
+        for term in expanded:
+            if term not in terms:
+                terms.append(term)
+    return terms
+
+
+class ModelSpec(_Strict):
+    """设计感知的统计模型（G3）：在已声明的因素上写公式，报告其中的主效应与交互项。
+
+    ``design.covariates`` 自动加入每个模型。主效应报告为每个非参照水平相对参照水平的合并估计
+    （``estimand_type = pooled_main``），交互项为 ``interaction``；与两两比较并列输出，不互相替代。
+    """
+    id: str = Field(pattern=ID_PATTERN)
+    formula: str
+    report: list[str] = Field(default_factory=list)    # 报告的项（如 diet、diet:treatment），默认为公式中的全部项
+    subset: dict[str, str] = Field(default_factory=dict)
+    role: ContrastRole = ContrastRole.OTHER
+    omics: list[Omics] = Field(default_factory=list)    # 默认为结果包中的全部组学
+
+    @field_validator("subset", mode="before")
+    @classmethod
+    def _subset_as_str(cls, value: Any) -> Any:
+        return {k: _as_str(v) for k, v in value.items()} if isinstance(value, dict) else value
+
+    @model_validator(mode="after")
+    def _check_formula(self) -> ModelSpec:
+        terms = [":".join(t) for t in formula_terms(self.formula)]
+        unknown = [r for r in self.report if r not in terms]
+        if unknown:
+            raise ValueError(f"report 中的项不在公式中：{'、'.join(unknown)}（公式中的项：{'、'.join(terms)}）")
+        return self
+
+    def terms(self) -> list[tuple[str, ...]]:
+        return formula_terms(self.formula)
+
+    def reported(self) -> list[tuple[str, ...]]:
+        return [t for t in self.terms() if not self.report or ":".join(t) in self.report]
+
+
 class Design(_Strict):
     subjects: str = "subjects.tsv"
     samples: str = "samples.tsv"
@@ -178,10 +266,26 @@ class Design(_Strict):
     reversal_pairs: list[ReversalPair] = Field(default_factory=list)
     stratify_by: list[str] = Field(default_factory=list)
     covariates: list[str] = Field(default_factory=list)
+    models: list[ModelSpec] = Field(default_factory=list)
+    # 对各差异结果做自适应收缩，增加 lfsr 列（证据画像据此计算方向可信度）
+    adaptive_shrinkage: bool = False
 
     @model_validator(mode="after")
     def _check_references(self) -> Design:
         problems: list[str] = []
+        known = set(self.factors) | set(self.covariates)
+        model_ids = set()
+        for model in self.models:
+            if model.id in model_ids or model.id in {c.id for c in self.contrasts}:
+                problems.append(f"模型 id {model.id} 与其他模型或比较重复")
+            model_ids.add(model.id)
+            for term in model.terms():
+                missing = [name for name in term if name not in known]
+                if missing:
+                    problems.append(f"模型 {model.id} 的公式引用了未声明的因素：{'、'.join(missing)}")
+            for key in model.subset:
+                if key not in self.factors:
+                    problems.append(f"模型 {model.id} 的 subset 引用了未声明的因素 {key!r}")
         seen: set[str] = set()
         for c in self.contrasts:
             if c.id in seen:
@@ -271,6 +375,54 @@ class IntegrationSettings(_Strict):
     parameters: dict[IntegrationMode, dict[str, Any]] = Field(default_factory=dict)
 
 
+class FeatureSelector(_Strict):
+    """派生特征的成员：按特征 ID 或名称、脂质类别（LIPID MAPS 简写，醚脂为 PE-O / PE-P）或 HMDB / KEGG ID 选取。"""
+    features: list[str] = Field(default_factory=list)
+    lipid_class: list[str] = Field(default_factory=list)
+    database_ids: list[str] = Field(default_factory=list)
+
+    def empty(self) -> bool:
+        return not (self.features or self.lipid_class or self.database_ids)
+
+
+DERIVED_TYPES = ("sum", "ratio", "step_ratio", "fraction", "index", "module_score")
+
+
+class DerivedSpec(_Strict):
+    """声明式派生特征（G8），在分析层数据集（log2 尺度）上按样本计算，与测得特征一起做差异分析、逆转与整合。
+
+    - ``sum``：``members`` 在线性尺度上求和后取 log2；
+    - ``ratio``：``numerator`` 与 ``denominator`` 之比（各自先求和）；
+    - ``step_ratio``：一步反应的产物 / 底物比，``source: network`` 时由 MFA 网络的化学计量自动生成；
+    - ``fraction``：``members`` 占 ``denominator``（总量）的比例；
+    - ``index``：``members`` 中脂质按丰度加权的平均链长（``index: chain_length``）或双键数（``double_bonds``）；
+    - ``module_score``：``members`` 的样本得分（各成员标准化后取平均）。
+    """
+    id: str | None = Field(default=None, pattern=ID_PATTERN)
+    type: Literal["sum", "ratio", "step_ratio", "fraction", "index", "module_score"]
+    omics: Omics
+    members: FeatureSelector | None = None
+    numerator: FeatureSelector | None = None
+    denominator: FeatureSelector | None = None
+    index: Literal["chain_length", "double_bonds"] | None = None
+    source: Literal["network"] | None = None
+    min_members: int = Field(1, ge=1)
+
+    @model_validator(mode="after")
+    def _check_type(self) -> DerivedSpec:
+        need = {"sum": ("members",), "ratio": ("numerator", "denominator"), "fraction": ("members", "denominator"),
+                "index": ("members", "index"), "module_score": ("members",)}.get(self.type, ())
+        missing = [n for n in need if getattr(self, n) is None or (isinstance(getattr(self, n), FeatureSelector)
+                                                                     and getattr(self, n).empty())]
+        if missing:
+            raise ValueError(f"派生特征类型 {self.type} 需要 {'、'.join(missing)}")
+        if self.type == "step_ratio" and self.source is None and (self.numerator is None or self.denominator is None):
+            raise ValueError("step_ratio 需要 source: network，或给出 numerator（产物）与 denominator（底物）")
+        if self.id is None and not (self.type == "step_ratio" and self.source == "network"):
+            raise ValueError(f"派生特征类型 {self.type} 需要 id")
+        return self
+
+
 class ExperimentInfo(_Strict):
     id: str = Field(pattern=ID_PATTERN)
     description: str = ""
@@ -282,7 +434,16 @@ class ExperimentConfig(_Strict):
     experiment: ExperimentInfo
     design: Design = Field(default_factory=Design)
     omics: OmicsBlock = Field(default_factory=OmicsBlock)
+    derived: list[DerivedSpec] = Field(default_factory=list)
     integration: IntegrationSettings = Field(default_factory=IntegrationSettings)
+
+    @model_validator(mode="after")
+    def _check_derived_ids(self) -> ExperimentConfig:
+        ids = [d.id for d in self.derived if d.id]
+        duplicated = sorted({i for i in ids if ids.count(i) > 1})
+        if duplicated:
+            raise ValueError(f"派生特征 id 重复：{'、'.join(duplicated)}")
+        return self
 
 
 def export_json_schema() -> dict[str, dict[str, Any]]:

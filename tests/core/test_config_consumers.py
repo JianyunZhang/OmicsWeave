@@ -52,7 +52,37 @@ CONSUMERS: dict[str, tuple[str, ...]] = {
     "experiment.design.reversal_pairs[].disease": ("omicsweave.integration.modes.reversal:p.disease",),
     "experiment.design.reversal_pairs[].treatment": ("omicsweave.integration.modes.reversal:p.treatment",),
     "experiment.design.covariates": ("omicsweave.transcriptomics.runner:design.covariates",
-                                     "omicsweave.proteomics.runner:design.covariates"),
+                                     "omicsweave.proteomics.runner:design.covariates",
+                                     "omicsweave.stats.models:design_cfg.covariates"),
+    "experiment.design.factors.*.reference": ("omicsweave.stats.data:factor.reference",),
+    "experiment.design.models[].id": ("omicsweave.stats.models:model.id",),
+    "experiment.design.models[].formula": ("omicsweave.stats.models:model.formula",),
+    "experiment.design.models[].report": ("omicsweave.stats.models:model.reported()",),
+    "experiment.design.models[].subset": ("omicsweave.stats.models:model.subset",),
+    "experiment.design.models[].role": ("omicsweave.stats.models:model.role",),
+    "experiment.design.models[].omics": ("omicsweave.stats.models:model.omics",),
+    "experiment.design.adaptive_shrinkage": ("omicsweave.stats.post:design.adaptive_shrinkage",),
+    "experiment.derived[].id": ("omicsweave.stats.derived:spec.id",),
+    "experiment.derived[].type": ("omicsweave.stats.derived:spec.type",),
+    "experiment.derived[].omics": ("omicsweave.stats.derived:spec.omics",),
+    "experiment.derived[].members.*": ("omicsweave.stats.derived:spec.members",),
+    "experiment.derived[].numerator.*": ("omicsweave.stats.derived:spec.numerator",),
+    "experiment.derived[].denominator.*": ("omicsweave.stats.derived:spec.denominator",),
+    "experiment.derived[].*.features": ("omicsweave.stats.derived:selector.features",),
+    "experiment.derived[].*.lipid_class": ("omicsweave.stats.derived:selector.lipid_class",),
+    "experiment.derived[].*.database_ids": ("omicsweave.stats.derived:selector.database_ids",),
+    "experiment.derived[].index": ("omicsweave.stats.derived:spec.index",),
+    "experiment.derived[].source": ("omicsweave.stats.derived:spec.source",),
+    "experiment.derived[].min_members": ("omicsweave.stats.derived:spec.min_members",),
+    "project.replication[].id": ("omicsweave.integration.replication:spec.id",),
+    "project.replication[].sources[].project": ("omicsweave.integration.replication:source.project",),
+    "project.replication[].sources[].experiment": ("omicsweave.integration.replication:source.experiment",),
+    "project.replication[].sources[].contrast": ("omicsweave.integration.replication:source.contrast",),
+    "project.replication[].sources[].run": ("omicsweave.integration.replication:source.run",),
+    "project.replication[].sources[].tissue_map": ("omicsweave.integration.replication:source.tissue_map",),
+    "project.replication[].cross_layer": ("omicsweave.integration.replication:spec.cross_layer",),
+    "project.replication[].min_sources": ("omicsweave.integration.replication:spec.min_sources",),
+    "project.replication[].alpha": ("omicsweave.integration.replication:spec.alpha",),
     "experiment.omics.*.enabled": ("omicsweave.core.run:config.omics.enabled()",),
     "experiment.omics.*.input.level": ('omicsweave.core.validate:spec.level == "raw"',),
     "experiment.omics.*.input.format": ("omicsweave.mfa.runner:input.format",
@@ -81,15 +111,13 @@ DESCRIPTIVE: dict[str, str] = {
 KNOWN_GAPS: dict[str, tuple[str, str]] = {
     "project.defaults.padj_method": ("各组学用自己的多重检验校正设置，项目默认值未接入", r"defaults\.padj_method"),
     "project.defaults.random_seed": ("各组学用自己的随机种子，项目默认值未接入", r"defaults\.random_seed"),
-    "experiment.design.factors.*.reference": ("比较显式给出分子与分母；公式模型（G3）接入后才需要参照水平",
-                                              r"\.reference\b(?!s)"),
     "experiment.design.stratify_by": ("各组学按 tissue 分层是写死的，只有 validate 读取该字段", r"stratify_by"),
 }
 # 探针的扫描范围之外：模型定义、模板、迁移与校验
 _PROBE_EXCLUDE = ("core/model.py", "core/scaffold.py", "core/migrate.py", "core/validate.py")
 # 字段级已有读取、但部分组学未接入 → (原因, 未接入的组学运行器模块, 探针)
 PARTIAL: dict[str, tuple[str, tuple[str, ...], str]] = {
-    "experiment.design.covariates": ("代谢组与 MFA 的差异分析不读取协变量（G3 的第 5 项）",
+    "experiment.design.covariates": ("代谢组与 MFA 的两两比较不读取协变量；公式模型（design.models）对所有组学都加入协变量",
                                      ("omicsweave.metabolomics.runner", "omicsweave.mfa.runner"), "covariates"),
 }
 
@@ -126,6 +154,11 @@ def all_paths() -> list[str]:
                           "experiment.omics.*.", p) for p in paths})
 
 
+def _matches(path: str, pattern: str) -> bool:
+    """fnmatch 中的 [] 是字符集；路径里的列表标记 [] 按字面匹配。"""
+    return fnmatch.fnmatchcase(path, pattern.replace("[]", "[[][]]"))
+
+
 def _source(module: str) -> str:
     return Path(importlib.import_module(module).__file__).read_text(encoding="utf-8")
 
@@ -139,13 +172,13 @@ def _package_sources() -> dict[str, str]:
 class ConfigConsumerTest(unittest.TestCase):
     def test_every_field_is_registered(self) -> None:
         registries = [*CONSUMERS, *DESCRIPTIVE, *KNOWN_GAPS]
-        unregistered = [p for p in all_paths() if not any(fnmatch.fnmatchcase(p, pattern) for pattern in registries)]
+        unregistered = [p for p in all_paths() if not any(_matches(p, pattern) for pattern in registries)]
         self.assertEqual(unregistered, [], "新配置字段需要在 CONSUMERS / DESCRIPTIVE / KNOWN_GAPS 中登记")
 
     def test_no_stale_entries(self) -> None:
         paths = all_paths()
         stale = [pattern for pattern in [*CONSUMERS, *DESCRIPTIVE, *KNOWN_GAPS]
-                 if not any(fnmatch.fnmatchcase(p, pattern) for p in paths)]
+                 if not any(_matches(p, pattern) for p in paths)]
         self.assertEqual(stale, [])
 
     def test_consumers_read_the_field(self) -> None:

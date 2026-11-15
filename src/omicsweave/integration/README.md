@@ -131,10 +131,30 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
   `tables/reversal_summary.parquet`。通路层面的逆转与析因交互项尚未实现（需要公式模型）。
 - `sample_level`：待接入，暂用下文的旧命令。
 
+- `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度
+  （RNA 的 `base_mean`、蛋白两组均值）加权，给出 `tx_/prot_weighted_capacity_change` 与主要成员；与通量同向的只有
+  丰度占比低于阈值的次要同工酶、而主要同工酶反向时，该层不计为支持，记在 `minor_isozyme_driven_layers`。
+- `flux_anchored` 的诱饵映射（`decoys: {replicates: N, seed: S}`，默认关闭）：把各反应的方向成员换成同组织中丰度相近的
+  随机特征后用同一套规则判定，诱饵支持率与目标支持率之比估计假证据比例，写在 `evaluation/decoy_*.parquet`。
+- 源结果包有逐只去掉动物的稳健性表时（`omicsweave stats`），与通量同向的特征全部由单只动物驱动的层记在
+  `single_subject_driven_layers`。
+
+项目级的跨实验 / 跨队列复现（`project.yaml` 的 `replication`）：
+
+```bash
+omicsweave replicate [--set <复现组>]
+```
+
+每个复现组列出估计对象相同的比较（可来自其他项目目录，组织名可用 `tissue_map` 对应），对特征、派生特征与 GSEA 通路做
+方向性的部分合取检验与 BH 校正（`replicated`、`replication_fdr`），同层特征另给随机效应合并估计；`cross_layer` 允许
+一个来源的蛋白对另一个来源的 RNA。`replication_baseline.parquet` 给出全部对应特征的同号比例与随机重排的基线（约 50%）。
+
 结果包工具：
 
 ```bash
 omicsweave diff <运行A> <运行B> [--experiment <id>] [--output <目录>]   # 0 相同 / 1 有差异 / 2 无法对照
+omicsweave stats --experiment <id> [--source <运行>]                     # 对已有结果包重跑后处理（公式模型、派生特征、稳健性）
+omicsweave refs list | build <genes|proteins|metabolites> | audit --experiment <id>   # 知识表与数据的审计
 ```
 
 `diff` 按主键对齐每张表后逐格比较，报告逐值相同与否、变化的列、数值差值分布与 `evidence_grade` 等分类列的转移计数。

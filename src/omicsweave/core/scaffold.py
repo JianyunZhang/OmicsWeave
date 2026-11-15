@@ -56,6 +56,10 @@ design:
     - {{disease: HFD_vs_LFD, treatment: Drug_vs_Saline_in_HFD}}
   stratify_by: [tissue]             # 各组织分别分析
   covariates: []                    # 例如 [batch]
+  models: []                        # 公式模型，如 [{{id: diet_pooled, formula: "~ diet + treatment", report: [diet]}}]
+  adaptive_shrinkage: false         # true 时给差异结果加 lfsr（自适应收缩的局部假符号率）
+
+derived: []                         # 声明式派生特征，如 [{{type: step_ratio, omics: metabolomics, source: network}}]
 
 omics:                              # 按需启用；input.level 为 raw（下机文件）或 table（已处理的表格）
   transcriptomics:

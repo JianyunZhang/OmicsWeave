@@ -70,8 +70,12 @@ DIFFERENTIAL_COLUMNS: tuple[Column, ...] = (
     Column("direction_stability", "float", False, "MFA：重抽样下方向一致的比例"),
     Column("permutation_pvalue", "float", False, "MFA：置换检验 p 值"),
     Column("flags", "str", False, "以分号分隔的标记，如 low_n;underpowered;effect_size_undefined"),
+    Column("estimand_type", "str", False, "pairwise（两两比较）/ pooled_main（公式模型的合并主效应）/ interaction"),
+    Column("n_total", "int", False, "参与估计的样本总数"),
+    Column("lfsr", "float", False, "自适应收缩的局部假符号率（design.adaptive_shrinkage 开启时）"),
 )
 DIFFERENTIAL_KEY = ("contrast_id", "tissue", "omics", "feature_id")
+ESTIMAND_TYPES = ("pairwise", "pooled_main", "interaction")
 # 只对该组学的行生效的必填列
 DIFFERENTIAL_REQUIRED_BY_OMICS: dict[str, tuple[str, ...]] = {
     Omics.MFA.value: ("effect_size", "effect_size_type", "mean_numerator", "mean_denominator",
@@ -153,11 +157,12 @@ def validate_differential(table: pd.DataFrame) -> list[str]:
     problems = _structure(table, DIFFERENTIAL_COLUMNS)
     if problems:
         return problems
-    problems += _probabilities(table, ("pvalue", "padj", "min_achievable_p"))
+    problems += _probabilities(table, ("pvalue", "padj", "min_achievable_p", "lfsr"))
     for name in ("n_numerator", "n_denominator"):
         if (table[name] < 0).any():
             problems.append(f"列 {name} 有负值")
     problems += _vocabulary(table, "contrast_role", [r.value for r in ContrastRole])
+    problems += _vocabulary(table, "estimand_type", ESTIMAND_TYPES)
     problems += _vocabulary(table, "omics", [o.value for o in Omics])
     problems += _vocabulary(table, "evidence_level", EVIDENCE_LEVELS)
 
@@ -239,6 +244,30 @@ def _read(path: str | Path, validate: Callable[[pd.DataFrame], list[str]]) -> pd
     if problems:
         raise ContractError(f"{path}: " + "；".join(problems))
     return table
+
+
+SE_COLUMNS = ("lfc_se", "log2fc_se")
+
+
+def effect_standard_errors(table: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """差异结果中 log2 倍数变化的标准误与来源：表中的标准误（``lfc_se`` / ``log2fc_se``）优先，
+    否则由双侧 p 值按正态近似反推（来源记为 ``from_pvalue``）。"""
+    from scipy.stats import norm
+
+    def numeric(column: str) -> pd.Series:
+        return pd.to_numeric(table[column], errors="coerce") if column in table.columns \
+            else pd.Series(np.nan, index=table.index)
+
+    reported = pd.Series(np.nan, index=table.index)
+    for column in SE_COLUMNS:
+        reported = reported.fillna(numeric(column))
+    effect, pvalue = numeric("log2fc").abs(), numeric("pvalue")
+    usable = pvalue.gt(0) & pvalue.lt(1) & effect.gt(0)
+    derived = pd.Series(np.nan, index=table.index)
+    derived[usable] = effect[usable] / norm.isf(pvalue[usable] / 2)
+    se = reported.where(reported.gt(0), derived)
+    source = np.select([reported.gt(0), derived.notna()], ["reported", "from_pvalue"], "")
+    return se, pd.Series(source, index=table.index)
 
 
 def write_differential(table: pd.DataFrame, path: str | Path) -> Path:

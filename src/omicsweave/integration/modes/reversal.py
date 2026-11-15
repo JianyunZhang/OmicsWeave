@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from omicsweave.contract.tables import read_differential
+from omicsweave.contract.tables import effect_standard_errors, read_differential
 from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import (
     BLOCKED, DEFAULT_IMBALANCE, QC_DIR, RELIABILITY_FILE, build_reliability, summary_note,
@@ -50,30 +50,10 @@ MODE = IntegrationMode.REVERSAL
 DEFAULTS: dict[str, Any] = {"alpha": None, "equivalence_margin": 0.5, "ci_level": 0.95,
                             "qc_imbalance": DEFAULT_IMBALANCE}
 CLASSES = ("reversed", "partially_reversed", "over_reversed", "aggravated", "not_reversed", "undetermined")
-_SE_COLUMNS = ("lfc_se", "log2fc_se")
 COLUMNS = ["pair_id", "disease_contrast", "treatment_contrast", "omics", "tissue", "feature_id", "feature_name",
            "feature_type", "disease_effect", "disease_se", "disease_padj", "treatment_effect", "treatment_se",
            "treatment_padj", "reversal_index", "ci_lower", "ci_upper", "class", "rule", "se_source"]
-
-
-def _numeric(rows: pd.DataFrame, column: str) -> pd.Series:
-    if column not in rows.columns:
-        return pd.Series(np.nan, index=rows.index)
-    return pd.to_numeric(rows[column], errors="coerce")
-
-
-def standard_errors(rows: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
-    """log2 倍数变化的标准误与来源：结果表中的标准误优先，否则由双侧 p 值按正态近似反推。"""
-    reported = pd.Series(np.nan, index=rows.index)
-    for column in _SE_COLUMNS:
-        reported = reported.fillna(_numeric(rows, column))
-    effect, pvalue = _numeric(rows, "log2fc").abs(), _numeric(rows, "pvalue")
-    usable = pvalue.gt(0) & pvalue.lt(1) & effect.gt(0)
-    derived = pd.Series(np.nan, index=rows.index)
-    derived[usable] = effect[usable] / norm.isf(pvalue[usable] / 2)
-    se = reported.where(reported.gt(0), derived)
-    source = np.select([reported.gt(0), derived.notna()], ["reported", "from_pvalue"], "")
-    return se, pd.Series(source, index=rows.index)
+standard_errors = effect_standard_errors
 
 
 def _features(tables: dict[str, pd.DataFrame], derived: pd.DataFrame | None) -> pd.DataFrame:

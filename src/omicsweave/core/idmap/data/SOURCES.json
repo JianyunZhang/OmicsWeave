@@ -30,5 +30,21 @@
     },
     "dropped_curated_aliases": {},
     "casefold_collisions": []
+  },
+  "metabolites": {
+    "generated_by": "python -m omicsweave.core.idmap.build_metabolite_registry",
+    "generated_on": "2026-11-15",
+    "source": "RefMet via Metabolomics Workbench REST",
+    "endpoints": [
+      "https://www.metabolomicsworkbench.org/rest/refmet/match/<name>",
+      "https://www.metabolomicsworkbench.org/rest/refmet/name/<refmet_name>/all",
+      "https://www.metabolomicsworkbench.org/rest/compound/regno/<regno>/all"
+    ],
+    "n_names": 642,
+    "status": {
+      "matched": 337,
+      "no_ids": 12,
+      "unmatched": 293
+    }
   }
 }

@@ -11,6 +11,9 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] run --experiment 实验ID [--omics mfa,...|all] [--steps qc,differential]
     omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode flux_anchored,pathway_convergence] [--source 运行ID]
     omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
+    omicsweave [--project-dir DIR] stats --experiment 实验ID [--source 运行ID]
+    omicsweave [--project-dir DIR] refs list | build <genes|proteins|metabolites> [...] | audit --experiment 实验ID
+    omicsweave [--project-dir DIR] replicate [--set 复现组ID]
     omicsweave [--project-dir DIR] diff 运行A 运行B [--experiment 实验ID] [--output 目录]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
@@ -117,6 +120,22 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--run", default=None, help="运行 ID，默认最近一次")
     export.add_argument("--format", choices=["xlsx", "tsv"], default="xlsx", help="导出格式，默认 xlsx")
     export.add_argument("--output", default=None, help="输出文件（xlsx）或目录（tsv），默认写在结果包的 exports/ 下")
+
+    refs = modules.add_parser("refs", help="知识表：列出（list）、生成（build <名称> [生成器参数]）、对照数据审计（audit）")
+    refs.add_argument("action", choices=["list", "build", "audit"])
+    refs.add_argument("name", nargs="?", default=None, help="build 时的知识表名称：genes / proteins / metabolites")
+    refs.add_argument("--experiment", default=None, help="audit：实验 ID")
+    refs.add_argument("--run", default=None, help="audit：结果包运行 ID，默认最近一次含数据集的运行")
+    refs.add_argument("--output", default=None, help="audit：把明细写到该 TSV 文件")
+
+    replicate = modules.add_parser("replicate", help="按 project.yaml 的 replication 判断跨实验 / 跨队列的复现，"
+                                                      "结果写入项目级结果包")
+    replicate.add_argument("--set", action="append", default=None, help="只运行这些复现组，可重复；默认全部")
+
+    stats = modules.add_parser("stats", help="对已有结果包重新运行后处理（公式模型、派生特征、可检出效应、稳健性），"
+                                              "结果写入新的结果包")
+    stats.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
+    stats.add_argument("--source", default=None, help="源结果包的运行 ID，默认最近一次含统一结果表的运行")
 
     diff = modules.add_parser("diff", help="逐表对照两个结果包，报告是否逐值相同、差值分布与等级转移")
     diff.add_argument("run_a", help="结果包 A：运行 ID 或结果包目录")
@@ -253,8 +272,71 @@ def _run_diff(args: argparse.Namespace) -> int:
     return 0 if result.identical else 1
 
 
+def _run_refs(args: argparse.Namespace) -> int:
+    from omicsweave.core import refs
+
+    if args.action == "list":
+        print(refs.registry_status().drop(columns=["builder"]).to_string(index=False))
+        return 0
+    if args.action == "build":
+        if not args.name:
+            print("错误：refs build 需要知识表名称，如 omicsweave refs build metabolites", file=sys.stderr)
+            return 1
+        return refs.build(args.name, list(args.forwarded))
+    from omicsweave.core.config import ConfigError, load_experiment, load_project
+
+    try:
+        experiment = load_experiment(load_project(project_dir()), args.experiment) if args.experiment else None
+    except ConfigError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    run_dir = (experiment.project.path("results") / experiment.id / args.run) if experiment and args.run else None
+    table = refs.audit(experiment, run_dir)
+    for message in refs.audit_messages(table):
+        print(f"[不一致] {message}")
+    coverage = table[table["issue"] == "coverage"]
+    for row in coverage.itertuples():
+        print(f"[覆盖] {row.omics} {row.tissue}：反应映射的直接酶测到 {row.data_value}")
+    if args.output:
+        table.to_csv(args.output, sep="\t", index=False)
+        print(f"明细：{args.output}")
+    return 0
+
+
+def _run_replicate(args: argparse.Namespace) -> int:
+    from omicsweave.core.config import ConfigError
+    from omicsweave.integration.replication import ReplicationError, replicate_project
+
+    try:
+        run_dir, notes = replicate_project(project_dir(), _split(args.set) or None, command=["omicsweave", *args.argv])
+    except (ConfigError, ReplicationError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    for note in notes:
+        print(f"[提示] {note}")
+    print(f"结果包：{run_dir}")
+    return 0
+
+
+def _run_stats(args: argparse.Namespace) -> int:
+    from omicsweave.core.run import RunError
+    from omicsweave.stats.post import stats_experiment
+
+    try:
+        run_dir, notes = stats_experiment(args.experiment, args.source, root=project_dir(),
+                                          command=["omicsweave", *args.argv])
+    except RunError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    for note in notes:
+        print(f"[提示] {note}")
+    print(f"结果包：{run_dir}")
+    return 0
+
+
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
-             "integrate": _run_integrate, "export": _run_export, "diff": _run_diff}
+             "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
+             "refs": _run_refs, "replicate": _run_replicate}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -263,7 +345,10 @@ def main(argv: list[str] | None = None) -> None:
     args.argv = list(sys.argv[1:] if argv is None else argv)
 
     if args.module in _HANDLERS:
-        if forwarded:
+        # refs build 的其余参数交给生成器
+        if args.module == "refs" and getattr(args, "action", None) == "build":
+            args.forwarded = forwarded
+        elif forwarded:
             parser.error(f"无法识别的参数：{' '.join(forwarded)}")
         handler = _HANDLERS[args.module]
         with project_context(args.project_dir):
