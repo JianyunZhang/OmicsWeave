@@ -243,7 +243,8 @@ def _resolve_bundle(value: str, experiment: str | None) -> Path:
     from omicsweave.core.config import load_project
 
     path = Path(value)
-    if path.is_dir() and (path / MANIFEST_FILE).is_file():
+    # 已有的目录直接对照（不要求运行清单，便于对照临时输出）
+    if path.is_dir():
         return path
     results = load_project(project_dir()).path("results")
     pattern = f"{experiment}/{value}" if experiment else f"*/{value}"

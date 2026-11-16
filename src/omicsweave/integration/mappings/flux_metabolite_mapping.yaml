@@ -136,10 +136,10 @@ FUMH_m:
   - malate
   - Malate
   - L-Malate
+  - Malic acid
   related:
   - Fumaric
   - Maleate
-  - Malic acid
   - Malic
   - Succinate
   - Succinyl-CoA
@@ -152,12 +152,12 @@ MDH_m:
   - malate
   - Malate
   - L-Malate
+  - Malic acid
   products:
   - oxaloacetate
   - Oxaloacetate
   - Oxaloacetic acid
   related:
-  - Malic acid
   - Malic
   - OAA
   - Fumarate
@@ -1781,12 +1781,12 @@ MDH_c:
   - malate
   - Malate
   - L-Malate
+  - Malic acid
   products:
   - oxaloacetate
   - Oxaloacetate
   - Oxaloacetic acid
   related:
-  - Malic acid
   - Malic
   - OAA
   - Fumarate

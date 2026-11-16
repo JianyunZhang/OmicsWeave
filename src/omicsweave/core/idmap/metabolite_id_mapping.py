@@ -26,6 +26,13 @@
     - HMDB 5.0 (https://hmdb.ca)
     - KEGG COMPOUND (https://www.genome.jp/kegg/compound/)
     - ChEBI (https://www.ebi.ac.uk/chebi/)
+
+审计（``omicsweave refs audit``，对照由 RefMet 生成的注册表）发现的明确错配已于 2026-11-16 修正，每个 ID 都在
+KEGG REST、Metabolomics Workbench / PubChem（HMDB）与 EBI OLS（ChEBI）核对过：甘油醛-3-磷酸 KEGG（原为果糖-1,6-二磷酸）、
+HMG-CoA KEGG 与 ChEBI（原为甲羟戊酸、(S)-甲基丙二酰辅酶 A）、叶酸 KEGG（原为尿黑酸）、苹果酸（原为 D-苹果酸）、
+2-磷酸甘油酸 HMDB（原为 3-氧代己二酸）、糖原 HMDB（原为 3-己酮）、血红素 HMDB（原为 2-羟基-3-甲基戊酸）、
+β-羟丁酸 / 果糖-2,6-二磷酸 / 氨甲酰磷酸 HMDB（原为无效编号）与氨甲酰磷酸 ChEBI（原为 UDP）。
+其余不一致只是立体异构或异头物的不同条目（如葡萄糖、肉碱、尿囊素），未改动。
 """
 from __future__ import annotations
 
@@ -46,18 +53,18 @@ METABOLITE_DATABASE_IDS: Dict[str, Dict[str, Optional[str]]] = {
     'Glucose-6-phosphate': {'hmdb_id': 'HMDB0001401', 'kegg_compound': 'C00092', 'chebi_id': 'CHEBI:4170'},
     'Fructose-6-phosphate': {'hmdb_id': 'HMDB0000124', 'kegg_compound': 'C00085', 'chebi_id': 'CHEBI:78697'},
     'Fructose-1,6-bisphosphate': {'hmdb_id': 'HMDB0001058', 'kegg_compound': 'C05378', 'chebi_id': 'CHEBI:78682'},
-    'Fructose-2,6-bisphosphate': {'hmdb_id': 'HMDB0001048', 'kegg_compound': 'C00665', 'chebi_id': 'CHEBI:28602'},
+    'Fructose-2,6-bisphosphate': {'hmdb_id': 'HMDB0001047', 'kegg_compound': 'C00665', 'chebi_id': 'CHEBI:28602'},
     'Dihydroxyacetone phosphate': {'hmdb_id': 'HMDB0001473', 'kegg_compound': 'C00111', 'chebi_id': 'CHEBI:16108'},
-    'Glyceraldehyde-3-phosphate': {'hmdb_id': 'HMDB0001112', 'kegg_compound': 'C00354', 'chebi_id': 'CHEBI:29052'},
+    'Glyceraldehyde-3-phosphate': {'hmdb_id': 'HMDB0001112', 'kegg_compound': 'C00118', 'chebi_id': 'CHEBI:29052'},
     '1,3-Bisphosphoglycerate': {'hmdb_id': 'HMDB0001270', 'kegg_compound': 'C00236', 'chebi_id': 'CHEBI:58289'},
     '3-Phosphoglycerate': {'hmdb_id': 'HMDB0000807', 'kegg_compound': 'C00197', 'chebi_id': 'CHEBI:17050'},
-    '2-Phosphoglycerate': {'hmdb_id': 'HMDB0000398', 'kegg_compound': 'C00631', 'chebi_id': 'CHEBI:17835'},
+    '2-Phosphoglycerate': {'hmdb_id': 'HMDB0003391', 'kegg_compound': 'C00631', 'chebi_id': 'CHEBI:17835'},
     'Phosphoenolpyruvate': {'hmdb_id': 'HMDB0000263', 'kegg_compound': 'C00074', 'chebi_id': 'CHEBI:44897'},
     'Pyruvate': {'hmdb_id': 'HMDB0000243', 'kegg_compound': 'C00022', 'chebi_id': 'CHEBI:15361'},
     'Lactate': {'hmdb_id': 'HMDB0000190', 'kegg_compound': 'C00186', 'chebi_id': 'CHEBI:422'},
     'Glucose-1-phosphate': {'hmdb_id': 'HMDB0001586', 'kegg_compound': 'C00103', 'chebi_id': 'CHEBI:16077'},
     'UDP-glucose': {'hmdb_id': 'HMDB0000286', 'kegg_compound': 'C00029', 'chebi_id': 'CHEBI:18066'},
-    'Glycogen': {'hmdb_id': 'HMDB0000753', 'kegg_compound': 'C00182', 'chebi_id': 'CHEBI:28087'},
+    'Glycogen': {'hmdb_id': 'HMDB0000757', 'kegg_compound': 'C00182', 'chebi_id': 'CHEBI:28087'},
 
     # =========================================================================
     # TCA Cycle Intermediates
@@ -134,7 +141,7 @@ METABOLITE_DATABASE_IDS: Dict[str, Dict[str, Optional[str]]] = {
     # =========================================================================
     # Ketone Bodies
     # =========================================================================
-    'beta-Hydroxybutyrate': {'hmdb_id': 'HMDB0000007', 'kegg_compound': 'C01089', 'chebi_id': 'CHEBI:20067'},
+    'beta-Hydroxybutyrate': {'hmdb_id': 'HMDB0000011', 'kegg_compound': 'C01089', 'chebi_id': 'CHEBI:20067'},
     'Acetoacetate': {'hmdb_id': 'HMDB0000060', 'kegg_compound': 'C00164', 'chebi_id': 'CHEBI:13705'},
 
     # =========================================================================
@@ -166,15 +173,15 @@ METABOLITE_DATABASE_IDS: Dict[str, Dict[str, Optional[str]]] = {
     'H2O': {'hmdb_id': 'HMDB0002111', 'kegg_compound': 'C00001', 'chebi_id': 'CHEBI:15377'},
     'Pi': {'hmdb_id': 'HMDB0001429', 'kegg_compound': 'C00009', 'chebi_id': 'CHEBI:18367'},
     'Urea': {'hmdb_id': 'HMDB0000294', 'kegg_compound': 'C00086', 'chebi_id': 'CHEBI:16199'},
-    'Carbamoyl phosphate': {'hmdb_id': 'HMDB0002081', 'kegg_compound': 'C00169', 'chebi_id': 'CHEBI:17659'},
+    'Carbamoyl phosphate': {'hmdb_id': 'HMDB0001096', 'kegg_compound': 'C00169', 'chebi_id': 'CHEBI:17672'},
     'Cholesterol': {'hmdb_id': 'HMDB0000067', 'kegg_compound': 'C00187', 'chebi_id': 'CHEBI:16113'},
-    'HMG-CoA': {'hmdb_id': 'HMDB0001375', 'kegg_compound': 'C00418', 'chebi_id': 'CHEBI:15466'},
+    'HMG-CoA': {'hmdb_id': 'HMDB0001375', 'kegg_compound': 'C00356', 'chebi_id': 'CHEBI:11814'},
     'Bile acid': {'hmdb_id': None, 'kegg_compound': 'C01558', 'chebi_id': 'CHEBI:3098'},
     'Glutathione': {'hmdb_id': 'HMDB0000125', 'kegg_compound': 'C00051', 'chebi_id': 'CHEBI:16856'},
-    'Heme': {'hmdb_id': 'HMDB0000317', 'kegg_compound': 'C00032', 'chebi_id': 'CHEBI:17627'},
+    'Heme': {'hmdb_id': 'HMDB0003178', 'kegg_compound': 'C00032', 'chebi_id': 'CHEBI:17627'},
     'Spermidine': {'hmdb_id': 'HMDB0001257', 'kegg_compound': 'C00315', 'chebi_id': 'CHEBI:16610'},
     'Spermine': {'hmdb_id': 'HMDB0001256', 'kegg_compound': 'C00750', 'chebi_id': 'CHEBI:15746'},
-    'Folate': {'hmdb_id': 'HMDB0000121', 'kegg_compound': 'C00544', 'chebi_id': 'CHEBI:27470'},
+    'Folate': {'hmdb_id': 'HMDB0000121', 'kegg_compound': 'C00504', 'chebi_id': 'CHEBI:27470'},
     'Tetrahydrofolate': {'hmdb_id': 'HMDB0001182', 'kegg_compound': 'C00101', 'chebi_id': 'CHEBI:20506'},
     'Pyroglutamate': {'hmdb_id': 'HMDB0000267', 'kegg_compound': 'C01879', 'chebi_id': 'CHEBI:16651'},
     'Allantoin': {'hmdb_id': 'HMDB0000462', 'kegg_compound': 'C01551', 'chebi_id': 'CHEBI:15676'},
@@ -1103,7 +1110,7 @@ METABOLITE_DATABASE_IDS: Dict[str, Dict[str, Optional[str]]] = {
     'Macrocarpal I': {'hmdb_id': 'HMDB0041587', 'kegg_compound': None, 'chebi_id': None},
     'Mahaleboside': {'hmdb_id': 'HMDB0032984', 'kegg_compound': None, 'chebi_id': None},
     'Maleic Acid': {'hmdb_id': 'HMDB0000176', 'kegg_compound': 'C01384', 'chebi_id': 'CHEBI:18300'},
-    'Malic acid': {'hmdb_id': 'HMDB0031518', 'kegg_compound': 'C00497', 'chebi_id': 'CHEBI:30796'},
+    'Malic acid': {'hmdb_id': 'HMDB0000156', 'kegg_compound': 'C00149', 'chebi_id': 'CHEBI:30797'},
     'Malonic acid': {'hmdb_id': 'HMDB0000691', 'kegg_compound': 'C00383', 'chebi_id': 'CHEBI:30794'},
     'Malonic semialdehyde': {'hmdb_id': 'HMDB0011111', 'kegg_compound': 'C00222', 'chebi_id': 'CHEBI:17960'},
     'Maltitol': {'hmdb_id': 'HMDB0002928', 'kegg_compound': None, 'chebi_id': 'CHEBI:68428'},
@@ -1944,6 +1951,34 @@ METABOLITE_DATABASE_IDS: Dict[str, Dict[str, Optional[str]]] = {
 # =============================================================================
 
 # 预建一个查找索引：规范化名称 -> 原始键
+# 2026-11-16 修正的错配：名称 → {字段: (旧值, 新值)}。修正前的结果包中，代谢组差异结果的 ID 列由旧值写入
+# （运行器按名称查本表注释），整合读取旧结果包时据此只更正这些确定错误的值（见 flux_anchored）。
+CORRECTED_IDS: dict[str, dict[str, tuple[str, str]]] = {
+    'Glyceraldehyde-3-phosphate': {'kegg_compound': ('C00354', 'C00118')},
+    'HMG-CoA': {'kegg_compound': ('C00418', 'C00356'), 'chebi_id': ('CHEBI:15466', 'CHEBI:11814')},
+    'Folate': {'kegg_compound': ('C00544', 'C00504')},
+    'Malic acid': {'hmdb_id': ('HMDB0031518', 'HMDB0000156'), 'kegg_compound': ('C00497', 'C00149'),
+                   'chebi_id': ('CHEBI:30796', 'CHEBI:30797')},
+    '2-Phosphoglycerate': {'hmdb_id': ('HMDB0000398', 'HMDB0003391')},
+    'Glycogen': {'hmdb_id': ('HMDB0000753', 'HMDB0000757')},
+    'Heme': {'hmdb_id': ('HMDB0000317', 'HMDB0003178')},
+    'beta-Hydroxybutyrate': {'hmdb_id': ('HMDB0000007', 'HMDB0000011')},
+    'Fructose-2,6-bisphosphate': {'hmdb_id': ('HMDB0001048', 'HMDB0001047')},
+    'Carbamoyl phosphate': {'hmdb_id': ('HMDB0002081', 'HMDB0001096'), 'chebi_id': ('CHEBI:17659', 'CHEBI:17672')},
+}
+
+
+def corrected_ids(name: str) -> dict[str, tuple[str, str]]:
+    """名称（按 :func:`lookup_metabolite_ids` 的规则解析）对应的已修正字段 {字段: (旧值, 新值)}；没有修正时为空。"""
+    found = lookup_metabolite_ids(name)
+    if found is None:
+        return {}
+    for key, fixes in CORRECTED_IDS.items():
+        if METABOLITE_DATABASE_IDS.get(key) is found:
+            return fixes
+    return {}
+
+
 _NORMALIZED_INDEX: dict[str, str] | None = None
 # 用于去除常见前缀的模式
 _STRIP_PREFIX_RE = re.compile(r'^[DLdl]-|^DL-|^\-')

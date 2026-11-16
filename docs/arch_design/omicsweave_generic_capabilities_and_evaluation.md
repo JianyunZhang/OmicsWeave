@@ -434,7 +434,7 @@
 | G3 | `core/statistics/moderated.py`（limma 方差压缩，从蛋白组移出，蛋白组结果不变）；`core/statistics/linear_model.py`（多特征最小二乘 + 方差压缩，支持缺失值，设计不满秩时说明原因）；`design.models`（公式 `~ a + b`、`~ a * b`，协变量自动加入；连续型数据层用上述模型，计数用 PyDESeq2）；有交互项时主效应对另一因素等权平均，`estimand_type` 才是真正的 pooled_main；差异结果增加 `estimand_type`、`n_total`；`design.adaptive_shrinkage` 时增加 `lfsr`（ash 正态混合版，证据画像据此计算方向可信度）；`qc/design_power.parquet`（样本量、组内标准差中位数、80% 功效下的最小可检出效应、秩检验可达最小 p） | 代谢组与 MFA 的两两比较仍不读协变量（公式模型中已读取）；转录组的公式模型不报告交互项 |
 | E5 | `stats/robustness.py`：入选特征逐只去掉样本后反号或减半记 `single_subject_driven`（写入 `flags` 与 `robustness.parquet`，并给出影响最大的样本）；以正态—正态收缩估计作为可信真实效应，给出功效、Type S 与 Type M；`flux_anchored` 增加 `single_subject_driven_layers` | 只看入选特征；计数数据用 log2 CPM 的组均值差，与 DESeq2 的估计不同 |
 | G8 | `derived` 配置与 `stats/derived.py`：sum、ratio、step_ratio（`source: network` 由 MFA 网络生成）、fraction、index（按丰度加权的链长 / 双键数）、module_score；各类型在“组织 × 比较”内单独校正；features 记 `definition`、`generated_from`、成员的最差鉴定等级；成员不足时不计算并说明原因；网络生成的 step_ratio 只作为关联读数进入 `flux_anchored`；派生特征同样进入公式模型、稳健性、逆转与复现 | 通路层面的派生特征待 G9 |
-| G7 | `core/refs.py` 与 `omicsweave refs list / build / audit`：基因、蛋白、代谢物三张知识表的生成器与审计；`validate` 在有结果包时报告登记号与数据不一致；`core/idmap/lipids.py`（LIPID MAPS 简写解析，含羟基、醚键、N-酰基与常见厂商写法）；代谢物注册表由 RefMet 生成（`build_metabolite_registry`）；“模型包”接口（`mappings/model_package.py`），证据构建器的反应知识改由模型包提供；同工酶加权（`isozyme.minor_share`） | 组织标志物表与同源映射（G1 的前置）；基因组尺度模型的基因—反应规则需另写模型包；代谢物名称查找仍以手写表为主，RefMet 注册表（整合用到的 642 个名称中 337 个匹配到 ID）先用于审计：与手写表有 22 处不一致，其中一部分只是立体异构的不同条目，另有明确的错配（如 HMG-CoA 写成 C00418 甲羟戊酸、甘油醛-3-磷酸写成 C00354 果糖-1,6-二磷酸、苹果酸写成 C00497 D-苹果酸），需逐条核对后修正 |
+| G7 | `core/refs.py` 与 `omicsweave refs list / build / audit`：基因、蛋白、代谢物三张知识表的生成器与审计；`validate` 在有结果包时报告登记号与数据不一致；`core/idmap/lipids.py`（LIPID MAPS 简写解析，含羟基、醚键、N-酰基与常见厂商写法）；代谢物注册表由 RefMet 生成（`build_metabolite_registry`）；“模型包”接口（`mappings/model_package.py`），证据构建器的反应知识改由模型包提供；同工酶加权（`isozyme.minor_share`） | 组织标志物表与同源映射（G1 的前置）；基因组尺度模型的基因—反应规则需另写模型包；代谢物名称查找仍以手写表为主，RefMet 注册表（整合用到的 642 个名称中 337 个匹配到 ID）先用于审计：与手写表有 22 处不一致。2026-11-16 逐条在 KEGG、HMDB（经 Metabolomics Workbench 与 PubChem）、ChEBI 核对：10 个条目是明确错配并已修正（如 HMG-CoA 原为 C00418 甲羟戊酸与 (S)-甲基丙二酰辅酶 A 的 ChEBI、甘油醛-3-磷酸原为 C00354 果糖-1,6-二磷酸、叶酸原为尿黑酸、苹果酸原为 D-苹果酸、糖原的 HMDB 原为 3-己酮），“Malic acid”随之从 FUMH_m / MDH_m / MDH_c 的 related 移到苹果酸所在的角色。旧结果包中运行器按旧表写入的错误 ID 由 `flux_anchored` 按 `CORRECTED_IDS` 只更正这些确定错误的值；在队列 A 上，证据等级不变，甲羟戊酸不再被当作 HMG-CoA（8 个格子少匹配 1 个），测得的苹果酸在苹果酸酶、柠檬酸合酶、PEPCK 等 6 个反应中被匹配到（84 个格子多匹配 1 个，此前被错误的 D-苹果酸 ID 挡住）；其余 12 处为同一化合物的立体异构体或异头物，登记在 `refs.ACCEPTED_METABOLITE_VARIANTS`，审计不再报告 |
 | E3 | `integration/evaluation/decoys.py`：丰度匹配的诱饵映射，按层与锚点状态汇总目标与诱饵支持率；`flux_anchored` 参数 `decoys`，种子登记在运行清单 | 只做反应 → 特征映射层；评估卡的其他指标（E1、E2）待 G3 的半合成框架 |
 | G6 | `omicsweave replicate` 与 `project.yaml` 的 `replication`：跨项目来源、组织名对应、方向性部分合取检验（Benjamini 与 Heller）与 BH、随机效应合并、跨层（蛋白对 RNA）对应、随机重排基线；结果写入项目级结果包 `_project/` | 证据画像读取 `replicated`（G5 第 4 项）尚未接入 |
 
@@ -474,3 +474,19 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 | [开发规划总纲](../omicsweave_theraweave_development_plan.md) | 结果模型、证据层与交换契约 |
 | [整合模块说明](../../src/omicsweave/integration/README.md) | 证据画像与整合模式的现状 |
 | [v2 打分矩阵技术文档（归档）](../history/integration_pipeline_evaluation_v2.md) | 已弃用的加和总分，仅供追溯 |
+
+未完成
+代谢物 ID 表的冲突只报告、未改。RefMet 注册表与手写表有 22 处不一致，其中几处是明确的错配：
+HMG-CoA 写成了 C00418（甲羟戊酸）；
+甘油醛-3-磷酸写成了 C00354（果糖-1,6-二磷酸）；
+苹果酸写成了 C00497（D-苹果酸）。
+
+其余多为立体异构体的不同条目，RefMet 并不总是更准。修正会改变整合中的代谢物匹配，所以我没有直接替换；下方可选择是否先修正这几处明确的错配。
+
+两个 DIO 课题的 samples.tsv 仍未登记 qc_flag。
+G1 需要先有组织标志物表，尚未开始。
+证据画像还没有读取复现结果（G5 第 4 项）。
+
+Batch 2 (G3, E5, G8, G7, E3, G6) is committed as adccea0 and fast-forwarded onto main; nothing pushed. 456 tests pass, and the DIO verification ran only in the scratchpad. Not done: the 22 metabolite ID conflicts RefMet found, qc_flag entries, G1, and G5 reading replication.
+
+Fix the clearly wrong metabolite IDs flagged by RefMet next?

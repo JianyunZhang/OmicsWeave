@@ -204,6 +204,39 @@ def metabolomics_frames(diff: pd.DataFrame, derived: pd.DataFrame | None = None)
                                          "lfsr": "lfsr"})
 
 
+_ANNOTATION_IDS = (("hmdb_id", "hmdb"), ("kegg_compound", "kegg_compound"), ("chebi_id", "chebi"))
+
+
+def refresh_metabolite_ids(diff: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """更正旧结果包中由错配 ID 表写入的代谢物 ID。
+
+    代谢组运行器按名称查代谢物 ID 表写入 HMDB / KEGG / ChEBI 列，而整合按 ID 优先匹配。ID 表中的错配修正后
+    （``metabolite_id_mapping.CORRECTED_IDS``），旧结果包里仍是错误的值，例如“Malic acid”写成 D-苹果酸，测得的苹果酸
+    因此匹配不到苹果酸脱氢酶。这里只把等于已知错误旧值的 ID 换成修正值，其他注释（含厂商给出的 ID）不动。
+    返回 (表, 有更正的行数)。
+    """
+    from omicsweave.core.idmap.metabolite_id_mapping import corrected_ids
+
+    if diff.empty or "feature_name" not in diff.columns or not any(c in diff.columns for _, c in _ANNOTATION_IDS):
+        return diff, 0
+    names = diff["feature_name"].astype(str)
+    fixes = {name: corrected_ids(name) for name in names.unique()}
+    if not any(fixes.values()):
+        return diff, 0
+    out = diff.copy()
+    changed = pd.Series(False, index=diff.index)
+    for key, column in _ANNOTATION_IDS:
+        if column not in out.columns:
+            continue
+        current = out[column].astype(object)
+        wrong = pd.Series([fixes[n].get(key, ("", ""))[0] for n in names], index=out.index)
+        right = pd.Series([fixes[n].get(key, ("", ""))[1] for n in names], index=out.index)
+        hit = wrong.ne("") & current.astype(str).eq(wrong)
+        out[column] = current.where(~hit, right)
+        changed |= hit
+    return out, int(changed.sum())
+
+
 def _transcriptomics_id_types(source: Path) -> dict[str, str]:
     types = {}
     for path in sorted(source.glob(f"omics/{Omics.TRANSCRIPTOMICS.value}/data/*/{META_FILE}")):
@@ -291,6 +324,9 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         raise RunError(f"{MODE.value} 需要 MFA 与至少 1 个其他组学的差异结果；结果包 {source.name} 中有：{found}。"
                        f"请先对启用的组学运行 omicsweave run（含 differential 步骤）")
     tables = {omics: read_differential(path) for omics, path in paths.items()}
+    reannotated = 0
+    if Omics.METABOLOMICS.value in tables:
+        tables[Omics.METABOLOMICS.value], reannotated = refresh_metabolite_ids(tables[Omics.METABOLOMICS.value])
     derived_path = source / "omics" / Omics.METABOLOMICS.value / "tables" / DERIVED_TABLE
     derived = read_differential(derived_path) if derived_path.is_file() else None
     empty = pd.DataFrame(columns=["contrast_id", "tissue", "feature_id", "evidence_level"])
@@ -345,6 +381,10 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     note = summary_note(reliability)
     if note:
         record.notes.append(note)
+    if reannotated:
+        record.notes.append(f"代谢组差异结果中 {reannotated} 行的代谢物 ID 是代谢物 ID 表修正前写入的错配值，"
+                            "已按修正值匹配（重新运行代谢组后不再需要）")
+    record.parameters["metabolite_ids_reannotated"] = reannotated
     if decoy_summary is not None and not decoy_summary.empty:
         rows = decoy_summary[decoy_summary["subset"] == "all_directional"]
         record.notes.append("诱饵映射（E3）的假证据比例：" + "；".join(

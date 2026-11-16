@@ -144,8 +144,27 @@ def audit_metabolite_ids(run_dir: Path) -> list[tuple]:
     return rows
 
 
-def audit_metabolite_table() -> list[tuple]:
-    """手写的代谢物 ID 表与 RefMet 注册表不一致的名称。"""
+# 已核对的不一致：手写表与 RefMet 指向同一化合物的不同条目（立体异构体、异头物或 HMDB 的重复条目），不再报告。
+# 键为（手写表中的名称, ID 类型），值为核对结论（2026-11-16，KEGG REST / Metabolomics Workbench / PubChem）。
+ACCEPTED_METABOLITE_VARIANTS: dict[tuple[str, str], str] = {
+    ("Glucose", "hmdb_id"): "HMDB0000122 与 HMDB0304632 都是 D-葡萄糖",
+    ("Fructose-6-phosphate", "hmdb_id"): "HMDB0003971 为 β-D-果糖-6-磷酸，同一化合物的异头物",
+    ("Fructose-1,6-bisphosphate", "kegg_compound"): "C05378 为 β-D-果糖-1,6-二磷酸，C00354 的异头物",
+    ("3-Phosphoglycerate", "hmdb_id"): "HMDB0000807 为外消旋体，HMDB0060180 为 D 构型",
+    ("Isocitrate", "hmdb_id"): "HMDB0001874 为 D-苏式异柠檬酸，HMDB0000193 为未指定构型",
+    ("Isocitric acid", "hmdb_id"): "同 Isocitrate",
+    ("NADP", "hmdb_id"): "HMDB0000217 与 HMDB0304435 都是 NADP",
+    ("beta-Hydroxybutyrate", "hmdb_id"): "HMDB0000011 与 HMDB0000357 都是 (R)-3-羟丁酸",
+    ("Carnitine", "kegg_compound"): "C00318 为 L-肉碱（生理构型），C00487 为未指定构型",
+    ("Sedoheptulose-7-phosphate", "hmdb_id"): "HMDB0001068 为 D-景天庚酮糖-7-磷酸，HMDB0258206 未指定构型",
+    ("Sedoheptulose 7-Phosphate", "hmdb_id"): "同 Sedoheptulose-7-phosphate",
+    ("Allantoin", "kegg_compound"): "C02350 为 (S)-尿囊素，C01551 未指定构型",
+}
+
+
+def audit_metabolite_table(include_accepted: bool = False) -> list[tuple]:
+    """手写的代谢物 ID 表与 RefMet 注册表不一致的名称；已核对为同一化合物不同条目的（
+    :data:`ACCEPTED_METABOLITE_VARIANTS`）默认不报告。"""
     from .idmap.metabolite_id_mapping import METABOLITE_DATABASE_IDS
 
     registry = _metabolite_registry()
@@ -155,6 +174,8 @@ def audit_metabolite_table() -> list[tuple]:
         if not entry or entry.get("status") != "matched":
             continue
         for kind, normalize in (("hmdb_id", _normalize_hmdb), ("kegg_compound", _normalize_kegg)):
+            if not include_accepted and (name, kind) in ACCEPTED_METABOLITE_VARIANTS:
+                continue
             written, expected = normalize((ids or {}).get(kind)), normalize(entry.get(kind))
             if written and expected and not written & expected:
                 rows.append(("metabolite_table", "metabolomics", "", name, name, ";".join(sorted(written)),
