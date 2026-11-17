@@ -1,7 +1,7 @@
 # OmicsWeave 通用多组学分析与评估能力：从 DIO 案例提炼的改进规划
 
 > 文档类型：调研 + 设计建议
-> 版本：v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S4 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
+> 版本：v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
 > 依据：两个 DIO 队列在 2026-11-03 至 11-13 的分析与映射修复（阶段 0–3，提交 `75f0bb8` 至 `d72b2c7`），以及课题工作区中的评估记录
 > （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库）
 > 配套文档：[架构规划 v2](../omicsweave_arch_design_v2.md)、[OmicsWeave × TheraWeave 开发规划](../omicsweave_theraweave_development_plan.md)。
@@ -474,7 +474,7 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 | E7 登记的配置缺口 | 剩 3 项：`defaults.padj_method`、`defaults.random_seed`、`design.stratify_by`（11.2 中的 `factors.*.reference` 已不在缺口表中）；`design.covariates` 在代谢组与 MFA 的两两比较中仍未接入 | `tests/core/test_config_consumers.py` |
 | 代谢物名称查找 | 仍以手写表为主，RefMet 注册表用于审计。审计报出的 22 处不一致已全部处理：10 处修正，12 处登记为可接受的立体异构体或异头物 | 11.4 |
 | 批次 3（G9、G10、G12、E1、E2） | 未开始 | 11.1 |
-| 通路层面的完整展示（G13–G17、E8） | S0（G17，示例面板的 6 个反应）、S1（成员行与 `reaction_dossier` 模式）、S2（其他来源、逐只动物表、通路面板、图 A–C 与导出表）、S3（分轴综合评估与结论等级）、S4（E8 校准：诱饵、对照集、不变性检查）已实施；S4 的组别置换待 E1，S5、S6 待实施 | [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) 8.1 |
+| 通路层面的完整展示（G13–G17、E8） | S0（G17，示例面板的 6 个反应）、S1（成员行与 `reaction_dossier` 模式）、S2（其他来源、逐只动物表、通路面板、图 A–C 与导出表）、S3（分轴综合评估与结论等级）、S4（E8 校准：诱饵、对照集、不变性检查）、S5（G16：节点分流比、模块旋转检验、交叉点分析、图 D）已实施；S4 的组别置换待 E1，S5 的标记层分流比待 G10，S6 待实施。G9 可复用 S5 的旋转检验（`core/statistics/rotation.py`） | [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) 8.1 |
 
 ---
 
@@ -486,4 +486,4 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 | [开发规划总纲](../omicsweave_theraweave_development_plan.md) | 结果模型、证据层与交换契约 |
 | [整合模块说明](../../src/omicsweave/integration/README.md) | 证据画像与整合模式的现状 |
 | [v2 打分矩阵技术文档（归档）](../history/integration_pipeline_evaluation_v2.md) | 已弃用的加和总分，仅供追溯 |
-| [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) | G13–G17、E8：通路层面的完整展示与不做加和的评估方案（S0–S4 已实施） |
+| [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) | G13–G17、E8：通路层面的完整展示与不做加和的评估方案（S0–S5 已实施） |

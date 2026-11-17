@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
-> 文档类型：设计建议（S0–S4 已实施，S5–S6 待实施；S4 的组别置换待 E1）
-> 版本：v0.6（2026-11-17，8.1 增加 S4 记录，第 6 节写出校准表的列，第 7 节写出对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
+> 文档类型：设计建议（S0–S5 已实施，S6 待实施；S4 的组别置换待 E1，S5 的标记层待 G10）
+> 版本：v0.7（2026-11-17，8.1 增加 S5 记录，第 6 节写出 S5 新增的列；v0.6 同日增加 S4 记录、校准表的列与对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -418,8 +418,10 @@ x  不可辨识      !  样本不足      /  未测或未输注      ?  映射�
 **`tables/panel_elements.parquet`**：`panel_id`、`order`、`element_type`（`metabolite`、`reaction`）、`element_id`、`label`、`segment`、`branch_node`、`exit_label`。
 
 **`tables/node_split.parquet`**：`panel_id`、`node`、`exit_a`、`exit_b`、`layer`、`source`、`tissue`、`contrast_id`、`log_ratio_change`、`se`、`pvalue`、`padj`、`n_numerator`、`n_denominator`。
+S5 另加 `tracer`（通量按示踪剂分行）、`state`、`members_a`、`members_b`、`detail`；逐只动物的分流比在 `tables/node_split_samples.parquet`。
 
 **`tables/pathway_tests.parquet`**：`panel_id`、`test`（`signed_module`、`crossover`）、`layer`、`source`、`tissue`、`contrast_id`、`statistic`、`pvalue`、`padj`、`direction`、`members`、`detail`。
+S5 另加 `name`（模块名或反应）、`n_members`、`flags`。
 
 **`evaluation/assessment_calibration.parquet`**：按（组织, 比较, 等级或轴状态）给出目标数、诱饵期望数、置换期望数、对照集符合率。
 S4 实现的列：`method`（`decoy`、`control_positive`、`control_negative`、`invariance`、`permutation`）、`tissue`、`contrast_id`（全部时为空）、
@@ -558,7 +560,7 @@ Dld 不再作为方向成员）。
 | 逐只动物表 | `dossier_samples.parquet`：成员表引用到的特征在各数据集中的值（计数为 log2(CPM + 1)，强度、峰面积为 log2，通量为线性）；组别为该数据集中有变化的动物层因素的组合（队列 A 为 diet，队列 B 为 diet·treatment，MFA 另有 duration），按因素水平排序；MFA 样本带示踪剂。`dossier_sample_contrasts.parquet`：各比较的分子 / 分母样本（含 subset） | 逐只动物的贴边标记 `at_bound`：MFA 流程在内部表中有，结果包的数据集中没有，为空；通量数据集的单位仍为 TBD。两者都应在 MFA 导出时补上 |
 | 通路面板 | `panels.yaml`（课题目录，参数 `panels` 相对实验目录）由 `integration/dossier/panels.py` 解析：反应必须在 MFA 网络中、不得重复，`expected_tracers` 与分支节点必须指向面板中的反应；代谢物节点由网络化学计量补全（辅因子除外，相邻反应共享的节点只出现一次），写入 `panel_elements.parquet` | `omicsweave panels suggest`（由 KEGG 或网络路径生成草稿）未做；`validate` 尚不检查面板声明（运行时报错） |
 | 矩阵视图与导出表 | `integration/dossier/view.py`：每个（面板, 组织, 比较）× 行 × 列的格子都由 `dossier_members` 汇总；导出 `matrix_<比较>.tsv`（宽表：每格的值、状态、通过数 / 测到数）、`matrix_<比较>_members.tsv`（成员行）与同名 `.xlsx`（两页）。多成员格子只作展示汇总：酶取同工酶按丰度占比加权的 log2FC（复合体取中位数，共用亚基不计入），调控取 log2FC 乘以作用方向的中位数（方向未知的只计个数）；判定在 S3 | 第五块评估列在 S3 加入；超过 15 个反应时按分段拆图 |
-| 图 | `plotting/dossier_plots.py`：图 A（颜色为 log2FC，蓝降红升、零点中性灰、截断于 ±2；点的大小为方向可信度，点下写 log2FC 的值；FDR 描边、同时达到效应量阈值的描边更粗；八种状态各有固定符号；每块内的列按来源排在一起，上方一行写来源名；预期示踪剂为虚线框；图注写来源与运行 ID），图 B（每个成员一个面板，横轴为数据中的全部组别，当前比较的分子 / 分母组着色；每个分区内每个来源另起一行，行首写来源名），图 C（每个比较一张：示踪剂 × 反应的可辨识性，格内为该比较两组的动物数，与图 A 的通量列取自同一批行；预期示踪剂为虚线框）。PDF 中的中文字体（微软雅黑、黑体）在本机的 fontTools 4.68 下不能按 Type 42 子集化，改用 Type 3 嵌入（文字不可编辑） | 图 D（节点分流）在 S5；图 E（示意图叠加）在后期 |
+| 图 | `plotting/dossier_plots.py`：图 A（颜色为 log2FC，蓝降红升、零点中性灰、截断于 ±2；点的大小为方向可信度，点下写 log2FC 的值；FDR 描边、同时达到效应量阈值的描边更粗；八种状态各有固定符号；每块内的列按来源排在一起，上方一行写来源名；预期示踪剂为虚线框；图注写来源与运行 ID），图 B（每个成员一个面板，横轴为数据中的全部组别，当前比较的分子 / 分母组着色；每个分区内每个来源另起一行，行首写来源名），图 C（每个比较一张：示踪剂 × 反应的可辨识性，格内为该比较两组的动物数，与图 A 的通量列取自同一批行；预期示踪剂为虚线框）。PDF 中的中文字体（微软雅黑、黑体）在本机的 fontTools 4.68 下不能按 Type 42 子集化，改用 Type 3 嵌入（文字不可编辑） | 图 D（节点分流）在 S5 实现；图 E（示意图叠加）在后期 |
 
 在队列 A 上（scratch 目录中进行，队列 B 的结果包只读）：
 
@@ -626,6 +628,34 @@ suggestive 指向降；L0，现有示踪剂都不能约束它）。PC_m 为 L0�
 使特征索引的缓存（按数据表对象缓存）失效，每个反应都要重建一遍整张表的索引。子集改为按数据表缓存
 （`feature_resolver.measured_metabolites`，`flux_anchored` 与 E3 诱饵共用）后，肝脏一次诱饵重复由 363 秒降至 15 秒，
 目标档案由 50 秒降至 5 秒；含 3 次诱饵的全量运行为 6.8 分钟，五张表（成员行、逐只动物、两张评估表、校准表）与修正前逐值相同。
+
+**S5（2026-11-17）**：G16 通路层的综合读数，`integration/dossier/pathway.py`；旋转检验在 `core/statistics/rotation.py`（供 G9 共用）。
+只在面板声明的范围内进行：`branch_nodes` 给出分流比，`signed_modules` 给出模块检验，面板的反应顺序给出交叉点分析。
+
+| 项目 | 实现 | 与 3.8、3.9 的差别或未做的部分 |
+|---|---|---|
+| 节点分流比（M6） | `tables/node_split.parquet`（每个节点的每一对出口 × 层 × 来源 × 组织 × 比较，通量按示踪剂分行）与 `tables/node_split_samples.parquet`（逐只动物值）。酶：两个出口反应的执行者（规则同图 A 的酶格子：直接酶，没有时为载体，共用亚基不计入），各自在线性尺度上求和后取 log2 相减，与 G8 `ratio` 的定义相同；两个出口共有的特征从两边去掉并写明。代谢物：出口反应在节点另一侧的主要代谢物（一个代谢物多个特征时取中位强度最高的一个）。通量：以节点为底物的出口反应的逐只动物净通量之和取 log2 之比，任一出口在该示踪剂、该比较上不可辨识或样本不足时不计算（来源没有分示踪剂结果时取合并估计的状态），和不为正时比值没有定义。组间差异用两组线性模型（`fit_contrasts`，分流比特征很少，不做方差压缩），BH 在（面板, 层, 来源, 组织, 比较）内 | 不经过 G8 写入组学结果包：G8 在 `omicsweave run` 时计算，档案只读结果包，所以在档案中按同一定义与同一检验引擎计算。尺度用 log2 而非 ln。标记层待 G10。状态：computed、not_measured、not_detected、not_identifiable、insufficient_n、same_members |
+| 预先定号的模块检验（M7） | `tables/pathway_tests.parquet`（`test = signed_module`）：每个模块在蛋白层与 RNA 层、每个来源、组织、比较做旋转检验（limma `roast` 的 mean 统计量：逐基因 moderated t 换算成 z，乘以声明的符号后取平均；9999 次旋转）。limma 先验取该数据集全部完整特征（RNA 去掉中位 log2(CPM + 1) < 1 的低表达基因）。基因按与成员表相同的规则匹配（别名、UniProt），一个基因多个特征时取中位强度最高的一个；未匹配、有缺失值的成员写入 `detail`。双侧 p，`direction` 为 `as_declared` 或 `opposite` | RNA 用 log2(CPM + 1)，没有 voom 权重。在合成数据上，零假设下 p < 0.05 的比例为 0.04–0.05，符号全部取反时 p 相同、方向相反 |
+| 交叉点分析（M7） | `test = crossover`：面板中每个反应一行。单底物、单产物（去掉辅因子）的步骤比较上游与下游代谢物：上游升、下游降为 `restricted`，上游降、下游升为 `activated`，同向为 `concordant`。p 为两种模式中较小的合取 p（两个单侧 p 的最大值）乘以 2，多个特征的单侧 p 取 Simes 合并；BH 在（面板, 来源, 组织, 比较）内。流动方向：该反应的合并通量可辨识且两组均值同号时按其符号，否则按书写方向假定（`assumed_direction`）；`flags` 标出 `branch`、`cofactor_coupled`、`reversed` | 两侧为同一代谢物（数据不区分区室，如 PYR_trans）、多底物或多产物、代谢物未测得的步骤不检验，原因写入 `detail` |
+| 图 D 与导出表 | `figures/<面板>/<组织>/node_split_<比较>`：每个（节点, 出口对, 来源）一行，各层（通量按示踪剂）的逐只动物分流比并排，比较的两组着色；不能计算的格子保留面板并写明原因，来源没有的层写“not in source”。同目录下 `node_split_<比较>.tsv` 与 `pathway_tests_<比较>.tsv` | 设计中按节点分文件（`node_split_<节点>`），实现为每个比较一张、每个节点一行 |
+
+验证：新增 12 项测试（`tests/integration/test_dossier_pathway.py`：旋转检验的符号翻转与零分布、先验与输入检查；合成分支节点上设定的分流变化在蛋白层与
+代谢物层被检出、两个出口同比例变化时不被检出、共有特征去掉、节点自身不计入、不可辨识的出口通量；模块声明取反时 p 相同方向相反、未匹配成员的记录；
+交叉点的三种模式、流动方向相反时模式互换、同一代谢物与未测得的步骤；模块声明错误；模式在合成结果包上写出三张表、图 D 与导出表）；
+全部测试 530 通过、3 跳过（需要课题数据）。
+
+在队列 A 与 B 上（面板 `liver_pyruvate`，肝脏 HFD_vs_LFD，scratch 目录中进行）：
+
+| 读数 | 结果 |
+|---|---|
+| PYR_m 分流（a = 羧化 PC_m，b = 氧化 PDH_m） | 蛋白（A）：Δlog2(a/b) +0.55，p 0.004；RNA（A）+0.69，p 0.019；RNA（B）+0.23，p 0.65。通量：A 的葡萄糖示踪两个出口都不可辨识，甘油示踪 PDH_m 不可辨识，乳酸示踪每组只有 1–2 只；B 样本不足。代谢物：乙酰辅酶 A 未检出 |
+| 模块 gluconeogenic_routing（+Pcx、Pck1、G6pc；−Pklr、Gck） | 蛋白（A）按声明方向，p 0.003（5 个成员中 4 个 z > √2）；RNA（A）反向，p 0.71；RNA（B）反向，p 0.45 |
+| 交叉点 | 队列 B：PC_m 为 restricted（丙酮酸 +0.87、草酰乙酸 −0.25，padj 0.047），PEPCK_c 为 activated（草酰乙酸 −0.25、磷酸烯醇式丙酮酸 +0.69，padj 0.047），两者的流动方向都是假定的。队列 A 的 4 个可检验步骤都是同向变化。PYR_trans 两侧为同一代谢物，PDH_m 的乙酰辅酶 A 未检出 |
+
+蛋白层的分流比与模块检验都指向肝脏的酶容量在 HFD 中向羧化与糖异生一侧重排，但 RNA 只在队列 A 中同向（分流比）、队列 B 不复现，通量层不能检验。
+按第 3 节的规则，这是酶容量层面的预测（与 L1 同一性质），需要能约束 PC 与 PDH 的示踪剂（乳酸、丙氨酸，见图 C）来检验。
+
+运行时间：不含诱饵的全量运行（两个来源、162 个反应）为 2.0 分钟（S3 时约 16 分钟；差别来自 S4 的代谢物子集缓存）。
 
 ---
 

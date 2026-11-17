@@ -161,6 +161,12 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
     统计 L1、C 轴 changed、C 轴 changed 且 M 轴同向的目标数与诱饵期望；面板声明的 `controls`（阳性对照写方向与所看的结论或轴，
     阴性对照预期不变）给出符合率；不变性检查在实际数据上翻转通量符号、逐层删除，确认各轴互不依赖。组别置换需要 E1，记为未运行。
     摘要写入运行备注，图 A 的图注写出诱饵对照。
+  - 通路层的综合读数（S5，G16，`integration/dossier/pathway.py`）：面板声明 `branch_nodes` 时给出节点分流比
+    （`tables/node_split.parquet` 与逐只动物的 `node_split_samples.parquet`：酶、代谢物、各示踪剂的通量，同一只动物内两个出口
+    之比，定义同 G8 `ratio`，两组线性模型检验）；声明 `signed_modules` 时在蛋白层与 RNA 层做带符号的旋转检验
+    （`core/statistics/rotation.py`，limma `roast` 的 mean 统计量，供 G9 共用；参数 `pathway.rotations`、`pathway.seed`）；
+    面板中单底物、单产物的步骤做交叉点分析（上游升、下游降为 restricted）。后两者写入 `tables/pathway_tests.parquet`。
+    图 D `node_split_<比较>` 与同名 TSV、`pathway_tests_<比较>.tsv` 在面板的图目录中。标记层的分流比待 G10。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度

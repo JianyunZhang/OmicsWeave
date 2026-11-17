@@ -124,6 +124,21 @@ def _metabolite_key(name: str) -> str:
     return members[0].key if members else f"name:{name.lower()}"
 
 
+def species_key(species: str, keys: dict[str, str]) -> str:
+    """网络物种（如 ``PYR_m``）→ 代谢物的标准键；``keys`` 为调用方持有的缓存。区室不区分（数据中同一个特征）。"""
+    base = split_metabolite(species)[0]
+    return keys.setdefault(base, _metabolite_key(species_labels().get(base, base)))
+
+
+def node_members(rows: pd.DataFrame, species: str, keys: dict[str, str]) -> pd.DataFrame:
+    """成员行中属于某个代谢物节点的底物 / 产物行：有测得特征时按特征去重，否则按成员去重（保留未检出等状态）。"""
+    key = species_key(species, keys)
+    part = rows[(rows["layer"] == "metabolomics") & rows["role"].isin(("substrate", "product"))]
+    part = part[part["member_id"].map(lambda m: keys.setdefault(f"member:{m}", _metabolite_key(str(m)))) == key]
+    measured = part[part["feature_id"].notna() & part["feature_id"].astype(str).ne("")]
+    return measured.drop_duplicates("feature_id") if not measured.empty else part.drop_duplicates("member_id")
+
+
 def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tissue: str, contrast: str,
                 sources: list[str], tracers: Iterable[str] = (),
                 assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None) -> pd.DataFrame:
@@ -187,17 +202,10 @@ def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tis
             if assessment is not None:
                 _assessment_cells(add, element, assessment, reaction, tissue, contrast, sources[0])
         else:
-            base = split_metabolite(element["element_id"])[0]
-            key = keys.setdefault(base, _metabolite_key(species_labels().get(base, base)))
             for source in sources:
                 if "metabolomics" not in layers_by_source[source]:
                     continue
-                part = cell_rows[(cell_rows["source"] == source) & (cell_rows["layer"] == "metabolomics")
-                                 & cell_rows["role"].isin(("substrate", "product"))]
-                part = part[part["member_id"].map(lambda m: keys.setdefault(f"member:{m}", _metabolite_key(str(m))))
-                            == key]
-                measured = part[part["feature_id"].notna() & part["feature_id"].astype(str).ne("")]
-                part = measured.drop_duplicates("feature_id") if not measured.empty else part.drop_duplicates("member_id")
+                part = node_members(cell_rows[cell_rows["source"] == source], element["element_id"], keys)
                 add(element, "pool", f"M:{source}", source, "metabolomics", "", summarize(part))
     view = pd.DataFrame(records)
     for column in VIEW_COLUMNS:

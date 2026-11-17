@@ -13,7 +13,7 @@
     segments: [{name, reactions: [...]}]           # 自上而下的阅读顺序
     branch_nodes: [{node: PYR_m, exits: {出口名: [反应...]}}]
     expected_tracers: {反应: [示踪剂...]}
-    signed_modules: {模块: {plus: [...], minus: [...]}}
+    signed_modules: {模块: {plus: [...], minus: [...]}}   # 基因符号；S5 在蛋白层与 RNA 层做带符号的旋转检验
     controls: {positive: [...], negative: [...]}   # 校准（S4）的对照：反应 ID，或 {reaction, direction, tissue, contrast, axis}
 """
 from __future__ import annotations
@@ -133,6 +133,12 @@ def load_panels(path: str | Path) -> dict[str, Panel]:
         stray = sorted({c["reaction"] for c in panel.controls} - set(panel.reactions))
         if stray:
             raise PanelError(f"{where}：controls 中的反应 {stray} 不在面板中")
+        for module, signs in panel.signed_modules.items():
+            both = sorted(set(signs["plus"]) & set(signs["minus"]))
+            if both:
+                raise PanelError(f"{where}：signed_modules.{module} 中 {both} 同时在 plus 与 minus 中")
+            if not signs["plus"] and not signs["minus"]:
+                raise PanelError(f"{where}：signed_modules.{module} 没有成员")
         nodes = {s for r in panel.reactions for s in (*network[r].substrates, *network[r].products)}
         for node in panel.branch_nodes:
             exits = {str(r) for rs in (node.get("exits") or {}).values() for r in rs}

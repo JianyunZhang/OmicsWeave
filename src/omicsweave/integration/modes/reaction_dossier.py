@@ -40,6 +40,10 @@
 - ``evaluation/assessment_calibration.parquet``：判定规则的校准（S4，E8，见
   :mod:`omicsweave.integration.dossier.calibration`；参数 ``calibration``：``decoys`` 诱饵重复次数，默认 0 不运行；
   ``seed``；``invariance`` 在实际数据上做不变性检查）；面板声明 ``controls`` 时含对照集的符合率；图 A 的图注写出诱饵对照；
+- 面板声明 ``branch_nodes`` / ``signed_modules`` 时：``tables/node_split.parquet``、``tables/node_split_samples.parquet``
+  与 ``tables/pathway_tests.parquet``（S5，G16：节点分流比、带符号的模块旋转检验、交叉点分析，见
+  :mod:`omicsweave.integration.dossier.pathway`；参数 ``pathway``：``rotations``、``seed``），图 D ``node_split_<比较>``
+  与同名导出表；
 - ``qc/contrast_reliability.parquet``（各来源的可靠性表）。
 """
 from __future__ import annotations
@@ -52,17 +56,20 @@ import numpy as np
 import pandas as pd
 from scipy.stats import t as student_t
 
-from omicsweave.contract.dataset import META_FILE
+from omicsweave.contract.dataset import META_FILE, read_dataset
 from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
+from omicsweave.stats.data import analysis_values
 
 from ..dossier import calibration as cal
+from ..dossier import pathway as pw
 from ..dossier.assessment import RULES as ASSESSMENT_RULES, assess
 from ..evaluation.decoys import _Pool as DecoyPool
+from ..mappings.feature_resolver import _canonical_gene_symbol, match_gene_features, match_protein_features
 from ..mappings.model_package import DecoyPackage
 from ..dossier.panels import Panel, PanelError, load_panels, panel_elements
-from ..dossier.samples import contrast_samples, dossier_samples
+from ..dossier.samples import _dataset_dir, contrast_samples, dossier_samples
 from ..dossier.sources import DossierSource, other_source, primary_source
 from ..dossier.view import export_matrix, matrix_view, member_table
 from ..integrate import IntegrationRun, mode_dir
@@ -79,7 +86,9 @@ DEFAULTS: dict[str, Any] = {**{key: fa.DEFAULTS[key] for key in SHARED}, "tracer
                             "rules": {k: v for k, v in ASSESSMENT_RULES.items() if k != "minor_share"},
                             "sources": [], "panels": "", "figures": {"formats": ["pdf", "png"], "max_reactions": 15},
                             # E8：诱饵重复次数（0 为不运行，每次约等于再建一遍成员行）、随机种子、是否在实际数据上做不变性检查
-                            "calibration": {"decoys": 0, "seed": 20261117, "invariance": True}}
+                            "calibration": {"decoys": 0, "seed": 20261117, "invariance": True},
+                            # S5：模块旋转检验的旋转次数与随机种子
+                            "pathway": {"rotations": 9999, "seed": 20261117}}
 DOSSIER_TABLE = "dossier_members.parquet"
 SAMPLES_TABLE = "dossier_samples.parquet"
 SIDES_TABLE = "dossier_sample_contrasts.parquet"
@@ -87,6 +96,9 @@ ELEMENTS_TABLE = "panel_elements.parquet"
 AXIS_TABLE = "axis_assessment.parquet"
 ASSESSMENT_TABLE = "reaction_assessment.parquet"
 CALIBRATION_TABLE = "assessment_calibration.parquet"
+NODE_SPLIT_TABLE = "node_split.parquet"
+NODE_SPLIT_SAMPLES = "node_split_samples.parquet"
+PATHWAY_TESTS_TABLE = "pathway_tests.parquet"
 INVARIANCE_FALLBACK = 30          # 没有面板时，不变性检查取前 30 个反应
 Z95 = 1.959963984540054              # ci_lower / ci_upper 的 95% 区间
 
@@ -126,11 +138,12 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
         raise RunError(f"integration.parameters.{MODE.value}.rules 中有无法识别的阈值：{'、'.join(bad_rules)}"
                        f"（可用：{'、'.join(DEFAULTS['rules'])}）")
     params["rules"] = {**DEFAULTS["rules"], **(parameters.get("rules") or {})}
-    bad = sorted(set(parameters.get("calibration") or {}) - set(DEFAULTS["calibration"]))
-    if bad:
-        raise RunError(f"integration.parameters.{MODE.value}.calibration 中有无法识别的项：{'、'.join(bad)}"
-                       f"（可用：{'、'.join(DEFAULTS['calibration'])}）")
-    params["calibration"] = {**DEFAULTS["calibration"], **(parameters.get("calibration") or {})}
+    for group in ("calibration", "pathway"):
+        bad = sorted(set(parameters.get(group) or {}) - set(DEFAULTS[group]))
+        if bad:
+            raise RunError(f"integration.parameters.{MODE.value}.{group} 中有无法识别的项：{'、'.join(bad)}"
+                           f"（可用：{'、'.join(DEFAULTS[group])}）")
+        params[group] = {**DEFAULTS[group], **(parameters.get(group) or {})}
     params["inherited_from_flux_anchored"] = sorted(inherited)
     return params
 
@@ -575,11 +588,21 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
                             samples, sides, expected, rules, panels)
     (base / "evaluation").mkdir(parents=True)
     calibration.to_parquet(base / "evaluation" / CALIBRATION_TABLE, index=False)
+
+    # 通路层的综合读数（S5，G16）
+    pathway = None
+    if panels:
+        pathway, module_dirs = pathway_readouts(panels, dossier, samples, sides, contexts, params)
+        dataset_dirs += module_dirs
+        pathway["splits"].to_parquet(out / NODE_SPLIT_TABLE, index=False)
+        pathway["split_samples"].to_parquet(out / NODE_SPLIT_SAMPLES, index=False)
+        pathway["tests"].to_parquet(out / PATHWAY_TESTS_TABLE, index=False)
     panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params,
-                                (axes, reactions_assessed), calibration) if panels else []
+                                (axes, reactions_assessed), calibration, pathway) if panels else []
 
     inputs = [p for s in sources for p in s.inputs] + [p for c in contexts for p in c.inputs] \
-        + [d / name for d in dataset_dirs for name in ("matrix.parquet", META_FILE) if (d / name).is_file()]
+        + [d / name for d in dict.fromkeys(dataset_dirs) for name in ("matrix.parquet", META_FILE)
+           if (d / name).is_file()]
     record = IntegrationRun(MODE, inputs=inputs + ([panels_path] if panels_path else []),
                             parameters={**params, "label": label,
                                         "sources_resolved": {s.label: {"run": s.run_id, "layers": list(s.layers),
@@ -599,8 +622,91 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
                                                        for k in ("L3", "L2", "L1", "L0", "LX"))
                             + f"（{len(reactions_assessed)} 个反应 × 组织 × 比较）")
     record.notes += calibration_notes(calibration)
+    record.notes += pathway_notes(pathway)
     record.notes += panel_notes
     return record
+
+
+def _module_data(contexts: list[_Context]) -> tuple[Any, list[Path]]:
+    """模块检验的数据：按（来源, 层, 组织）读取分析尺度的数据集，基因按与成员表相同的规则匹配。"""
+    cache: dict[tuple[str, str, str], pw.ModuleData | None] = {}
+    read: list[Path] = []
+    by_label = {c.label: c for c in contexts}
+
+    def provide(source: str, layer: str, tissue: str) -> pw.ModuleData | None:
+        key = (source, layer, tissue)
+        if key in cache:
+            return cache[key]
+        ctx, out = by_label[source], None
+        frames = ctx.frames.get(layer, {})
+        frame = next((per[tissue] for per in frames.values() if tissue in per), None) \
+            if layer == Omics.TRANSCRIPTOMICS.value else frames.get(tissue)
+        directory = _dataset_dir(ctx.source, layer, tissue)
+        if frame is not None and directory.is_dir():
+            dataset = read_dataset(directory)
+            values = analysis_values(dataset)
+            matcher = match_gene_features if layer == Omics.TRANSCRIPTOMICS.value else match_protein_features
+            id_column = _FRAME_ID[layer][0]
+
+            def match(genes: list[str], frame=frame, matcher=matcher, id_column=id_column) -> dict[str, list[str]]:
+                found = matcher(frame, genes)
+                by_query: dict[str, list[str]] = {}
+                for index in found.indices:
+                    by_query.setdefault(found.query_by_index.get(index, ""), []).append(str(frame.at[index, id_column]))
+                return {g: by_query.get(_canonical_gene_symbol(g) or g, []) for g in genes}
+
+            # RNA：估计先验时去掉低表达基因（中位 log2(CPM + 1) < 1）
+            background = values.index[values.median(axis=1) >= 1.0] if dataset.meta.value_type.value == "counts" \
+                else None
+            out = pw.ModuleData(values, match, background)
+            read.append(directory)
+        cache[key] = out
+        return out
+
+    return provide, read
+
+
+def pathway_readouts(panels: dict[str, Panel], dossier: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataFrame,
+                     contexts: list[_Context], params: dict[str, Any]) -> tuple[dict[str, pd.DataFrame], list[Path]]:
+    """S5：每个面板的节点分流比、模块检验与交叉点分析。"""
+    labels = [c.label for c in contexts]
+    provide, read = _module_data(contexts)
+    tissues = {s: sorted(set(dossier.loc[dossier["source"] == s, "tissue"])) for s in labels}
+    contrasts = {s: sorted(set(dossier.loc[dossier["source"] == s, "contrast_id"])) for s in labels}
+    settings = params["pathway"]
+    splits, split_samples, tests = [], [], []
+    for panel in panels.values():
+        table, per_animal = pw.node_splits(panel, dossier, samples, sides, labels)
+        splits.append(table)
+        split_samples.append(per_animal)
+        tests.append(pw.signed_module_tests(panel, provide, sides, labels, tissues, contrasts,
+                                            int(settings["rotations"]), int(settings["seed"])))
+        tests.append(pw.crossover_tests(panel, dossier, labels))
+    combine = (lambda parts, columns: pd.concat([p for p in parts if not p.empty], ignore_index=True)
+               if any(not p.empty for p in parts) else pd.DataFrame(columns=columns))
+    return {"splits": combine(splits, pw.NODE_SPLIT_COLUMNS),
+            "split_samples": combine(split_samples, pw.SPLIT_SAMPLE_COLUMNS),
+            "tests": combine(tests, pw.TEST_COLUMNS)}, read
+
+
+def pathway_notes(pathway: dict[str, pd.DataFrame] | None) -> list[str]:
+    if not pathway:
+        return []
+    notes = []
+    splits, tests = pathway["splits"], pathway["tests"]
+    if not splits.empty:
+        computed = splits[splits["state"] == "computed"]
+        notes.append(f"节点分流比：{len(splits)} 个（节点 × 出口对 × 层 × 来源 × 组织 × 比较），计算了 {len(computed)} 个，"
+                     f"padj < 0.05 的 {int((computed['padj'] < 0.05).sum())} 个；其余状态 "
+                     + "、".join(f"{k} {v}" for k, v in splits.loc[splits["state"] != "computed", "state"]
+                                .value_counts().items()))
+    for test, label in (("signed_module", "模块检验"), ("crossover", "交叉点分析")):
+        part = tests[tests["test"] == test] if not tests.empty else tests
+        if part.empty:
+            continue
+        tested = part[part["pvalue"].notna()]
+        notes.append(f"{label}：{len(part)} 项，检验了 {len(tested)} 项，padj < 0.05 的 {int((tested['padj'] < 0.05).sum())} 项")
+    return notes
 
 
 def calibrate(builder: FluxEvidenceBuilder, contexts: list[_Context], params: dict[str, Any], reactions: list[str],
@@ -652,8 +758,9 @@ def calibration_notes(calibration: pd.DataFrame) -> list[str]:
 def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, samples: pd.DataFrame,
                   sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any],
                   assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None,
-                  calibration: pd.DataFrame | None = None) -> list[str]:
-    """面板的行表、矩阵视图与导出表、图 A / B / C。"""
+                  calibration: pd.DataFrame | None = None,
+                  pathway: dict[str, pd.DataFrame] | None = None) -> list[str]:
+    """面板的行表、矩阵视图与导出表、图 A / B / C / D。"""
     from ..plotting import dossier_plots
 
     figures = {**DEFAULTS["figures"], **(params.get("figures") or {})}
@@ -691,9 +798,30 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
                         continue
                     dossier_plots.plot_dossier_page(rows, samples, sides, reaction, tissue, contrast,
                                                     folder / f"dossier_{reaction}_{contrast}", formats, runs)
+                if pathway is not None:
+                    _render_pathway(pathway, panel, tissue, contrast, folder, sides, formats, runs, dossier_plots)
         notes.append(f"面板 {panel.id}：{len(panel.reactions)} 个反应，图与导出表在 integration/{MODE.value}/figures/{panel.id}/")
     pd.concat(elements_all, ignore_index=True).to_parquet(base / "tables" / ELEMENTS_TABLE, index=False)
     return notes
+
+
+def _render_pathway(pathway: dict[str, pd.DataFrame], panel: Panel, tissue: str, contrast: str, folder: Path,
+                    sides: pd.DataFrame, formats: list[str], runs: dict[str, str], dossier_plots: Any) -> None:
+    """图 D（节点分流）与通路层读数的导出表（该面板、组织、比较）。"""
+    def here(table: pd.DataFrame) -> pd.DataFrame:
+        return table[(table["panel_id"] == panel.id) & (table["tissue"] == tissue)
+                     & (table["contrast_id"] == contrast)] if not table.empty else table
+
+    splits, tests = here(pathway["splits"]), here(pathway["tests"])
+    folder.mkdir(parents=True, exist_ok=True)
+    if not splits.empty:
+        per_animal = pathway["split_samples"]
+        per_animal = per_animal[(per_animal["panel_id"] == panel.id) & (per_animal["tissue"] == tissue)]
+        dossier_plots.plot_node_split(splits, per_animal, sides, panel, tissue, contrast,
+                                      folder / f"node_split_{contrast}", formats, runs)
+        splits.to_csv(folder / f"node_split_{contrast}.tsv", sep="\t", index=False)
+    if not tests.empty:
+        tests.to_csv(folder / f"pathway_tests_{contrast}.tsv", sep="\t", index=False)
 
 
 def _chunks(panel: Panel, elements: pd.DataFrame, limit: int) -> list[pd.DataFrame]:

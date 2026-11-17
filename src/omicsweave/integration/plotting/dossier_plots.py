@@ -5,7 +5,8 @@
 
 - 图 A :func:`plot_matrix`：通路证据矩阵，只画 :func:`omicsweave.integration.dossier.view.matrix_view` 的表；
 - 图 B :func:`plot_dossier_page`：一个（反应, 组织, 比较）的档案页，每个成员一个面板，画出每只动物的点；
-- 图 C :func:`plot_tracer_coverage`：面板中各反应 × 示踪剂的可辨识性。
+- 图 C :func:`plot_tracer_coverage`：面板中各反应 × 示踪剂的可辨识性；
+- 图 D :func:`plot_node_split`：分支节点的分流比（各层的逐只动物点图并排）。
 
 编码（设计文档 4.5）：颜色为带符号的效应量（log2FC，蓝降红升，零点为中性灰，色阶固定并截断于 ±2）；点的大小为
 方向的确定程度；通过 FDR 的格子加描边（同时达到入选规则的描边更粗）；不可辨识、未测、未检出等状态各有固定的
@@ -386,6 +387,111 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
 
 
 # ---------------------------------------------------------------------------
+# 图 D
+# ---------------------------------------------------------------------------
+
+SPLIT_LAYER_NAMES = {"mfa": "flux", "proteomics": "enzyme P", "transcriptomics": "enzyme R", "metabolomics": "metabolite"}
+SPLIT_STATES = {"not_identifiable": "x", "insufficient_n": "!", "not_measured": "/", "not_detected": "?",
+                "same_members": "="}
+
+
+def _split_title(row: pd.Series) -> str:
+    head = SPLIT_LAYER_NAMES.get(row["layer"], row["layer"]) + (f" · {row['tracer']}" if row["tracer"] else "")
+    if row["state"] == "computed":
+        stats = f"Δ log2(a/b) {row['log_ratio_change']:+.2f}  p {row['pvalue']:.2g}"
+        if pd.notna(row.get("padj")):
+            stats += f"  q {row['padj']:.2g}"
+    else:
+        stats = row["state"]
+    members = f"a: {row['members_a'] or '—'} | b: {row['members_b'] or '—'}"
+    return f"{head}\n{stats}\n{textwrap.shorten(members, 46, placeholder='…')}"
+
+
+def _draw_split(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[str, str]) -> None:
+    ax.set_title(_split_title(row), fontsize=5.8, color=INK, loc="left", pad=3)
+    ax.tick_params(labelsize=5.5, colors=INK2, length=2)
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(HAIRLINE)
+    if data.empty or data["value"].notna().sum() == 0:
+        text = textwrap.fill(f"{SPLIT_STATES.get(row['state'], '')} {row.get('detail') or row['state']}".strip(), 24,
+                             break_long_words=False)
+        ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=5.5, color=MUTED, transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return
+    groups = data[["group", "group_order"]].drop_duplicates().sort_values("group_order")
+    positions = {g: i for i, g in enumerate(groups["group"])}
+    rng = np.random.default_rng(0)
+    for group, part in data.groupby("group", sort=False):
+        xs = positions[group] + rng.uniform(-0.12, 0.12, len(part))
+        colors = [NUMERATOR if sides.get(s) == "numerator" else DENOMINATOR if sides.get(s) == "denominator"
+                  else MUTED for s in part["sample_id"]]
+        ax.scatter(xs, part["value"], s=12, color=colors, edgecolors=SURFACE, linewidths=0.5, zorder=3)
+        median = part["value"].median()
+        if pd.notna(median):
+            ax.plot([positions[group] - 0.25, positions[group] + 0.25], [median, median], color=INK2, lw=0.8, zorder=2)
+    ax.set_xticks(range(len(positions)))
+    longest = max(map(len, positions))
+    ax.set_xticklabels(list(positions), rotation=45 if longest > 4 else 0, ha="right" if longest > 4 else "center")
+    ax.set_xlim(-0.6, len(positions) - 0.4)
+    ax.set_ylabel("log2(a / b)", fontsize=5.5, color=INK2)
+
+
+def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.DataFrame, panel: Panel, tissue: str,
+                    contrast: str, stem: Path, formats: Iterable[str] = ("pdf", "png"),
+                    runs: dict[str, str] | None = None) -> list[Path]:
+    """图 D：每个（节点, 出口对, 来源）一行，各层（通量按示踪剂）的逐只动物分流比并排。``splits`` 为该面板、组织、
+    比较的 node_split 行；不能计算的格子保留面板并写明原因。"""
+    layer_rank = {layer: i for i, layer in enumerate(SPLIT_LAYER_NAMES)}
+    columns = sorted({(r.layer, r.tracer) for r in splits.itertuples()},
+                     key=lambda c: (layer_rank.get(c[0], 9), c[1]))
+    keys = list(dict.fromkeys((r.node, r.exit_a, r.exit_b, r.source) for r in splits.itertuples()))
+    side_map = {(s.source, s.layer, s.sample_id): s.side
+                for s in sides[sides["contrast_id"] == contrast].itertuples()} if not sides.empty else {}
+    panel_w, panel_h, left = 1.85, 2.0, 1.45
+    width, height = left + panel_w * len(columns) + 0.3, 1.0 + panel_h * len(keys) + 0.5
+    with themed():
+        fig = plt.figure(figsize=(width, height), facecolor=SURFACE)
+        for i, (node, exit_a, exit_b, source) in enumerate(keys):
+            top = height - 1.0 - i * panel_h
+            fig.text(0.1 / width, (top - panel_h / 2 + 0.25) / height, f"{node}\na = {exit_a}\nb = {exit_b}\n{source}",
+                     fontsize=7, color=INK, va="center", ha="left", linespacing=1.4)
+            for j, (layer, tracer) in enumerate(columns):
+                hit = splits[(splits["node"] == node) & (splits["exit_a"] == exit_a) & (splits["exit_b"] == exit_b)
+                             & (splits["source"] == source) & (splits["layer"] == layer) & (splits["tracer"] == tracer)]
+                ax = fig.add_axes(((left + j * panel_w) / width, (top - panel_h + 0.5) / height, (panel_w - 0.55) / width,
+                                   (panel_h - 1.05) / height))
+                ax.set_facecolor(SURFACE)
+                if hit.empty:              # 该来源没有这一层（或这种示踪剂）：保留面板并写明，不留空白
+                    placeholder = pd.Series({"layer": layer, "tracer": tracer, "state": "not_measured",
+                                             "members_a": "", "members_b": "",
+                                             "detail": f"not in source {source}"})
+                    _draw_split(ax, placeholder, per_animal.iloc[0:0], {})
+                    continue
+                data = per_animal[(per_animal["node"] == node) & (per_animal["exit_a"] == exit_a)
+                                  & (per_animal["exit_b"] == exit_b) & (per_animal["source"] == source)
+                                  & (per_animal["layer"] == layer) & (per_animal["tracer"] == tracer)]
+                here = {sample: side for (src, lay, sample), side in side_map.items() if src == source and lay == layer}
+                _draw_split(ax, hit.iloc[0], data if hit.iloc[0]["state"] == "computed" else data.iloc[0:0], here)
+        fig.text(0.01, 1 - 0.25 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}  ·  node split",
+                 fontsize=10, color=INK, fontweight="bold", va="top")
+        fig.text(0.01, 1 - 0.55 / height, "per animal: log2 of exit a over exit b (enzymes and metabolites summed on the "
+                 "linear scale; flux = net flux of exit reactions consuming the node); bar = group median",
+                 fontsize=6.5, color=INK2, va="top")
+        handles = [Line2D([], [], marker="o", ls="", color=c, markersize=4) for c in (NUMERATOR, DENOMINATOR, MUTED)]
+        fig.legend(handles, [f"{contrast}: numerator", "denominator", "other groups"], loc="upper right",
+                   bbox_to_anchor=(0.99, 1 - 0.2 / height), ncol=3, fontsize=6, frameon=False)
+        legend = "   ".join(f"{g} {s.replace('_', ' ')}" for s, g in SPLIT_STATES.items())
+        fig.text(0.01, 0.3 / height, legend + "   labelled-isotope split awaits G10", fontsize=5.5, color=MUTED)
+        if runs:
+            fig.text(0.01, 0.12 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()),
+                     fontsize=5.5, color=MUTED)
+        return _save(fig, stem, formats)
+
+
+# ---------------------------------------------------------------------------
 # 图 C
 # ---------------------------------------------------------------------------
 
@@ -403,7 +509,7 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
     with themed():
         fig = plt.figure(figsize=(width, height), facecolor=SURFACE)
         ax = fig.add_axes((1.6 / width, 1.0 / height, (width - 1.9) / width, (height - 1.5) / height))
-        ax.set_xlim(-0.5, len(order) - 0.5)
+        ax.set_xlim(-0.5, max(len(order), 1) - 0.5)          # 没有示踪剂时保留一列宽的空图
         ax.set_ylim(len(reactions) - 0.5, -0.5)
         ax.set_xticks(range(len(order)))
         ax.set_xticklabels(order, fontsize=7, color=INK2)
