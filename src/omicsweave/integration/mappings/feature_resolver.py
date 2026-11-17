@@ -73,6 +73,7 @@ _NCBI_TO_GENE = dict(NCBI_TO_SYMBOL)
 _GENE_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
 _PROTEIN_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
 _METABOLITE_FEATURE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
+_MEASURED_METABOLITE_CACHE: dict[int, tuple[weakref.ReferenceType, Any]] = {}
 
 
 def _get_cached(
@@ -368,6 +369,21 @@ def match_protein_features(
     )
     return IdentifierMatch(tuple(matched_indices), matched_queries, methods,
                            {row_index: next(iter(selected_queries[row_index])) for row_index in matched_indices})
+
+
+def measured_metabolites(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """去掉派生特征（``feature_type`` 非空：脂质类别总量、质量作用比）后的代谢物行，供按名称 / ID 匹配。
+
+    子集按数据表缓存：每次新建的子集是新对象，会使 :func:`_metabolite_feature_index` 的缓存失效，
+    每个反应都要重建一遍整张表的索引。与缓存的其他部分相同，假定数据表建好后不再原地修改。
+    """
+    if "feature_type" not in dataframe.columns:
+        return dataframe
+    subset = _get_cached(_MEASURED_METABOLITE_CACHE, dataframe)
+    if subset is None:
+        subset = dataframe[dataframe["feature_type"].isna()]
+        _set_cached(_MEASURED_METABOLITE_CACHE, dataframe, subset)
+    return subset
 
 
 def _metabolite_feature_index(

@@ -156,6 +156,11 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
     （示踪剂矛盾）、机制类型（L2 及以上，按调控系数 ρ_h 的分层自助区间）、合取检验与字典序排名
     （`tables/reaction_assessment.parquet`）。没有加和总分。阈值在 `rules` 中（`flux_min_abs_g`、`heterogeneity_alpha`、
     `direction_stability_min`、`established_min_group`、`opposition_min_state` 等）。图 A 的评估块即这两张表。
+  - 判定规则的校准（S4，E8，`integration/dossier/calibration.py`）：`evaluation/assessment_calibration.parquet`。
+    诱饵（参数 `calibration.decoys`，默认 0 不运行）把直接酶与底物 / 产物换成同组织中丰度相近的随机特征后重跑判定，
+    统计 L1、C 轴 changed、C 轴 changed 且 M 轴同向的目标数与诱饵期望；面板声明的 `controls`（阳性对照写方向与所看的结论或轴，
+    阴性对照预期不变）给出符合率；不变性检查在实际数据上翻转通量符号、逐层删除，确认各轴互不依赖。组别置换需要 E1，记为未运行。
+    摘要写入运行备注，图 A 的图注写出诱饵对照。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度

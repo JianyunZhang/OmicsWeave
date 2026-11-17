@@ -31,6 +31,7 @@ from ..mappings import (
 from ..mappings.feature_resolver import (
     IdentifierMatch,
     _canonical_gene_symbol,
+    measured_metabolites,
     metabolite_member_of,
     metabolite_members,
 )
@@ -529,7 +530,7 @@ class FluxEvidenceBuilder:
         usable = frame is not None and not frame.empty and "compound" in frame.columns
         derived_idx = _derived_indices(flux_id, frame, self.package.lipid_pools(flux_id)) if usable \
             else {"substrates": [], "products": [], "related": []}
-        measured = frame[frame["feature_type"].isna()] if usable and "feature_type" in frame.columns else frame
+        measured = measured_metabolites(frame) if usable else frame
         match = match_metabolite_roles(measured, roles) if usable else None
         hits = match.indices_by_role if match else {"substrates": (), "products": (), "related": ()}
         all_idx = list(dict.fromkeys([*hits["substrates"], *hits["products"], *hits["related"],
@@ -1070,7 +1071,7 @@ class FluxEvidenceBuilder:
             return {"n_metabolites_checked": n_checked, "n_sig": 0, "sig_metabolites": [], "concordant_metabolites": [], "evidence_mode": "no_data"}
 
         # 派生特征不参与按名称 / ID 的匹配，只按反应注释挂到底物 / 产物 / 关联上
-        measured = metab_df[metab_df["feature_type"].isna()] if "feature_type" in metab_df.columns else metab_df
+        measured = measured_metabolites(metab_df)
         matched_roles = match_metabolite_roles(measured, roles)
         n_checked = sum(matched_roles.target_count_by_role.values()) + sum(map(len, derived_idx.values()))
         sub_idx = list(matched_roles.indices_by_role["substrates"]) + derived_idx["substrates"]

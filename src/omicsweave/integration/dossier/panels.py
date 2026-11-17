@@ -14,14 +14,14 @@
     branch_nodes: [{node: PYR_m, exits: {出口名: [反应...]}}]
     expected_tracers: {反应: [示踪剂...]}
     signed_modules: {模块: {plus: [...], minus: [...]}}
-    controls: {positive: [...], negative: [...]}
+    controls: {positive: [...], negative: [...]}   # 校准（S4）的对照：反应 ID，或 {reaction, direction, tissue, contrast, axis}
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 import yaml
@@ -50,7 +50,16 @@ class Panel:
     branch_nodes: list[dict[str, Any]] = field(default_factory=list)
     expected_tracers: dict[str, list[str]] = field(default_factory=dict)
     signed_modules: dict[str, dict[str, list[str]]] = field(default_factory=dict)
-    controls: dict[str, list[str]] = field(default_factory=dict)
+    controls: list[dict[str, Any]] = field(default_factory=list)   # 展开后的对照（每个组织、比较一条）
+
+    def expand_controls(self, tissues: Iterable[str], contrasts: Iterable[str]) -> list[dict[str, Any]]:
+        """对照中省略的组织 / 比较取面板声明的（面板也没写时取数据中的全部）。"""
+        out = []
+        for control in self.controls:
+            for tissue in [control["tissue"]] if control.get("tissue") else (self.tissues or list(tissues)):
+                for contrast in [control["contrast"]] if control.get("contrast") else (self.contrasts or list(contrasts)):
+                    out.append({**control, "tissue": tissue, "contrast": contrast})
+        return out
 
     @property
     def reactions(self) -> list[str]:
@@ -111,7 +120,7 @@ def load_panels(path: str | Path) -> dict[str, Panel]:
                       {str(k): [str(t) for t in v] for k, v in (spec.get("expected_tracers") or {}).items()},
                       {str(k): {s: [str(m) for m in (v or {}).get(s, [])] for s in ("plus", "minus")}
                        for k, v in (spec.get("signed_modules") or {}).items()},
-                      {str(k): [str(m) for m in v or []] for k, v in (spec.get("controls") or {}).items()})
+                      _controls(spec.get("controls") or {}, where))
         missing = [r for r in panel.reactions if r not in network]
         if missing:
             raise PanelError(f"{where}：反应 {missing} 不在 MFA 网络中")
@@ -121,6 +130,9 @@ def load_panels(path: str | Path) -> dict[str, Panel]:
         stray = sorted(set(panel.expected_tracers) - set(panel.reactions))
         if stray:
             raise PanelError(f"{where}：expected_tracers 中的反应 {stray} 不在面板中")
+        stray = sorted({c["reaction"] for c in panel.controls} - set(panel.reactions))
+        if stray:
+            raise PanelError(f"{where}：controls 中的反应 {stray} 不在面板中")
         nodes = {s for r in panel.reactions for s in (*network[r].substrates, *network[r].products)}
         for node in panel.branch_nodes:
             exits = {str(r) for rs in (node.get("exits") or {}).values() for r in rs}
@@ -128,6 +140,29 @@ def load_panels(path: str | Path) -> dict[str, Panel]:
                 raise PanelError(f"{where}：分支节点 {node.get('node')} 不是面板反应的代谢物，或出口反应不在面板中")
         panels[panel.id] = panel
     return panels
+
+
+CONTROL_AXES = ("claim", "flux", "capacity", "regulation", "pool")
+
+
+def _controls(spec: Any, where: str) -> list[dict[str, Any]]:
+    """``controls: {positive: [...], negative: [...]}``。每条为反应 ID，或 {reaction, direction（阳性必填：up / down），
+    tissue, contrast, axis（claim 或某条轴，默认 claim）}。"""
+    if not isinstance(spec, dict) or set(spec) - {"positive", "negative"}:
+        raise PanelError(f"{where}：controls 应为 {{positive: [...], negative: [...]}}")
+    out = []
+    for kind in ("positive", "negative"):
+        for item in spec.get(kind) or []:
+            entry = {"reaction": item} if isinstance(item, str) else dict(item or {})
+            entry = {**entry, "kind": kind, "axis": str(entry.get("axis") or "claim")}
+            if not entry.get("reaction"):
+                raise PanelError(f"{where}：controls.{kind} 的条目需要 reaction")
+            if kind == "positive" and entry.get("direction") not in ("up", "down"):
+                raise PanelError(f"{where}：阳性对照 {entry['reaction']} 需要 direction: up 或 down")
+            if entry["axis"] not in CONTROL_AXES:
+                raise PanelError(f"{where}：对照 {entry['reaction']} 的 axis 应为 {CONTROL_AXES} 之一")
+            out.append(entry)
+    return out
 
 
 def panel_elements(panel: Panel) -> pd.DataFrame:

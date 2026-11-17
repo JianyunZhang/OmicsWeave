@@ -37,6 +37,9 @@
   TSV / XLSX 导出表）、``dossier_<反应>_<比较>``（图 B）、``tracer_coverage_<比较>``（图 C）；
 - ``tables/axis_assessment.parquet`` 与 ``tables/reaction_assessment.parquet``：分轴综合评估（S3，见
   :mod:`omicsweave.integration.dossier.assessment`）；图 A 的评估块即这两张表；
+- ``evaluation/assessment_calibration.parquet``：判定规则的校准（S4，E8，见
+  :mod:`omicsweave.integration.dossier.calibration`；参数 ``calibration``：``decoys`` 诱饵重复次数，默认 0 不运行；
+  ``seed``；``invariance`` 在实际数据上做不变性检查）；面板声明 ``controls`` 时含对照集的符合率；图 A 的图注写出诱饵对照；
 - ``qc/contrast_reliability.parquet``（各来源的可靠性表）。
 """
 from __future__ import annotations
@@ -54,7 +57,10 @@ from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
 
+from ..dossier import calibration as cal
 from ..dossier.assessment import RULES as ASSESSMENT_RULES, assess
+from ..evaluation.decoys import _Pool as DecoyPool
+from ..mappings.model_package import DecoyPackage
 from ..dossier.panels import Panel, PanelError, load_panels, panel_elements
 from ..dossier.samples import contrast_samples, dossier_samples
 from ..dossier.sources import DossierSource, other_source, primary_source
@@ -71,13 +77,17 @@ SHARED = ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "iso
 DEFAULTS: dict[str, Any] = {**{key: fa.DEFAULTS[key] for key in SHARED}, "tracers": [], "reactions": [],
                             "tissues": [], "label": "",
                             "rules": {k: v for k, v in ASSESSMENT_RULES.items() if k != "minor_share"},
-                            "sources": [], "panels": "", "figures": {"formats": ["pdf", "png"], "max_reactions": 15}}
+                            "sources": [], "panels": "", "figures": {"formats": ["pdf", "png"], "max_reactions": 15},
+                            # E8：诱饵重复次数（0 为不运行，每次约等于再建一遍成员行）、随机种子、是否在实际数据上做不变性检查
+                            "calibration": {"decoys": 0, "seed": 20261117, "invariance": True}}
 DOSSIER_TABLE = "dossier_members.parquet"
 SAMPLES_TABLE = "dossier_samples.parquet"
 SIDES_TABLE = "dossier_sample_contrasts.parquet"
 ELEMENTS_TABLE = "panel_elements.parquet"
 AXIS_TABLE = "axis_assessment.parquet"
 ASSESSMENT_TABLE = "reaction_assessment.parquet"
+CALIBRATION_TABLE = "assessment_calibration.parquet"
+INVARIANCE_FALLBACK = 30          # 没有面板时，不变性检查取前 30 个反应
 Z95 = 1.959963984540054              # ci_lower / ci_upper 的 95% 区间
 
 COLUMNS = [
@@ -116,6 +126,11 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
         raise RunError(f"integration.parameters.{MODE.value}.rules 中有无法识别的阈值：{'、'.join(bad_rules)}"
                        f"（可用：{'、'.join(DEFAULTS['rules'])}）")
     params["rules"] = {**DEFAULTS["rules"], **(parameters.get("rules") or {})}
+    bad = sorted(set(parameters.get("calibration") or {}) - set(DEFAULTS["calibration"]))
+    if bad:
+        raise RunError(f"integration.parameters.{MODE.value}.calibration 中有无法识别的项：{'、'.join(bad)}"
+                       f"（可用：{'、'.join(DEFAULTS['calibration'])}）")
+    params["calibration"] = {**DEFAULTS["calibration"], **(parameters.get("calibration") or {})}
     params["inherited_from_flux_anchored"] = sorted(inherited)
     return params
 
@@ -405,6 +420,88 @@ def build_dossier(builder: FluxEvidenceBuilder, ctx: _Context, params: dict[str,
     return out[COLUMNS]
 
 
+def _decoy_packages(builder: FluxEvidenceBuilder, ctx: _Context, reactions: list[str], tissue: str,
+                    rng: np.random.Generator) -> dict[str, DecoyPackage]:
+    """一个组织的诱饵映射（E8）：每个反应的直接酶（没有时为载体）与底物 / 产物换成同一组织数据中丰度相近的随机特征
+    （E3 的抽样），数目与角色不变；每层一个模型包，各层的诱饵互不影响。"""
+    tx = next((per[tissue] for per in ctx.frames.get(Omics.TRANSCRIPTOMICS.value, {}).values() if tissue in per), None)
+    frames = {Omics.TRANSCRIPTOMICS.value: tx, Omics.PROTEOMICS.value: ctx.frames.get(Omics.PROTEOMICS.value, {}).get(tissue),
+              Omics.METABOLOMICS.value: ctx.frames.get(Omics.METABOLOMICS.value, {}).get(tissue)}
+    names = {Omics.TRANSCRIPTOMICS.value: "gene", Omics.PROTEOMICS.value: "protein",
+             Omics.METABOLOMICS.value: "compound"}
+    picked: dict[str, dict[str, Any]] = {layer: {} for layer in frames}
+    for layer, frame in frames.items():
+        if frame is None or frame.empty or names[layer] not in frame.columns:
+            continue
+        pool = DecoyPool(frame, layer)
+        for flux_id in reactions:
+            rows = builder.member_matches(layer, flux_id, frame)
+            matched = rows[rows["row"].notna()]
+            exclude = set(matched["row"])
+            if layer == Omics.METABOLOMICS.value:
+                roles = {}
+                for key, role in (("substrates", "substrate"), ("products", "product")):
+                    targets = list(matched.loc[(matched["layer"] == "metabolomics") & (matched["role"] == role), "row"])
+                    chosen = pool.sample(targets, exclude, rng)
+                    exclude |= set(chosen)
+                    roles[key] = frame.loc[chosen, names[layer]].astype(str).tolist()
+                if roles["substrates"] or roles["products"]:
+                    picked[layer][flux_id] = roles
+                continue
+            direct = matched[(matched["role"] == "direct_enzyme") & (matched["member_relation"] != "shared_subunit")]
+            if direct.empty:
+                direct = matched[matched["role"] == "carrier"]
+            chosen = pool.sample(list(direct["row"]), exclude, rng)
+            if chosen:
+                picked[layer][flux_id] = frame.loc[chosen, names[layer]].astype(str).tolist()
+    base = builder.package
+    return {Omics.TRANSCRIPTOMICS.value: DecoyPackage(base, genes=picked[Omics.TRANSCRIPTOMICS.value]),
+            Omics.PROTEOMICS.value: DecoyPackage(base, proteins=picked[Omics.PROTEOMICS.value]),
+            Omics.METABOLOMICS.value: DecoyPackage(base, metabolites=picked[Omics.METABOLOMICS.value])}
+
+
+def build_decoy_dossier(builder: FluxEvidenceBuilder, contexts: list[_Context], params: dict[str, Any],
+                        reactions: list[str], tissues: set[str] | None, seed: int) -> pd.DataFrame:
+    """一次诱饵重复的成员行：组学层换成诱饵映射（同一套诱饵名称用于所有来源），通量行与目标相同，不带派生比值。"""
+    rng = np.random.default_rng(seed)
+    base = builder.package
+    primary = contexts[0]
+    found = sorted({t for frames in primary.frames.values() for t in _tissues(frames)})
+    minor_share = float((params.get("isozyme") or {}).get("minor_share", 0.2))
+    records: list[dict[str, Any]] = []
+    try:
+        for tissue in found:
+            if tissues is not None and tissue not in tissues:
+                continue
+            packages = _decoy_packages(builder, primary, reactions, tissue, rng)
+            for ctx in contexts:
+                contrasts = sorted({c for frames in ctx.frames.values() for c in _contrasts(frames)}
+                                   | {key[1] for key in ctx.mfa["pooled"]})
+                tracers = [str(t) for t in params["tracers"]] if ctx.source.is_primary else []
+                for contrast in contrasts:
+                    if not [layer for layer, frames in ctx.frames.items()
+                            if _frame_for(layer, frames, tissue, contrast) is not None]:
+                        continue
+                    for flux_id in reactions:
+                        rows = []
+                        for layer in ctx.frames:
+                            builder.package = packages[layer]
+                            rows += [r for r in _omics_rows(builder, ctx, layer, flux_id, tissue, contrast, minor_share)
+                                     if r["layer"] != "derived"]
+                        builder.package = base
+                        if Omics.MFA.value in ctx.source.layers:
+                            rows += _mfa_rows(ctx.mfa, flux_id, tissue, contrast, tracers, ctx.reliability, ctx.flagged)
+                        semantics = base.semantics(flux_id).direction_evidence
+                        records += _finish(rows, params["rules"], flux_id, tissue, contrast, ctx.label, semantics)
+    finally:
+        builder.package = base
+    out = pd.DataFrame(records)
+    for column in COLUMNS:
+        if column not in out.columns:
+            out[column] = np.nan
+    return out[COLUMNS]
+
+
 def _contrasts(frames: dict) -> set[str]:
     if frames and isinstance(next(iter(frames.values())), dict):
         return set(frames)
@@ -472,8 +569,14 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     axes, reactions_assessed = assess(dossier, label, rules, expected, samples, sides)
     axes.to_parquet(out / AXIS_TABLE, index=False)
     reactions_assessed.to_parquet(out / ASSESSMENT_TABLE, index=False)
+
+    # 判定规则的校准（S4，E8）
+    calibration = calibrate(builder, contexts, params, reactions, tissues, dossier, (axes, reactions_assessed),
+                            samples, sides, expected, rules, panels)
+    (base / "evaluation").mkdir(parents=True)
+    calibration.to_parquet(base / "evaluation" / CALIBRATION_TABLE, index=False)
     panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params,
-                                (axes, reactions_assessed)) if panels else []
+                                (axes, reactions_assessed), calibration) if panels else []
 
     inputs = [p for s in sources for p in s.inputs] + [p for c in contexts for p in c.inputs] \
         + [d / name for d in dataset_dirs for name in ("matrix.parquet", META_FILE) if (d / name).is_file()]
@@ -495,13 +598,61 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         record.notes.append("分轴综合评估：结论等级 " + "、".join(f"{k} {claims.get(k, 0)}"
                                                        for k in ("L3", "L2", "L1", "L0", "LX"))
                             + f"（{len(reactions_assessed)} 个反应 × 组织 × 比较）")
+    record.notes += calibration_notes(calibration)
     record.notes += panel_notes
     return record
 
 
+def calibrate(builder: FluxEvidenceBuilder, contexts: list[_Context], params: dict[str, Any], reactions: list[str],
+              tissues: set[str] | None, dossier: pd.DataFrame, assessed: tuple[pd.DataFrame, pd.DataFrame],
+              samples: pd.DataFrame, sides: pd.DataFrame, expected: dict[str, list[str]], rules: dict[str, Any],
+              panels: dict[str, Panel]) -> pd.DataFrame:
+    """E8：诱饵（参数 calibration.decoys 次）、面板声明的对照集、实际数据上的不变性检查；组别置换记为未运行。"""
+    settings = params["calibration"]
+    label = contexts[0].label
+    parts = []
+    if int(settings["decoys"]) > 0:
+        runs = []
+        for replicate in range(int(settings["decoys"])):
+            members = build_decoy_dossier(builder, contexts, params, reactions, tissues,
+                                          int(settings["seed"]) + replicate)
+            runs.append(assess(members, label, rules, expected, samples, sides))
+        parts.append(cal.decoy_summary(assessed, runs))
+    controls = [c for p in panels.values() for c in p.expand_controls(sorted(set(dossier["tissue"])),
+                                                                       sorted(set(dossier["contrast_id"])))]
+    if controls:
+        parts.append(cal.control_summary(assessed[1], assessed[0], controls))
+    if settings["invariance"]:
+        subset = sorted({r for p in panels.values() for r in p.reactions}) or reactions[:INVARIANCE_FALLBACK]
+        members = dossier[dossier["flux_id"].isin(subset)]
+        parts.append(cal.invariance_checks(members, lambda m: assess(m, label, rules, expected, samples, sides)[0]))
+    parts.append(cal.not_run("组别置换（E1）需要按置换后的标签重跑各组学的差异分析，尚未实现"))
+    return pd.concat(parts, ignore_index=True)
+
+
+def calibration_notes(calibration: pd.DataFrame) -> list[str]:
+    notes = []
+    overall = calibration[(calibration["method"] == "decoy") & (calibration["tissue"] == "")].set_index("metric")
+    if not overall.empty:
+        notes.append(f"诱饵校准（{int(overall['n_replicates'].iloc[0])} 次）：" + "；".join(
+            f"{metric} 目标 {int(overall.at[metric, 'target'])}、诱饵期望 {overall.at[metric, 'decoy_expected']:.1f}"
+            for metric in cal.METRICS if metric in overall.index) + "；明细见 evaluation/")
+    invariance = calibration[calibration["method"] == "invariance"]
+    if not invariance.empty:
+        failed = invariance[invariance["passed"] != True]  # noqa: E712
+        notes.append("不变性检查：" + ("全部通过" if failed.empty else
+                                    "未通过 " + "、".join(f"{r.metric}（{int(r.target)} 处）" for r in failed.itertuples()))
+                     + f"（{int(invariance['n_cells'].max())} 个格子）")
+    controls = calibration[calibration["metric"] == "concordance"]
+    for row in controls.itertuples():
+        notes.append(f"对照集（{row.method.replace('control_', '')}）：{row.detail}")
+    return notes
+
+
 def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, samples: pd.DataFrame,
                   sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any],
-                  assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None) -> list[str]:
+                  assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None,
+                  calibration: pd.DataFrame | None = None) -> list[str]:
     """面板的行表、矩阵视图与导出表、图 A / B / C。"""
     from ..plotting import dossier_plots
 
@@ -526,7 +677,8 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
                         continue
                     stem = folder / f"matrix_{contrast}{suffix}"
                     export_matrix(view, member_table(dossier, panel, tissue, contrast), stem)
-                    dossier_plots.plot_matrix(view, panel, tissue, contrast, stem, formats, runs)
+                    dossier_plots.plot_matrix(view, panel, tissue, contrast, stem, formats, runs,
+                                              cal.caption(calibration, tissue, contrast))
         for tissue in panel.tissues or sorted(set(dossier["tissue"])):
             folder = base / "figures" / panel.id / tissue
             for contrast in panel.contrasts or sorted(set(dossier["contrast_id"])):

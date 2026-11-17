@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
-> 文档类型：设计建议（S0–S3 已实施，S4–S6 待实施）
-> 版本：v0.5（2026-11-17，8.1 增加 S3 记录；v0.4、v0.3、v0.2 同日分别增加 S2、S1 记录与 8.1；v0.1 为 2026-11-16）
+> 文档类型：设计建议（S0–S4 已实施，S5–S6 待实施；S4 的组别置换待 E1）
+> 版本：v0.6（2026-11-17，8.1 增加 S4 记录，第 6 节写出校准表的列，第 7 节写出对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -422,6 +422,9 @@ x  不可辨识      !  样本不足      /  未测或未输注      ?  映射�
 **`tables/pathway_tests.parquet`**：`panel_id`、`test`（`signed_module`、`crossover`）、`layer`、`source`、`tissue`、`contrast_id`、`statistic`、`pvalue`、`padj`、`direction`、`members`、`detail`。
 
 **`evaluation/assessment_calibration.parquet`**：按（组织, 比较, 等级或轴状态）给出目标数、诱饵期望数、置换期望数、对照集符合率。
+S4 实现的列：`method`（`decoy`、`control_positive`、`control_negative`、`invariance`、`permutation`）、`tissue`、`contrast_id`（全部时为空）、
+`metric`（诱饵为 `L1`、`capacity_changed`、`capacity_and_pool`；对照为“反应:轴”或 `concordance`；不变性为检查名）、`n_cells`、`target`、
+`decoy_expected`、`decoy_sd`、`n_replicates`、`ratio`（诱饵期望 / 目标，上限 1）、`passed`、`detail`。置换尚未实现（8.1）。
 
 **`figures/<面板>/<组织>/`**：`matrix_<比较>`、`dossier_<反应>`、`tracer_coverage`、`node_split_<节点>`，以及与矩阵图同名的导出表。
 
@@ -483,9 +486,10 @@ panels:
       gluconeogenic_routing:
         plus: [Pcx, Pck1, G6pc1]
         minus: [Pklr, Gck]
-    controls:                             # 可选：用于校准的对照
-      positive: []
-      negative: []
+    controls:                             # 可选：用于校准的对照（反应须在面板中）
+      positive:                           # 已知方向：direction 必填；axis 为 claim（默认）或 flux / capacity / regulation / pool
+        - {reaction: G6Pase_c, direction: up, axis: capacity}
+      negative: [PEPCK_c]                 # 预期不变；省略的 tissue / contrast 取面板声明的（面板也没写时取全部）
 ```
 
 `validate` 检查：面板引用的反应在网络中存在；`sources` 能解析到运行；`tracers` 与 MFA 数据的示踪剂名可以对应。
@@ -584,6 +588,44 @@ suggestive 指向降；L0，现有示踪剂都不能约束它）。PC_m 为 L0�
 （名义 p）使 M 轴指向降，按默认规则构成反向；把 `opposition_min_state` 设为 changed 后为 L1，与附录 A 相同。附录 A 只看了队列 A 的底物与产物。
 
 运行时间：评估 4,212 个格子约 83 秒。pandas 3 的字符串列默认由 pyarrow 存放，逐格筛选时复制开销约占九成；评估开始时转成普通 object 数组。
+
+**S4（2026-11-17）**：E8 判定规则的校准，`integration/dossier/calibration.py`；输出 `evaluation/assessment_calibration.parquet`（列见第 6 节），
+摘要写入运行备注，图 A 的图注写出该组织、该比较的诱饵对照。参数 `calibration`：`decoys`（诱饵重复次数，默认 0 不运行）、`seed`、
+`invariance`（默认运行）。
+
+| 项目 | 实现 | 与 3.11 的差别或未做的部分 |
+|---|---|---|
+| 诱饵映射 | 每次重复在每个组织中，把每个反应的直接酶（共用亚基除外；没有直接酶时为载体）与代谢组的底物 / 产物换成同一组织数据中丰度十分位相同的随机特征（E3 的 `_Pool` 与 `DecoyPackage`），个数与角色不变，转录组、蛋白组、代谢组各自抽取、互不影响；同一套诱饵名称用于所有来源。重建成员行后用同一套规则重跑四轴判定，按（组织, 比较）与全部统计 L1、“C 轴 changed”、“C 轴 changed 且 M 轴同向”的个数，给出诱饵期望、标准差与“诱饵期望 / 目标” | 诱饵没有调控因子知识（R 轴为 no_knowledge），也不带派生比值；通量行与目标相同。因此 L1 的诱饵数只反映 C、M 两轴的随机一致，不含 R 轴。诱饵的同工酶关系都记为 `isozyme`，复合体按整体判断的规则在诱饵上不适用 |
+| 组别置换 | 未实现，在结果表中记为 `permutation`、未运行 | 需要按置换后的标签重跑各组学的差异分析（E1，批次 3）。每组 3 只时只有 10 种置换，见 3.11 |
+| 对照集 | 面板声明 `controls`（第 7 节）：阳性对照指定方向与所看的结论或轴，阴性对照预期不变（结论为 L0，或该轴没有指向）。省略的组织 / 比较取面板声明的。每条对照一行，另给阳性、阴性各自的符合率；该组织没有评估的对照记为 not_assessed，不计入符合率 | 两个 DIO 课题都还没有声明对照集。冒烟测试中用过的对照是示意，不是生物学判断 |
+| 不变性测试 | 在实际数据上运行（面板中的反应，没有面板时取前 30 个反应）：翻转通量的符号，C、R、M 轴的状态、方向与效应量不变；删除一整层，不读该层的轴不变（如删除转录组时只看 F、M 轴）。违反时记录格子数与前 5 个格子 | 合成数据上另有一个故意让 C 轴读取通量的判定函数，验证违反能被检出 |
+
+验证：新增 11 项测试（`tests/integration/test_dossier_calibration.py`：诱饵计数与比例、图注、对照的判定与符合率、不变性及其违反、置换未运行、
+`controls` 的声明错误、模式在合成结果包上写出校准表且同一种子可复现），另有 1 项测试保证代谢物子集的缓存（见下文运行时间）；全部测试 518 通过、3 跳过（需要课题数据）。
+
+在队列 A 上（两个来源、162 个反应、全部组织，诱饵 3 次，scratch 目录中进行）：
+
+| 范围 | 指标 | 目标 | 诱饵期望（3 次的计数） | 诱饵期望 / 目标 |
+|---|---|--:|--:|--:|
+| 全部 4,212 个格子 | L1 | 24 | 15.7（14、18、15） | 0.65 |
+| | C 轴 changed | 27 | 18.0（17、19、18） | 0.67 |
+| | C 轴 changed 且 M 轴同向 | 1 | 1.3（1、2、1） | 1 |
+| 肝脏 HFD_vs_LFD | L1 | 16 | 14.0 | 0.88 |
+| | C 轴 changed | 19 | 16.3 | 0.86 |
+| 心脏 HFD_vs_LFD | L1 / C 轴 changed | 8 | 1.7 | 0.21 |
+
+- 肝脏的 L1 与诱饵相当。HFD_vs_LFD 中肝脏 10.1% 的蛋白通过 FDR（其他组织没有），丰度相近的随机蛋白与真实的酶一样容易判为 changed，
+  以蛋白为主的 C 轴在这个比较上没有区分力。这与批次 2 中 E3 的结论（转录组支持率与诱饵率相当）一致。
+- 心脏的 8 个都没有蛋白数据，依据是 RNA 在两个队列中同向通过 FDR（如 G3PDH_c 的 Gpd1、GLYCOLYSIS 的多个糖酵解酶），诱饵期望 1.7：
+  要求两个来源同向带来了区分力。
+- “C 轴 changed 且 M 轴同向”只有 1 个，与诱饵相当。
+- 诱饵的 L1 偏多：诱饵没有调控因子与派生比值，R、M 轴构成反向的机会更少。C 轴 changed 不受此影响，两者给出的比例相同。
+- 不变性检查：面板 6 个反应 × 26 个（组织, 比较）= 156 个格子，全部通过。对照集只是冒烟测试的示意，符合率没有意义。
+
+运行时间：起初每次诱饵重复约 15 分钟（3 次共 61 分钟）。剖析显示，按名称 / ID 匹配代谢物时，去掉派生特征的子集每次新建，
+使特征索引的缓存（按数据表对象缓存）失效，每个反应都要重建一遍整张表的索引。子集改为按数据表缓存
+（`feature_resolver.measured_metabolites`，`flux_anchored` 与 E3 诱饵共用）后，肝脏一次诱饵重复由 363 秒降至 15 秒，
+目标档案由 50 秒降至 5 秒；含 3 次诱饵的全量运行为 6.8 分钟，五张表（成员行、逐只动物、两张评估表、校准表）与修正前逐值相同。
 
 ---
 

@@ -122,7 +122,8 @@ def _short_label(block: str, column: str, tracer: str) -> str:
 
 
 def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, stem: Path,
-                formats: Iterable[str] = ("pdf", "png"), runs: dict[str, str] | None = None) -> list[Path]:
+                formats: Iterable[str] = ("pdf", "png"), runs: dict[str, str] | None = None,
+                caption: str = "") -> list[Path]:
     """图 A：只画 ``view``（矩阵视图）中的格子。"""
     rows = view[["row", "element_type", "element_id", "label", "segment"]].drop_duplicates().sort_values("row")
     row_y = {r: -i for i, r in enumerate(rows["row"])}
@@ -197,6 +198,8 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
         fig.text(0.01, 1 - 0.35 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}", fontsize=10, color=INK,
                  fontweight="bold", va="top")
         _matrix_legend(fig, width, height, runs or {})
+        if caption:                                  # 校准结果（E8）写入图注
+            fig.text(0.04, 0.04 / height, caption, fontsize=6, color=INK2)
         return _save(fig, stem, formats)
 
 

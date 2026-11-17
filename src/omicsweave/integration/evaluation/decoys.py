@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from ..mappings import match_metabolite_roles
+from ..mappings.feature_resolver import measured_metabolites
 from ..mappings.model_package import DecoyPackage
 from ..methods.evidence_profile import ANCHORED_STATES
 
@@ -75,7 +76,7 @@ def _metabolite_members(builder, flux_id: str, frame: pd.DataFrame) -> dict[str,
     roles = builder.package.metabolite_roles(flux_id)
     if not isinstance(roles, dict):
         return {"substrates": [], "products": []}
-    measured = frame[frame["feature_type"].isna()] if "feature_type" in frame.columns else frame
+    measured = measured_metabolites(frame)
     matched = match_metabolite_roles(measured, roles)
     return {role: list(matched.indices_by_role[role]) for role in ("substrates", "products")}
 

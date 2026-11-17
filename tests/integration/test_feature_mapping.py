@@ -350,6 +350,28 @@ class MetaboliteFeatureMappingTest(unittest.TestCase):
         self.assertEqual(details["n_sig"], 0)
         self.assertEqual(details["data_reason"], "missing_comparison_effect")
 
+    def test_measured_subset_is_cached_so_the_feature_index_is_reused(self) -> None:
+        from omicsweave.integration.mappings import feature_resolver as fr
+
+        metabolites = pd.DataFrame({
+            "compound": ["Citrate", "Isocitrate", "Citrate / Isocitrate"],
+            "HMDB": ["HMDB0000094", "HMDB0000193", None],
+            "feature_type": [None, None, "mass_action_ratio"],
+        })
+        measured = fr.measured_metabolites(metabolites)
+        self.assertEqual(list(measured["compound"]), ["Citrate", "Isocitrate"])   # 派生特征不参与匹配
+        self.assertIs(fr.measured_metabolites(metabolites), measured)             # 同一张表返回同一个子集
+        plain = metabolites.drop(columns="feature_type")
+        self.assertIs(fr.measured_metabolites(plain), plain)
+        # 子集是同一个对象，匹配用的特征索引只建一次（每个反应都重建时，全量档案慢二十余倍）
+        roles = {"substrates": ["Citrate"], "products": ["Isocitrate"]}
+        first = match_metabolite_roles(fr.measured_metabolites(metabolites), roles)
+        index = fr._get_cached(fr._METABOLITE_FEATURE_CACHE, measured)
+        second = match_metabolite_roles(fr.measured_metabolites(metabolites), roles)
+        self.assertIs(fr._get_cached(fr._METABOLITE_FEATURE_CACHE, measured), index)
+        self.assertEqual(first.indices_by_role, second.indices_by_role)
+        self.assertEqual(first.indices_by_role["substrates"], (0,))
+
 
 if __name__ == "__main__":
     unittest.main()
