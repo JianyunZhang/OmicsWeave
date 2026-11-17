@@ -474,7 +474,7 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 | E7 登记的配置缺口 | 剩 3 项：`defaults.padj_method`、`defaults.random_seed`、`design.stratify_by`（11.2 中的 `factors.*.reference` 已不在缺口表中）；`design.covariates` 在代谢组与 MFA 的两两比较中仍未接入 | `tests/core/test_config_consumers.py` |
 | 代谢物名称查找 | 仍以手写表为主，RefMet 注册表用于审计。审计报出的 22 处不一致已全部处理：10 处修正，12 处登记为可接受的立体异构体或异头物 | 11.4 |
 | 批次 3（G9、G10、G12、E1、E2） | 未开始 | 11.1 |
-| 通路层面的完整展示（G13–G17、E8） | S0（G17，示例面板的 6 个反应）与 S1（G13 第一部分：成员行与 `reaction_dossier` 模式）已实施；S2–S6 待实施 | [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) 8.1 |
+| 通路层面的完整展示（G13–G17、E8） | S0（G17，示例面板的 6 个反应）、S1（成员行与 `reaction_dossier` 模式）、S2（其他来源、逐只动物表、通路面板、图 A–C 与导出表）已实施；S3–S6 待实施 | [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) 8.1 |
 
 ---
 

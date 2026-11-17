@@ -139,7 +139,17 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
   匹配数、入选数一致（映射数按规范基因符号计，`flux_anchored` 按名称计）。等效判定用 t 分位数（自由度取 `residual_df`，
   否则 n1 + n2 − 2）；RNA 的 apeGLM 收缩估计不做等效判定。参数 `tracers`（应出现的示踪剂，没有数据的记 not_infused）、
   `reactions`、`tissues`、`label`、`rules`；入选阈值、`tissue_map`、`qc_imbalance` 没写时沿用 `flux_anchored`。
-  输出 `tables/dossier_members.parquet`（设计文档第 6 节的契约）。通路面板、逐只动物表、其他来源与图在 S2。
+  输出 `tables/dossier_members.parquet`（设计文档第 6 节的契约）。
+  - 其他来源（`sources`，S2）：其他项目 / 实验的结果包只读接入，`tissue_map` 与 `contrast_map` 把组织与比较换成本实验的
+    名称，`layers` 限定组学；`source` 列区分来源。声明的 `tracers` 只用于本实验。
+  - 逐只动物表（S2）：`tables/dossier_samples.parquet`（成员表引用到的特征在各数据集中的值；组别为该数据集中有变化的
+    动物层因素的组合，按因素水平排序）与 `tables/dossier_sample_contrasts.parquet`（各比较的分子 / 分母样本）。
+  - 通路面板（S2，`panels: panels.yaml`，相对实验目录，课题内容不进包）：`integration/dossier/panels.py` 解析声明，
+    代谢物节点由网络化学计量补全（`tables/panel_elements.parquet`）；`figures/<面板>/<组织>/` 下为图 A
+    `matrix_<比较>`（与同名 TSV / XLSX 导出表共用 `integration/dossier/view.py` 的矩阵视图）、图 B
+    `dossier_<反应>_<比较>`（每个成员一个面板，逐只动物的点，每个来源一行）、图 C `tracer_coverage_<比较>`
+    （示踪剂 × 反应的可辨识性与该比较两组的动物数）。绘图在
+    `plotting/dossier_plots.py`；PDF 中的中文字体在部分 fontTools 版本下不能按 Type 42 子集化时改用 Type 3 嵌入。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度

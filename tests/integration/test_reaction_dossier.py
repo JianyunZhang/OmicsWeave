@@ -168,7 +168,7 @@ class DossierBundleTest(unittest.TestCase):
         self.assertEqual(parameters["inherited_from_flux_anchored"], ["tissue_map"])
         with self.assertRaisesRegex(Exception, "无法识别的参数"):
             self.set_integration(enabled=False, modes=["reaction_dossier"],
-                                 parameters={"reaction_dossier": {"panels": "panels.yaml"}})
+                                 parameters={"reaction_dossier": {"colours": "red"}})
             self.integrate()
 
 

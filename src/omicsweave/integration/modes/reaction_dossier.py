@@ -23,12 +23,19 @@
   （较小组少于 2 只）、``not_identifiable``（``poorly_constrained`` 或 ``bound_pinned``）。
 
 参数（``integration.parameters.reaction_dossier``）：``tracers``（应出现的示踪剂）、``reactions`` / ``tissues``
-（只列这些；默认全部）、``label``（来源标签，默认项目 ID）、``rules``（``alpha``、``equivalence_bound``）；
+（只列这些；默认全部）、``label``（本实验的来源标签，默认项目 ID）、``rules``（``alpha``、``equivalence_bound``）、
+``sources``（其他来源，见 :mod:`omicsweave.integration.dossier.sources`）、``panels``（面板声明，相对实验目录，见
+:mod:`omicsweave.integration.dossier.panels`）、``figures``（``formats``、``max_reactions``）；
 ``pval_cutoff``、``log2fc_cutoff``、``omics_cutoffs``、``fallback_mode``、``isozyme``、``tissue_map``、``qc_imbalance``
 没有写时沿用 ``flux_anchored`` 的参数，使入选规则一致。
 
-输出（``integration/reaction_dossier/``）：``tables/dossier_members.parquet``（列见 :data:`COLUMNS`）、
-``qc/contrast_reliability.parquet``。
+输出（``integration/reaction_dossier/``）：
+
+- ``tables/dossier_members.parquet``（列见 :data:`COLUMNS`；``source`` 区分来源）；
+- ``tables/dossier_samples.parquet``（逐只动物值）与 ``tables/dossier_sample_contrasts.parquet``（各比较的分子 / 分母样本）；
+- 有面板时：``tables/panel_elements.parquet``，以及 ``figures/<面板>/<组织>/`` 下的 ``matrix_<比较>``（图 A 与同名的
+  TSV / XLSX 导出表）、``dossier_<反应>_<比较>``（图 B）、``tracer_coverage_<比较>``（图 C）；
+- ``qc/contrast_reliability.parquet``（各来源的可靠性表）。
 """
 from __future__ import annotations
 
@@ -40,11 +47,15 @@ import numpy as np
 import pandas as pd
 from scipy.stats import t as student_t
 
-from omicsweave.contract.tables import read_differential
+from omicsweave.contract.dataset import META_FILE
 from omicsweave.core.model import IntegrationMode, Omics
-from omicsweave.core.reliability import BLOCKED, DEFAULT_IMBALANCE, QC_DIR, RELIABILITY_FILE, build_reliability
+from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
 
+from ..dossier.panels import Panel, PanelError, load_panels, panel_elements
+from ..dossier.samples import contrast_samples, dossier_samples
+from ..dossier.sources import DossierSource, other_source, primary_source
+from ..dossier.view import export_matrix, matrix_view, member_table
 from ..integrate import IntegrationRun, mode_dir
 from ..mappings import FLUX_GENE_MAPPING, FLUX_METABOLITE_MAPPING, REACTION_ENZYME_MAPPING
 from ..mappings.reaction_members import ACTIVITY_MODES
@@ -55,8 +66,12 @@ MODE = IntegrationMode.REACTION_DOSSIER
 # 与 flux_anchored 共用（没有写时沿用其参数）
 SHARED = ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "isozyme", "tissue_map", "qc_imbalance")
 DEFAULTS: dict[str, Any] = {**{key: fa.DEFAULTS[key] for key in SHARED}, "tracers": [], "reactions": [],
-                            "tissues": [], "label": "", "rules": {"alpha": 0.05, "equivalence_bound": 0.58}}
+                            "tissues": [], "label": "", "rules": {"alpha": 0.05, "equivalence_bound": 0.58},
+                            "sources": [], "panels": "", "figures": {"formats": ["pdf", "png"], "max_reactions": 15}}
 DOSSIER_TABLE = "dossier_members.parquet"
+SAMPLES_TABLE = "dossier_samples.parquet"
+SIDES_TABLE = "dossier_sample_contrasts.parquet"
+ELEMENTS_TABLE = "panel_elements.parquet"
 Z95 = 1.959963984540054              # ci_lower / ci_upper 的 95% 区间
 
 COLUMNS = [
@@ -162,23 +177,40 @@ def _activity_sign(effect: str, mode: str) -> int:
 
 
 class _Context:
-    """一次运行中各层的帧、统计量索引、可靠性与稳健性标记。"""
+    """一个来源的各层帧、统计量索引、可靠性、稳健性标记与通量表；组织名与比较 ID 都已换成共同名称。"""
 
-    def __init__(self, tables: dict[str, pd.DataFrame], source: Path, derived: pd.DataFrame | None,
-                 tissue_map: dict[str, str], reliability: pd.DataFrame, flagged: set) -> None:
+    def __init__(self, source: DossierSource, imbalance: float) -> None:
+        self.source = source
+        self.label = source.label
+        tables = source.mapped_tables()
+        derived = source.mapped(source.derived, Omics.METABOLOMICS.value)
         empty = pd.DataFrame(columns=["contrast_id", "tissue", "feature_id", "evidence_level"])
-        self.frames = {
-            Omics.TRANSCRIPTOMICS.value: fa.transcriptomics_frames(tables.get(Omics.TRANSCRIPTOMICS.value, empty),
-                                                                  fa._transcriptomics_id_types(source)),
-            Omics.PROTEOMICS.value: fa.proteomics_frames(tables.get(Omics.PROTEOMICS.value, empty)),
-            Omics.METABOLOMICS.value: fa.metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty), derived),
+        id_types = {source.common_tissue(Omics.TRANSCRIPTOMICS.value, t): v
+                    for t, v in fa._transcriptomics_id_types(source.run_dir).items()}
+        builders = {
+            Omics.TRANSCRIPTOMICS.value: lambda t: fa.transcriptomics_frames(t, id_types),
+            Omics.PROTEOMICS.value: fa.proteomics_frames,
+            Omics.METABOLOMICS.value: lambda t: fa.metabolomics_frames(t, derived),
         }
-        self.long = {omics: _long_index(tables.get(omics)) for omics in self.frames}
+        self.frames = {layer: build(tables.get(layer, empty)) for layer, build in builders.items()
+                       if layer in source.layers and layer in tables}
+        self.long = {layer: _long_index(tables.get(layer)) for layer in self.frames}
         self.derived_long = _long_index(derived)
-        self.reliability = {(str(r.omics), str(r.tissue), str(r.contrast_id)): str(r.status)
-                            for r in reliability.itertuples()} if not reliability.empty else {}
-        self.flagged = flagged
-        self.tissue_map = tissue_map
+        # 可靠性与稳健性按来源自己的名称计算，再换成共同名称
+        reliability, self.inputs = build_reliability(source.experiment, source.run_dir, source.tables, imbalance)
+        self.reliability_table = reliability
+        self.reliability = {
+            (str(r.omics), source.common_tissue(str(r.omics), str(r.tissue)), source.contrast_map[str(r.contrast_id)]):
+                str(r.status)
+            for r in reliability.itertuples() if str(r.contrast_id) in source.contrast_map} \
+            if not reliability.empty else {}
+        flagged, robustness_inputs = fa.single_subject_features(source.run_dir, source.tables)
+        self.flagged = {(o, source.common_tissue(o, t), source.contrast_map[c], f) for o, t, c, f in flagged
+                        if c in source.contrast_map}
+        self.inputs += robustness_inputs
+        self.mfa = _mfa_tables(source) if Omics.MFA.value in source.layers else \
+            {"pooled": {}, "by_tracer": {}, "inputs": []}
+        self.inputs += self.mfa["inputs"]
 
 
 def _omics_rows(builder: FluxEvidenceBuilder, ctx: _Context, layer: str, flux_id: str, tissue: str, contrast: str,
@@ -290,18 +322,18 @@ def _mfa_state(row: dict[str, Any], rules: dict[str, float]) -> tuple[str, str]:
     return _state(row, rules)
 
 
-def _mfa_tables(tables: dict[str, pd.DataFrame], source: Path, tissue_map: dict[str, str]) -> dict[str, Any]:
+def _mfa_tables(source: DossierSource) -> dict[str, Any]:
     def split(frame: pd.DataFrame | None) -> dict[tuple[str, str], pd.DataFrame]:
+        frame = source.mapped(frame, Omics.MFA.value)
         if frame is None or frame.empty:
             return {}
-        frame = frame.assign(tissue=frame["tissue"].astype(str).map(lambda t: tissue_map.get(t, t)),
-                             contrast_id=frame["contrast_id"].astype(str), feature_id=frame["feature_id"].astype(str))
+        frame = frame.assign(feature_id=frame["feature_id"].astype(str))
         return {key: part for key, part in frame.groupby(["tissue", "contrast_id"], sort=True)}
 
-    path = source / "omics" / Omics.MFA.value / "tables" / "differential_by_tracer.parquet"
+    path = source.run_dir / "omics" / Omics.MFA.value / "tables" / "differential_by_tracer.parquet"
     # 分示踪剂的结果以（比较, 组织, 反应, 示踪剂）为键，不是统一差异结果表的契约，直接读取
     by_tracer = pd.read_parquet(path) if path.is_file() else None
-    return {"pooled": split(tables.get(Omics.MFA.value)), "by_tracer": split(by_tracer),
+    return {"pooled": split(source.tables.get(Omics.MFA.value)), "by_tracer": split(by_tracer),
             "inputs": [path] if by_tracer is not None else []}
 
 
@@ -322,22 +354,21 @@ def _finish(rows: list[dict[str, Any]], rules: dict[str, float], flux_id: str, t
     return rows
 
 
-def build_dossier(builder: FluxEvidenceBuilder, ctx: _Context, mfa: dict[str, Any], params: dict[str, Any],
-                  label: str) -> pd.DataFrame:
-    tissue_map = ctx.tissue_map
+def build_dossier(builder: FluxEvidenceBuilder, ctx: _Context, params: dict[str, Any],
+                  reactions: list[str], tissues: set[str] | None = None) -> pd.DataFrame:
+    """一个来源的成员行。``tissues``：只列这些（共同名称）组织；None 为全部。"""
+    mfa = ctx.mfa
     contrasts = sorted({c for frames in ctx.frames.values() for c in _contrasts(frames)}
                        | {key[1] for key in mfa["pooled"]})
-    tissues = sorted({t for frames in ctx.frames.values() for t in _tissues(frames)} | {key[0] for key in mfa["pooled"]})
-    if params["tissues"]:
-        tissues = [t for t in tissues if t in {tissue_map.get(str(x), str(x)) for x in params["tissues"]}]
-    reactions = [str(r) for r in params["reactions"]] or sorted(
-        set(FLUX_GENE_MAPPING) | set(REACTION_ENZYME_MAPPING) | set(FLUX_METABOLITE_MAPPING)
-        | {f for frame in mfa["pooled"].values() for f in frame["feature_id"]})
-    tracers = [str(t) for t in params["tracers"]]
+    found = sorted({t for frames in ctx.frames.values() for t in _tissues(frames)} | {key[0] for key in mfa["pooled"]})
+    # 声明的示踪剂描述本实验；其他来源只列它自己有数据的示踪剂
+    tracers = [str(t) for t in params["tracers"]] if ctx.source.is_primary else []
     minor_share = float((params.get("isozyme") or {}).get("minor_share", 0.2))
     records: list[dict[str, Any]] = []
     for contrast in contrasts:
-        for tissue in tissues:
+        for tissue in found:
+            if tissues is not None and tissue not in tissues:
+                continue
             available = [layer for layer, frames in ctx.frames.items()
                          if _frame_for(layer, frames, tissue, contrast) is not None]
             if not available and (tissue, contrast) not in mfa["pooled"]:
@@ -346,9 +377,10 @@ def build_dossier(builder: FluxEvidenceBuilder, ctx: _Context, mfa: dict[str, An
                 rows = []
                 for layer in ctx.frames:
                     rows += _omics_rows(builder, ctx, layer, flux_id, tissue, contrast, minor_share)
-                rows += _mfa_rows(mfa, flux_id, tissue, contrast, tracers, ctx.reliability)
+                if Omics.MFA.value in ctx.source.layers:
+                    rows += _mfa_rows(mfa, flux_id, tissue, contrast, tracers, ctx.reliability)
                 semantics = builder.package.semantics(flux_id).direction_evidence
-                records += _finish(rows, params["rules"], flux_id, tissue, contrast, label, semantics)
+                records += _finish(rows, params["rules"], flux_id, tissue, contrast, ctx.label, semantics)
     out = pd.DataFrame(records)
     for column in COLUMNS:
         if column not in out.columns:
@@ -370,46 +402,122 @@ def _tissues(frames: dict) -> set[str]:
 
 def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> IntegrationRun:
     params = _parameters(ctx, parameters)
-    paths = {p.parent.parent.name: p for p in sorted(source.glob("omics/*/tables/differential.parquet"))}
-    if not paths:
-        raise RunError(f"{MODE.value} 需要至少 1 个组学的差异结果；结果包 {source.name} 中没有。"
-                       f"请先运行 omicsweave run（含 differential 步骤）")
-    tables = {omics: read_differential(path) for omics, path in paths.items()}
-    if Omics.METABOLOMICS.value in tables:
-        tables[Omics.METABOLOMICS.value], _ = fa.refresh_metabolite_ids(tables[Omics.METABOLOMICS.value])
-    derived_path = source / "omics" / Omics.METABOLOMICS.value / "tables" / fa.DERIVED_TABLE
-    derived = read_differential(derived_path) if derived_path.is_file() else None
     tissue_map = {str(k): str(v) for k, v in (params["tissue_map"] or {}).items()}
-
-    reliability, quality_inputs = build_reliability(ctx.experiment, source, tables, float(params["qc_imbalance"]))
-    qc_dir = mode_dir(ctx, MODE) / QC_DIR
-    qc_dir.mkdir(parents=True)
-    reliability.to_parquet(qc_dir / RELIABILITY_FILE, index=False)
-    mapped = reliability.copy()
-    if not mapped.empty:
-        is_mfa = mapped["omics"] == Omics.MFA.value
-        mapped.loc[is_mfa, "tissue"] = mapped.loc[is_mfa, "tissue"].map(lambda t: tissue_map.get(t, t))
-    flagged, robustness_inputs = fa.single_subject_features(source, tables)
+    label = str(params["label"] or ctx.project.id)
+    primary = primary_source(ctx.experiment, source, label, tissue_map)
+    sources = [primary]
+    for spec in params["sources"] or []:
+        other = other_source(ctx.project, dict(spec), set(primary.contrast_map.values()))
+        if other.label in {s.label for s in sources}:
+            raise RunError(f"reaction_dossier.sources 中的来源标签 {other.label} 重复（本实验的标签为 {label}）")
+        sources.append(other)
+    panels, panels_path = {}, None
+    if params["panels"]:
+        panels_path = ctx.experiment.root / str(params["panels"])
+        try:
+            panels = load_panels(panels_path)
+        except PanelError as exc:
+            raise RunError(str(exc)) from exc
 
     scoring = {k: params[k] for k in ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "isozyme")}
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={}, scoring=scoring))
-    context = _Context(tables, source, derived, tissue_map, mapped, flagged)
-    mfa = _mfa_tables(tables, source, tissue_map)
-    label = str(params["label"] or ctx.project.id)
-    dossier = build_dossier(builder, context, mfa, params, label)
+    contexts = [_Context(s, float(params["qc_imbalance"])) for s in sources]
+    reactions = [str(r) for r in params["reactions"]] or sorted(
+        set(FLUX_GENE_MAPPING) | set(REACTION_ENZYME_MAPPING) | set(FLUX_METABOLITE_MAPPING)
+        | {f for frame in contexts[0].mfa["pooled"].values() for f in frame["feature_id"]})
+    tissues = {tissue_map.get(str(t), str(t)) for t in params["tissues"]} or None
+    dossier = pd.concat([build_dossier(builder, c, params, reactions, tissues) for c in contexts], ignore_index=True)
 
-    out = mode_dir(ctx, MODE) / "tables"
+    base = mode_dir(ctx, MODE)
+    out, qc_dir = base / "tables", base / QC_DIR
     out.mkdir(parents=True)
+    qc_dir.mkdir(parents=True)
     dossier.to_parquet(out / DOSSIER_TABLE, index=False)
+    pd.concat([c.reliability_table.assign(source=c.label) for c in contexts], ignore_index=True) \
+        .to_parquet(qc_dir / RELIABILITY_FILE, index=False)
+    samples, sides, dataset_dirs = [], [], []
+    for c in contexts:
+        table, dirs = dossier_samples(c.source, dossier[dossier["source"] == c.label])
+        samples.append(table)
+        sides.append(contrast_samples(c.source))
+        dataset_dirs += dirs
+    samples = pd.concat(samples, ignore_index=True)
+    sides = pd.concat(sides, ignore_index=True)
+    samples.to_parquet(out / SAMPLES_TABLE, index=False)
+    sides.to_parquet(out / SIDES_TABLE, index=False)
+    panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params) if panels else []
 
-    record = IntegrationRun(MODE, inputs=list(paths.values()) + ([derived_path] if derived is not None else [])
-                            + mfa["inputs"] + quality_inputs + robustness_inputs,
-                            parameters={**params, "omics": sorted(paths), "label": label})
+    inputs = [p for s in sources for p in s.inputs] + [p for c in contexts for p in c.inputs] \
+        + [d / name for d in dataset_dirs for name in ("matrix.parquet", META_FILE) if (d / name).is_file()]
+    record = IntegrationRun(MODE, inputs=inputs + ([panels_path] if panels_path else []),
+                            parameters={**params, "label": label,
+                                        "sources_resolved": {s.label: {"run": s.run_id, "layers": list(s.layers),
+                                                                       "contrast_map": s.contrast_map}
+                                                             for s in sources},
+                                        "omics": sorted(primary.tables)})
     states = dossier["cell_state"].value_counts()
-    record.notes.append(f"反应档案：{dossier['flux_id'].nunique()} 个反应、{len(dossier)} 行；格子状态 "
-                        + "、".join(f"{state} {n}" for state, n in states.items()))
+    record.notes.append(f"反应档案：{len(sources)} 个来源、{dossier['flux_id'].nunique()} 个反应、{len(dossier)} 行；"
+                        "格子状态 " + "、".join(f"{state} {n}" for state, n in states.items()))
     declared = set(params["tracers"])
-    seen = set(dossier.loc[dossier["layer"].eq("mfa"), "tracer"]) - {"pooled"}
+    seen = set(dossier.loc[dossier["layer"].eq("mfa") & dossier["cell_state"].ne("not_infused"), "tracer"]) - {"pooled"}
     if declared - seen:
         record.notes.append(f"声明的示踪剂 {'、'.join(sorted(declared - seen))} 在结果包中没有数据，记为 not_infused")
+    record.notes += panel_notes
     return record
+
+
+def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, samples: pd.DataFrame,
+                  sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any]) -> list[str]:
+    """面板的行表、矩阵视图与导出表、图 A / B / C。"""
+    from ..plotting import dossier_plots
+
+    figures = {**DEFAULTS["figures"], **(params.get("figures") or {})}
+    formats = [str(f) for f in figures["formats"]]
+    labels = [c.label for c in contexts]
+    runs = {c.label: c.source.run_id for c in contexts}
+    elements_all, notes = [], []
+    primary = dossier[dossier["source"] == contexts[0].label]
+    for panel in panels.values():
+        elements = panel_elements(panel)
+        elements_all.append(elements)
+        tissues = panel.tissues or sorted(set(dossier["tissue"]))
+        contrasts = panel.contrasts or sorted(set(dossier["contrast_id"]))
+        for chunk_index, chunk in enumerate(_chunks(panel, elements, int(figures["max_reactions"]))):
+            suffix = f"_{chunk_index + 1}" if chunk_index or len(panel.reactions) > int(figures["max_reactions"]) else ""
+            for tissue in tissues:
+                folder = base / "figures" / panel.id / tissue
+                for contrast in contrasts:
+                    view = matrix_view(panel, chunk, dossier, tissue, contrast, labels, params["tracers"])
+                    if view.empty:
+                        continue
+                    stem = folder / f"matrix_{contrast}{suffix}"
+                    export_matrix(view, member_table(dossier, panel, tissue, contrast), stem)
+                    dossier_plots.plot_matrix(view, panel, tissue, contrast, stem, formats, runs)
+        for tissue in panel.tissues or sorted(set(dossier["tissue"])):
+            folder = base / "figures" / panel.id / tissue
+            for contrast in panel.contrasts or sorted(set(dossier["contrast_id"])):
+                dossier_plots.plot_tracer_coverage(primary, panel, tissue, contrast,
+                                                   folder / f"tracer_coverage_{contrast}", formats, params["tracers"])
+                for reaction in panel.reactions:
+                    rows = dossier[(dossier["flux_id"] == reaction) & (dossier["tissue"] == tissue)
+                                   & (dossier["contrast_id"] == contrast)]
+                    if rows.empty:
+                        continue
+                    dossier_plots.plot_dossier_page(rows, samples, sides, reaction, tissue, contrast,
+                                                    folder / f"dossier_{reaction}_{contrast}", formats, runs)
+        notes.append(f"面板 {panel.id}：{len(panel.reactions)} 个反应，图与导出表在 integration/{MODE.value}/figures/{panel.id}/")
+    pd.concat(elements_all, ignore_index=True).to_parquet(base / "tables" / ELEMENTS_TABLE, index=False)
+    return notes
+
+
+def _chunks(panel: Panel, elements: pd.DataFrame, limit: int) -> list[pd.DataFrame]:
+    """一张矩阵不超过 ``limit`` 个反应：超过时按分段拆成几张（分段本身超过时再按反应拆）。"""
+    groups, current, count = [], [], 0
+    for segment, reactions in panel.segments:
+        if current and count + len(reactions) > limit:
+            groups.append(current)
+            current, count = [], 0
+        current.append(segment)
+        count += len(reactions)
+    groups.append(current)
+    return [elements[elements["segment"].isin(g)].reset_index(drop=True) for g in groups]
