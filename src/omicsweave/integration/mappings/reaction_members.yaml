@@ -1,0 +1,121 @@
+# 反应成员知识表（G17）：每个成员的角色、直接酶之间的关系、调控因子与别构效应物对酶活性的作用方向。
+#
+# 只有登记在这里的反应受本表约束。flux_gene_mapping.yaml 的 gene_roles 与 flux_protein_mapping.yaml 的分类
+# 由本表生成（omicsweave refs build reaction_roles）；生成只改角色分组，不增删两张表的成员。
+#
+# 角色（键）：
+#   direct_enzymes          直接催化的酶；可写 relation
+#   carriers                转运体（没有直接酶时由它充当方向成员）；可写 relation
+#   regulators              作用于酶的蛋白（激酶、磷酸酶、信号分子）；必须写 effect 与 mode
+#   effectors               别构效应物（代谢物，名称与代谢组映射一致）；必须写 effect 与 mode
+#   transcription_factors   通过酶量起作用，只展示
+#   upstream_enzymes / downstream_enzymes / related_isozymes / cofactors / pathway_neighbors
+#
+# 成员可以写成列表，或写成 {成员: {属性}}。属性：
+#   relation  isozyme（默认，可互相替代）/ complex_subunit（复合体亚基）/ shared_subunit（多个复合体共用的亚基）
+#   effect    activates / inhibits / unknown（对酶活性的作用方向；unknown 只展示，不参与方向判断）
+#   mode      phosphorylation / dephosphorylation / allosteric / protein_interaction（作用于活性）
+#             transcription / signaling（作用于酶量或经由其他通路，只展示）/ unknown
+#   sources   文献（PMID:编号，已在 PubMed 核对）；note 补充说明
+#
+# 文献（2026-11-17 在 PubMed 核对）：
+#   PMID:24798336  Patel MS, et al. The pyruvate dehydrogenase complexes: structure-based function and regulation. J Biol Chem 2014
+#   PMID:373769    Randle PJ, et al. Regulation of pyruvate oxidation and the conservation of glucose. Biochem Soc Symp 1978
+#   PMID:28579060  Ambrus A, Adam-Vizi V. Human dihydrolipoamide dehydrogenase (E3) deficiency. Neurochem Int 2018
+#   PMID:18613815  Jitrapakdee S, et al. Structure, mechanism and regulation of pyruvate carboxylase. Biochem J 2008
+#   PMID:26277545  Israelsen WJ, Vander Heiden MG. Pyruvate kinase: function, regulation and role in cancer. Semin Cell Dev Biol 2015
+#   PMID:22628558  Bricker DK, et al. A mitochondrial pyruvate carrier required for pyruvate uptake in yeast, Drosophila, and humans. Science 2012
+
+PYR_trans:
+  carriers:
+    Mpc1: {relation: complex_subunit, sources: [PMID:22628558]}
+    Mpc2: {relation: complex_subunit, sources: [PMID:22628558]}
+  downstream_enzymes: [Pdha1, Pdhb, Pcx]
+
+PC_m:
+  direct_enzymes: [Pcx]
+  carriers:
+    Mpc1: {relation: complex_subunit, sources: [PMID:22628558]}
+    Mpc2: {relation: complex_subunit, sources: [PMID:22628558]}
+  transcription_factors: [Ppara]
+  downstream_enzymes: [Cs, Pck1]
+  effectors:
+    Acetyl-CoA: {effect: activates, mode: allosteric, sources: [PMID:18613815]}
+    Aspartate:
+      effect: unknown
+      mode: allosteric
+      sources: [PMID:18613815]
+      note: 文献摘要只写明乙酰辅酶 A 与天冬氨酸是别构调节物，未写天冬氨酸的方向，暂记 unknown
+
+PDH_m:
+  direct_enzymes:
+    Pdha1: {relation: complex_subunit, sources: [PMID:24798336]}
+    Pdhb: {relation: complex_subunit, sources: [PMID:24798336]}
+    Dlat: {relation: complex_subunit, sources: [PMID:24798336]}
+    Dld:
+      relation: shared_subunit
+      sources: [PMID:28579060]
+      note: E3 同时是 α-酮戊二酸、丙酮酸、支链 α-酮酸脱氢酶复合体的亚基，也属于甘氨酸裂解系统
+  carriers:
+    Mpc1: {relation: complex_subunit, sources: [PMID:22628558]}
+    Mpc2: {relation: complex_subunit, sources: [PMID:22628558]}
+  regulators:
+    Pdk1: {effect: inhibits, mode: phosphorylation, sources: [PMID:24798336]}
+    Pdk2: {effect: inhibits, mode: phosphorylation, sources: [PMID:24798336]}
+    Pdk3: {effect: inhibits, mode: phosphorylation, sources: [PMID:24798336]}
+    Pdk4: {effect: inhibits, mode: phosphorylation, sources: [PMID:24798336]}
+    Pdp1: {effect: activates, mode: dephosphorylation, sources: [PMID:24798336]}
+    Pdp2: {effect: activates, mode: dephosphorylation, sources: [PMID:24798336]}
+  transcription_factors: [Ppara, Hif1a]
+  downstream_enzymes: [Cs]
+  effectors:
+    Acetyl-CoA:
+      effect: inhibits
+      mode: allosteric
+      sources: [PMID:373769]
+      note: 产物抑制；高乙酰辅酶 A / 辅酶 A 比值同时促进 PDK 使其失活。按比值起作用，单看浓度只是近似
+    NADH:
+      effect: inhibits
+      mode: allosteric
+      sources: [PMID:373769]
+      note: 产物抑制；高 NADH / NAD+ 比值促进 PDK 使其失活。按比值起作用
+    Pyruvate:
+      effect: activates
+      mode: allosteric
+      sources: [PMID:373769]
+      note: 低丙酮酸促进磷酸化失活，即丙酮酸经抑制 PDK 而激活 PDH
+
+PEPCK_c:
+  direct_enzymes: [Pck1]
+  related_isozymes: [Pck2]
+  transcription_factors: [Foxo1, Creb1, Crtc2, Hnf4a, Ppara, Pparg]
+  downstream_enzymes: [Fbp1, Fbp2]
+
+G6Pase_c:
+  direct_enzymes: [G6pc, G6pc2, G6pc3]
+  carriers: [Slc37a1, Slc37a2, Slc37a4]
+  upstream_enzymes: [Pck1, Pck2, Fbp1, Fbp2]
+  regulators:
+    Insr: &insulin_signaling
+      effect: unknown
+      mode: signaling
+      note: 胰岛素信号经 FoxO1 影响 G6pc 的转录，不直接作用于酶活性；方向未核对文献，暂记 unknown
+    Irs1: *insulin_signaling
+    Irs2: *insulin_signaling
+    Pik3r1: *insulin_signaling
+  transcription_factors: [Foxo1, Creb1, Hnf4a]
+
+PYK_c:
+  direct_enzymes: [Pkm, Pklr]
+  downstream_enzymes: [Ldha, Ldhb]
+  effectors:
+    Fructose-1,6-bisphosphate:
+      effect: activates
+      mode: allosteric
+      sources: [PMID:26277545]
+      note: PKL、PKM2 的主要别构激活物；PKM1 不结合
+    Alanine:
+      effect: inhibits
+      mode: allosteric
+      sources: [PMID:26277545]
+      note: 文中为 PKM2 的别构抑制物（不抑制 PKM1）；对 PKL 的作用未在该文核对

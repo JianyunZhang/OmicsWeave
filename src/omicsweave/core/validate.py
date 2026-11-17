@@ -364,15 +364,15 @@ def validate_experiment(exp: Experiment) -> list[Issue]:
 
 def _check_registries(exp: Experiment, out: _Collector) -> None:
     """实验有结果包时，用其中的数据集对照知识表（omicsweave.core.refs），不一致处给出警告。"""
-    from .refs import audit, audit_messages, latest_bundle
+    from .refs import KNOWLEDGE_CHECKS, audit, audit_messages, latest_bundle
 
     try:
         bundle = latest_bundle(exp)
         if bundle is None:
             return
         table = audit(exp, bundle)
-        # 手写代谢物 ID 表与 RefMet 的冲突属于包内知识表，不随项目报告（用 omicsweave refs audit 查看）
-        for message in audit_messages(table[table["check"] != "metabolite_table"]):
+        # 手写代谢物 ID 表与 RefMet 的冲突、反应成员的角色与调控方向属于包内知识表，不随项目报告（用 omicsweave refs audit 查看）
+        for message in audit_messages(table[~table["check"].isin(KNOWLEDGE_CHECKS)]):
             out.warning(f"{message}（结果包 {bundle.name}；明细用 omicsweave refs audit 导出）")
     except Exception as exc:  # noqa: BLE001 — 审计失败不影响校验结论
         out.warning(f"知识表审计未能完成：{exc}")

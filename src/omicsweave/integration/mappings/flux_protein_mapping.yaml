@@ -157,17 +157,18 @@ G6Pase_c:
   - G6pc
   - G6pc2
   - G6pc3
-  upstream_regulators:
-  - Pck1
-  - Pck2
-  - Fbp1
-  - Fbp2
+  upstream_regulators: []
   downstream_enzymes: []
   transporters:
   - Slc37a1
   - Slc37a2
   - Slc37a4
   cofactors: []
+  upstream_enzymes:
+  - Pck1
+  - Pck2
+  - Fbp1
+  - Fbp2
   description: Glucose-6-Phosphatase - 葡萄糖-6-磷酸酶 (糖异生终步)
 FBPase_c:
   direct_enzymes:

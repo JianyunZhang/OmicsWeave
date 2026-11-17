@@ -22,17 +22,10 @@ from omicsweave.core.idmap.reaction_pathway_mapping import REACTION_REGISTRY
 
 from .flux_gene_mapping import FLUX_GENE_MAPPING
 from .flux_metabolite_mapping import FLUX_METABOLITE_MAPPING
-from .flux_protein_mapping import REACTION_ENZYME_MAPPING
+from .flux_protein_mapping import PROTEIN_CATEGORIES, REACTION_ENZYME_MAPPING
 
 
-PROTEIN_ROLES = (
-    "direct_enzymes",
-    "upstream_regulators",
-    "downstream_enzymes",
-    "transporters",
-    "cofactors",
-    "related_isozymes",
-)
+PROTEIN_ROLES = PROTEIN_CATEGORIES
 METABOLITE_ROLES = ("substrates", "products", "related")
 
 

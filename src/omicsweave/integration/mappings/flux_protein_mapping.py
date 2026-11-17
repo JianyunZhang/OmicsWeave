@@ -36,6 +36,13 @@ def _load_yaml(filename: str) -> dict[str, Any]:
 
 REACTION_ENZYME_MAPPING: dict[str, Any] = _load_yaml("flux_protein_mapping.yaml")
 
+# 蛋白表的成员分类。方向证据只取 direct_enzymes（没有时取 transporters），其余分类只计入匹配与关联。
+# 后三类由反应成员知识表（G17，reaction_members.yaml）引入；追加在末尾，使原有分类的成员顺序不变。
+PROTEIN_CATEGORIES: tuple[str, ...] = (
+    "direct_enzymes", "upstream_regulators", "downstream_enzymes", "transporters", "cofactors", "related_isozymes",
+    "upstream_enzymes", "transcription_factors", "pathway_neighbors",
+)
+
 # ---------------------------------------------------------------------------
 # Validation against common/mouse_protein_id_mapping
 # ---------------------------------------------------------------------------
@@ -55,8 +62,7 @@ def _validate_proteins(mapping: dict[str, Any]) -> list[str]:
 
     warns: list[str] = []
     for rxn_id, entry in mapping.items():
-        for cat in ("direct_enzymes", "upstream_regulators", "downstream_enzymes", "transporters", "cofactors",
-                    "related_isozymes"):
+        for cat in PROTEIN_CATEGORIES:
             for protein in entry.get(cat, []):
                 if protein in MOUSE_PROTEIN_UNIPROT_MAPPING:
                     continue
@@ -106,8 +112,7 @@ def get_all_related_proteins(reaction: str) -> Tuple[List[str], Dict]:
     all_proteins: list[str] = []
     categories: dict[str, list[str]] = {}
 
-    for category in ['direct_enzymes', 'upstream_regulators', 'downstream_enzymes', 'transporters', 'cofactors',
-                     'related_isozymes']:
+    for category in PROTEIN_CATEGORIES:
         proteins = mapping.get(category, [])
         categories[category] = proteins
         all_proteins.extend(proteins)

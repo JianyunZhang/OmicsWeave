@@ -12,7 +12,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] integrate --experiment 实验ID [--mode flux_anchored,pathway_convergence] [--source 运行ID]
     omicsweave [--project-dir DIR] export --experiment 实验ID [--run 运行ID] [--format xlsx|tsv] [--output 路径]
     omicsweave [--project-dir DIR] stats --experiment 实验ID [--source 运行ID]
-    omicsweave [--project-dir DIR] refs list | build <genes|proteins|metabolites> [...] | audit --experiment 实验ID
+    omicsweave [--project-dir DIR] refs list | build <genes|proteins|metabolites|reaction_roles> [...] | audit --experiment 实验ID
     omicsweave [--project-dir DIR] replicate [--set 复现组ID]
     omicsweave [--project-dir DIR] diff 运行A 运行B [--experiment 实验ID] [--output 目录]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
@@ -123,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     refs = modules.add_parser("refs", help="知识表：列出（list）、生成（build <名称> [生成器参数]）、对照数据审计（audit）")
     refs.add_argument("action", choices=["list", "build", "audit"])
-    refs.add_argument("name", nargs="?", default=None, help="build 时的知识表名称：genes / proteins / metabolites")
+    refs.add_argument("name", nargs="?", default=None, help="build 时的知识表名称：genes / proteins / metabolites / reaction_roles")
     refs.add_argument("--experiment", default=None, help="audit：实验 ID")
     refs.add_argument("--run", default=None, help="audit：结果包运行 ID，默认最近一次含数据集的运行")
     refs.add_argument("--output", default=None, help="audit：把明细写到该 TSV 文件")

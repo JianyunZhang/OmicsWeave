@@ -28,6 +28,7 @@ from ..mappings import (
     match_protein_features,
     audit_mapping_integrity,
 )
+from ..mappings.flux_protein_mapping import PROTEIN_CATEGORIES
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
 from ..mappings.model_package import DEFAULT_PACKAGE
 from ..mappings.network_annotation import lipid_pool_roles
@@ -92,6 +93,14 @@ def _isozyme_check(direct: pd.DataFrame, fc_col: str, abundance_col: str, name_c
                   and names[major] not in concordant and fc[major] != 0 and np.sign(fc[major]) == -np.sign(flux_fc))
     return {"weighted_capacity_change": float((share * fc[usable]).sum()), "major_member": names[major],
             "major_share": round(float(share.max()), 4), "minor_isozyme_driven": driven}
+
+
+def _non_isozyme_rows(frame: pd.DataFrame, relations: dict[str, str], proteins: bool) -> set[Any]:
+    """登记为复合体亚基或共用亚基的成员在数据中的行：同工酶加权只在可互相替代的同工酶之间进行（G17）。"""
+    members = [member for member, relation in relations.items() if relation != "isozyme"]
+    if not members:
+        return set()
+    return set((match_protein_features if proteins else match_gene_features)(frame, members).indices)
 
 
 def _demote_minor_support(details: dict[str, Any], iso: dict[str, Any], concordant_key: str) -> dict[str, Any]:
@@ -329,6 +338,9 @@ class FluxEvidenceBuilder:
         if not direct_genes:
             direct_genes = set(carriers)
         genes = list(dict.fromkeys(genes + sorted(direct_genes) + sorted(carriers)))
+        relations = self.package.member_relations(str(flux_id))
+        # 多个复合体共用的亚基（如 DLD）的变化不只反映这个反应：只记为关联，不作为方向成员（G17）
+        direct_genes -= {member for member, relation in relations.items() if relation == "shared_subunit"}
         if not self.package.semantics(str(flux_id)).directional:
             direct_genes = set()           # 只表示容量：匹配到的基因全部记为关联，不判支持或冲突
         if not genes:
@@ -548,7 +560,8 @@ class FluxEvidenceBuilder:
             ),
             "evidence_mode": tx_evidence_mode,
         }
-        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices]]
+        excluded = _non_isozyme_rows(tx_df, relations, proteins=False)
+        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices and index not in excluded]]
         details = _demote_minor_support(details, _isozyme_check(
             direct_rows, log2fc_col, "base_mean", gene_column, flux_fc, concordant_genes_list, self.minor_share),
             "concordant_genes")
@@ -573,12 +586,13 @@ class FluxEvidenceBuilder:
         if not directional_proteins:
             # 运输/交换反应通常没有 EC 对应的直接酶，此时转运蛋白就是直接执行者。
             directional_proteins = list(mapping.get("transporters", []))
-        directional_proteins = list(dict.fromkeys(directional_proteins))
+        relations = self.package.member_relations(str(flux_id))
+        # 共用亚基只记为关联，不作为方向成员（G17，同转录组）
+        directional_proteins = [p for p in dict.fromkeys(directional_proteins) if relations.get(p) != "shared_subunit"]
         if not self.package.semantics(str(flux_id)).directional:
             directional_proteins = []      # 只表示容量：匹配到的蛋白全部记为关联
         all_proteins: list[str] = list(direct_enzymes)
-        for key in ("upstream_regulators", "downstream_enzymes",
-                     "transporters", "cofactors", "related_isozymes"):
+        for key in PROTEIN_CATEGORIES[1:]:
             all_proteins.extend(mapping.get(key, []))
         all_proteins = list(dict.fromkeys(all_proteins))
         if not all_proteins:
@@ -818,7 +832,8 @@ class FluxEvidenceBuilder:
             ),
             "evidence_mode": prot_evidence_mode,
         }
-        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices]]
+        excluded = _non_isozyme_rows(prot_df, relations, proteins=True)
+        direct_rows = sub.loc[[index for index in sub.index if index in direct_indices and index not in excluded]]
         details = _demote_minor_support(details, _isozyme_check(
             direct_rows, log2fc_col, "abundance", protein_column, flux_fc, concordant_proteins_list, self.minor_share),
             "concordant_proteins")

@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
-> 文档类型：设计建议（待实施）
-> 版本：v0.1（2026-11-16）
+> 文档类型：设计建议（S0 已实施，S1–S6 待实施）
+> 版本：v0.2（2026-11-17，增加 8.1 实施记录；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -504,11 +504,29 @@ panels:
 | S5 | G16：分流比、模块检验、交叉点分析；图 D | S2；旋转检验与 G9 共用 | 约 1 周 |
 | S6 | 示踪层读数接入档案（标记面板、F 轴的不依赖模型读数）；调控系数 | G10 与新示踪批次 | 取决于数据 |
 
-工作量按 1 名开发者估算，仅供排期参考。S0–S4 不需要新数据，也不改变任何已有统计量和 `flux_anchored` 的输出。
+工作量按 1 名开发者估算，仅供排期参考。S0–S4 不需要新数据，也不改变任何已有统计量。`flux_anchored` 的输出只在 S0 有一处有意的改变：
+G17 第 3 项让同工酶加权只在 `isozyme` 之间进行、共用亚基不再作为方向成员（8.1）。S1–S4 不改变 `flux_anchored` 的输出。
 建议 S2 完成后先用一个面板在现有课题上生成图，确认版式后再做 S3。
 
 与已有规划的关系：L 等级可以作为结论台账（G12）的判据来源；“跨队列复现”读取复现模式（G6）的结果，同时补上证据画像尚未读取复现结果的缺口（G5 第 4 项）；
 通量数据集的单位（第 2 节第 6 条）在 MFA 导出时补上。
+
+### 8.1 实施记录
+
+**S0（2026-11-17）**：G17 先覆盖第 7 节示例面板 `liver_pyruvate` 的 6 个反应（PYR_trans、PC_m、PDH_m、PEPCK_c、G6Pase_c、PYK_c）。
+
+| 项目 | 实现 | 未做的部分 |
+|---|---|---|
+| 成员知识表 | `integration/mappings/reaction_members.yaml` 与 `reaction_members.py`：角色键 `direct_enzymes`、`carriers`、`regulators`、`effectors`、`transcription_factors`、`upstream_enzymes`、`downstream_enzymes`、`related_isozymes`、`cofactors`、`pathway_neighbors`；直接酶与转运体的 `relation`（`isozyme` 默认、`complex_subunit`、`shared_subunit`）；调控因子与效应物必须写 `effect`（`activates`、`inhibits`、`unknown`）与 `mode`。`Member.activity_sign` 只对作用于活性的方式（磷酸化、去磷酸化、别构、蛋白互作）且方向已知的成员给出 ±1，`unknown`、`transcription`、`signaling` 为 0 | 其余 85 个反应未登记 |
+| 角色统一 | 两张映射表中登记反应的角色分组由成员表生成（`omicsweave refs build reaction_roles`，`--check` 只比较），只改分组，不增删成员。本次改写：PDH_m 的 Pdk1–4、Pdp1–2 由基因表的 catalytic 移到 regulatory；PEPCK_c 的 Pck2 统一为 related_isozyme；G6Pase_c 的 Pck1、Pck2、Fbp1、Fbp2 由两张表的 catalytic / upstream_regulators 移到 upstream_enzymes（蛋白表新增分类 `upstream_enzymes`、`transcription_factors`、`pathway_neighbors`） | 别构效应物没有从代谢物表的 `related` 中移出（移出会改变 `flux_anchored` 的代谢物匹配数）；反应档案以成员表的角色为准 |
+| 调控方向与文献 | 方向为激活或抑制的条目逐条附 PubMed 核对过的文献：PDK 抑制、PDP 激活 PDH（PMID 24798336）；乙酰辅酶 A、NADH 抑制、丙酮酸激活 PDH（PMID 373769）；DLD 为多个复合体共用的 E3（PMID 28579060）；乙酰辅酶 A 别构调节 PC（PMID 18613815）；果糖-1,6-二磷酸激活、丙氨酸抑制丙酮酸激酶（PMID 26277545，丙氨酸的证据针对 PKM2）；MPC1 与 MPC2 组成复合体（PMID 22628558）。PC 的天冬氨酸、G6Pase_c 的胰岛素信号成员方向未核对，记 `unknown` | 肝型丙酮酸激酶受 ATP 与 PKA 磷酸化抑制，未找到核对过的来源，暂未收录 |
+| 成员关系进入 `flux_anchored` | 同工酶加权排除复合体亚基与共用亚基；共用亚基只记为关联，不作为方向成员（转录组与蛋白组相同） | 复合体的整体判断（核心亚基半数同向）属于 S3 的 C 轴 |
+| 审计 | `omicsweave refs audit` 增加 `reaction_roles`（未登记反应的两表角色不一致 `role_mismatch`；登记反应的 `out_of_sync`、`unannotated_member`、`effector_unresolved`）与 `regulator_effect`（`effect_missing`）；`validate` 不随项目报告这些包内知识表的检查。当前：登记的 6 个反应无问题；其余反应有 53 处角色不一致（25 个反应，如 ACONT_m 的 Idh1–3、HEX_c 的 Gckr）与 103 个没有方向的调控因子 | 这份清单是其余反应的策展工作量 |
+
+在队列 A 上的对照（组学结果包 `run_20261112_102147_5d76`，只运行 `flux_anchored`，scratch 目录中进行）：改动前后的证据等级分布相同；
+`flux_evidence_profile` 1,605 行中 4 格变化（PYR_trans 在肾脏与皮下脂肪的 `tx_weighted_capacity_change` 与 `tx_major_member` 变为空，
+因为 Mpc1 与 Mpc2 是复合体亚基，不再按同工酶加权），`flux_evidence_table` 6,420 行中 1 格变化（心脏 PDH_m 转录组的 `n_implied_up` 由 4 变为 3，
+Dld 不再作为方向成员）。
 
 ---
 

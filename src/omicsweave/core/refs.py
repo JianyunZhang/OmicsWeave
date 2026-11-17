@@ -13,7 +13,11 @@
 - ``protein_accession``：蛋白组数据自带的 UniProt 登记号与蛋白注册表中该基因符号的登记号不一致；
 - ``metabolite_ids``：代谢组数据自带的 HMDB / KEGG 与代谢物注册表（RefMet）中同名代谢物的 ID 不一致；
 - ``metabolite_table``：手写的代谢物 ID 表与 RefMet 注册表不一致（不需要数据）；
-- ``mapping_coverage``：反应映射中的直接酶在各组织蛋白组数据中的覆盖率。
+- ``mapping_coverage``：反应映射中的直接酶在各组织蛋白组数据中的覆盖率；
+- ``reaction_roles`` 与 ``regulator_effect``：反应成员知识表（G17）的角色一致性与调控因子的作用方向（不需要数据）。
+
+``metabolite_table``、``reaction_roles``、``regulator_effect`` 只检查包内知识表（:data:`KNOWLEDGE_CHECKS`），
+``validate`` 不随项目报告。
 """
 from __future__ import annotations
 
@@ -31,6 +35,10 @@ from .config import Experiment
 AUDIT_COLUMNS = ["check", "omics", "tissue", "feature_id", "feature_name", "data_value", "registry_value", "issue"]
 
 
+# 只检查包内知识表、与项目数据无关的审计项
+KNOWLEDGE_CHECKS = ("metabolite_table", "reaction_roles", "regulator_effect")
+
+
 @dataclass(frozen=True)
 class RegistryInfo:
     name: str
@@ -38,6 +46,8 @@ class RegistryInfo:
     files: tuple[str, ...]
     builder: str            # "模块:函数"，接受 argv
     sources_key: str
+    package: str = "omicsweave.core.idmap"   # 文件所在的包；idmap 的表在其 data/ 子目录
+    subdir: str = "data"
 
 
 REGISTRIES: dict[str, RegistryInfo] = {
@@ -49,6 +59,10 @@ REGISTRIES: dict[str, RegistryInfo] = {
     "metabolites": RegistryInfo("metabolites", "代谢物：RefMet 标准名称、类别与 HMDB / KEGG / ChEBI",
                                 ("metabolite_registry.tsv.gz",),
                                 "omicsweave.core.idmap.build_metabolite_registry:main", "metabolites"),
+    "reaction_roles": RegistryInfo("reaction_roles", "反应成员角色（G17）：由策展表生成基因表与蛋白表中登记反应的角色分组；行数为登记的反应数",
+                                   ("reaction_members.yaml",),
+                                   "omicsweave.integration.mappings.reaction_members:main", "",
+                                   package="omicsweave.integration.mappings", subdir=""),
 }
 
 
@@ -56,16 +70,31 @@ def _data_dir() -> Path:
     return Path(importlib.import_module("omicsweave.core.idmap").__file__).parent / "data"
 
 
+def _registry_dir(info: RegistryInfo) -> Path:
+    return Path(importlib.import_module(info.package).__file__).parent / info.subdir
+
+
+def _count_rows(info: RegistryInfo) -> int:
+    from .idmap._registry import read_table
+
+    if info.files[0].endswith((".yaml", ".yml")):
+        import yaml
+        return len(yaml.safe_load((_registry_dir(info) / info.files[0]).read_text(encoding="utf-8")) or {})
+    return len(read_table(info.files[0]))
+
+
 def registry_status() -> pd.DataFrame:
-    from .idmap._registry import read_sources, read_table
+    from .idmap._registry import read_sources
 
     sources = read_sources() if (_data_dir() / "SOURCES.json").is_file() else {}
     rows = []
     for info in REGISTRIES.values():
-        present = all((_data_dir() / f).is_file() for f in info.files)
-        n_rows = len(read_table(info.files[0])) if present else 0
+        present = all((_registry_dir(info) / f).is_file() for f in info.files)
+        n_rows = _count_rows(info) if present else 0
         section = sources.get(info.sources_key, {}) if isinstance(sources.get(info.sources_key), dict) else {}
-        generated = section.get("generated_on") or sources.get("generated_on", "") if present else ""
+        # 策展表（没有下载来源）不记生成日期
+        generated = section.get("generated_on") or sources.get("generated_on", "") if present and info.sources_key \
+            else ""
         rows.append((info.name, info.description, ";".join(info.files), present, generated, n_rows, info.builder))
     return pd.DataFrame(rows, columns=["name", "description", "files", "present", "generated_on", "n_rows", "builder"])
 
@@ -198,9 +227,11 @@ def audit_mapping_coverage(run_dir: Path) -> list[tuple]:
 
 def audit(experiment: Experiment | None = None, run_dir: str | Path | None = None) -> pd.DataFrame:
     """对照知识表与数据；``run_dir`` 省略时取实验最近一次含数据集的结果包。"""
+    from omicsweave.integration.mappings.reaction_members import audit_reaction_roles
+
     if run_dir is None and experiment is not None:
         run_dir = latest_bundle(experiment)
-    rows = audit_metabolite_table()
+    rows = audit_metabolite_table() + audit_reaction_roles()
     if run_dir is not None:
         run_dir = Path(run_dir)
         rows = audit_protein_accessions(run_dir) + audit_metabolite_ids(run_dir) + rows + audit_mapping_coverage(run_dir)
@@ -212,6 +243,13 @@ def audit_messages(table: pd.DataFrame, limit: int = 5) -> list[str]:
     problems = table[table["issue"] != "coverage"]
     messages = []
     for (check, tissue), rows in problems.groupby(["check", "tissue"], sort=True):
+        if check in ("reaction_roles", "regulator_effect"):
+            issues = "、".join(f"{issue} {n}" for issue, n in rows["issue"].value_counts().sort_index().items())
+            examples = "、".join(f"{r.feature_id}.{r.feature_name}（{r.issue}：{r.data_value}"
+                                + (f" / {r.registry_value}" if r.registry_value else "") + "）"
+                                for r in rows.head(limit).itertuples())
+            messages.append(f"{check}：{len(rows)} 处待核对（{issues}），如 {examples}")
+            continue
         examples = "、".join(f"{r.feature_name}（数据 {r.data_value}，注册表 {r.registry_value}）"
                             for r in rows.head(limit).itertuples())
         where = f" {tissue}" if tissue else ""

@@ -46,6 +46,8 @@ omicsweave/integration/
     flux_gene_mapping.py                 # 101 反应 → 基因映射
     flux_protein_mapping.py              # 86 反应 → 酶/蛋白质映射
     flux_metabolite_mapping.py           # 111 反应 → 代谢物映射（底物/产物/关联）
+    reaction_members.py / .yaml          # 反应成员知识表（G17）：角色、成员关系、调控方向；生成上面两张表的角色分组
+    model_package.py                     # 模型包接口：证据构建器读取的反应知识（含成员关系）
   loaders/
     __init__.py
     mfa_loader.py                        # MFA 差异通量 + 通路 + TCA + 概览
@@ -134,6 +136,13 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度
   （RNA 的 `base_mean`、蛋白两组均值）加权，给出 `tx_/prot_weighted_capacity_change` 与主要成员；与通量同向的只有
   丰度占比低于阈值的次要同工酶、而主要同工酶反向时，该层不计为支持，记在 `minor_isozyme_driven_layers`。
+  加权只在可互相替代的同工酶之间进行：`mappings/reaction_members.yaml` 中登记为复合体亚基（`complex_subunit`，如
+  PDH 的 Pdha1 / Pdhb / Dlat、MPC 的 Mpc1 / Mpc2）的成员不参与；多个复合体共用的亚基（`shared_subunit`，如 Dld）
+  只记为关联，不作为方向成员。
+- 反应成员知识表（G17，`mappings/reaction_members.yaml`）：登记反应的成员角色、成员关系、调控因子与别构效应物对酶活性的
+  作用方向（`effect`、`mode`，逐条附 PubMed 核对过的文献）。基因表与蛋白表中这些反应的角色分组由它生成
+  （`omicsweave refs build reaction_roles`，`--check` 只比较），生成不增删两张表的成员；`omicsweave refs audit`
+  报告其余反应的角色不一致与没有作用方向的调控因子。目前登记了肝脏丙酮酸面板的 6 个反应。
 - `flux_anchored` 的诱饵映射（`decoys: {replicates: N, seed: S}`，默认关闭）：把各反应的方向成员换成同组织中丰度相近的
   随机特征后用同一套规则判定，诱饵支持率与目标支持率之比估计假证据比例，写在 `evaluation/decoy_*.parquet`。
 - 源结果包有逐只去掉动物的稳健性表时（`omicsweave stats`），与通量同向的特征全部由单只动物驱动的层记在

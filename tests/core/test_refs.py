@@ -149,9 +149,12 @@ class ValidateAuditTest(unittest.TestCase):
             write_manifest(RunManifest(run_id=run_dir.name, project_id="toy", experiment_id=EXP), run_dir)
             rows = audit_protein_accessions(run_dir)
             self.assertEqual([(r[3], r[5], r[7]) for r in rows], [("Pkm", "Q00000", "accession_mismatch")])
-            warnings = [i.message for i in validate_project(root).warnings if "protein_accession" in i.message]
+            all_warnings = [i.message for i in validate_project(root).warnings]
+            warnings = [m for m in all_warnings if "protein_accession" in m]
             self.assertEqual(len(warnings), 1)
             self.assertIn("Pkm", warnings[0])
+            # 包内知识表自身的检查（反应成员角色、调控方向）不随项目报告
+            self.assertFalse([m for m in all_warnings if m.startswith(("reaction_roles", "regulator_effect"))])
 
 
 if __name__ == "__main__":

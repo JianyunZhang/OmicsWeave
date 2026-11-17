@@ -1416,15 +1416,16 @@ PDH_m:
     - Pdhb
     - Dlat
     - Dld
+    transcription_factor:
+    - Ppara
+    - Hif1a
+    regulatory:
     - Pdk1
     - Pdk2
     - Pdk3
     - Pdk4
     - Pdp1
     - Pdp2
-    transcription_factor:
-    - Ppara
-    - Hif1a
   pathway: Pyruvate Metabolism
   description: Pyruvate dehydrogenase
 PC_m:
@@ -1473,6 +1474,7 @@ PEPCK_c:
     downstream:
     - Fbp1
     - Fbp2
+    related_isozyme:
     - Pck2
   pathway: Gluconeogenesis
   description: Phosphoenolpyruvate carboxykinase
@@ -1498,8 +1500,6 @@ G6Pase_c:
     - G6pc
     - G6pc2
     - G6pc3
-    - Pck1
-    - Fbp1
     regulatory:
     - Insr
     - Irs1
@@ -1513,6 +1513,9 @@ G6Pase_c:
     - Foxo1
     - Creb1
     - Hnf4a
+    upstream:
+    - Pck1
+    - Fbp1
   pathway: Gluconeogenesis
   description: Glucose-6-phosphatase
 LIPID_c:
