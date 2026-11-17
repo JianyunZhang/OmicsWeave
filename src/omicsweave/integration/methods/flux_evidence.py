@@ -14,7 +14,7 @@ MFA 显著性判定（FDR < 0.05 且 |Cohen's d| > 0.8；样本量不足时改�
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any
 
 import numpy as np
@@ -28,7 +28,14 @@ from ..mappings import (
     match_protein_features,
     audit_mapping_integrity,
 )
+from ..mappings.feature_resolver import (
+    IdentifierMatch,
+    _canonical_gene_symbol,
+    metabolite_member_of,
+    metabolite_members,
+)
 from ..mappings.flux_protein_mapping import PROTEIN_CATEGORIES
+from ..mappings.reaction_members import GENE_ROLE_ROLE, PROTEIN_CATEGORY_ROLE
 from omicsweave.core.idmap.reaction_pathway_mapping import get_kegg_pathway
 from ..mappings.model_package import DEFAULT_PACKAGE
 from ..mappings.network_annotation import lipid_pool_roles
@@ -93,6 +100,27 @@ def _isozyme_check(direct: pd.DataFrame, fc_col: str, abundance_col: str, name_c
                   and names[major] not in concordant and fc[major] != 0 and np.sign(fc[major]) == -np.sign(flux_fc))
     return {"weighted_capacity_change": float((share * fc[usable]).sum()), "major_member": names[major],
             "major_share": round(float(share.max()), 4), "minor_isozyme_driven": driven}
+
+
+# 反应档案（G13）的成员行：FluxEvidenceBuilder.member_matches 的列
+MEMBER_COLUMNS = ["layer", "role", "member_id", "member_relation", "regulator_effect", "regulator_mode",
+                  "direction_member", "row", "mapping_method", "selected", "selection_mode", "in_flux_anchored"]
+_GENE_COLUMNS = ("gene", "gene_symbol", "canonical_symbol")
+_PROTEIN_COLUMNS = ("protein", "Protein", "gene", "gene_symbol", "uniprot_id")
+
+
+def _metabolite_roles(roles: Any) -> dict[str, list[str]]:
+    """模型包给出的代谢物角色 → {substrates, products, related}（旧映射可能只给一个列表，全部记为关联）。"""
+    if isinstance(roles, dict):
+        return {key: list(roles.get(key, []) or []) for key in ("substrates", "products", "related")}
+    return {"substrates": [], "products": [], "related": list(roles or [])}
+
+
+def _tx_columns(frame: pd.DataFrame) -> tuple[str, str, str | None]:
+    """转录组表的 (FDR 列, log2FC 列, 证据级别列)。"""
+    return ("padj" if "padj" in frame.columns else "pvalue",
+            "log2fc" if "log2fc" in frame.columns else "log2FoldChange",
+            "evidence_level" if "evidence_level" in frame.columns else None)
 
 
 def _non_isozyme_rows(frame: pd.DataFrame, relations: dict[str, str], proteins: bool) -> set[Any]:
@@ -310,22 +338,10 @@ class FluxEvidenceBuilder:
             scoring.get("evidence_profile", {}), reliability=getattr(config, "contrast_reliability", None))
         self._evidence_table = evidence_table([])
 
-    # ---- 各组学证据 ----
+    # ---- 成员集合与入选规则（证据判定与反应档案共用） ----
 
-    def transcriptomics_evidence(
-        self,
-        flux_row: pd.Series,
-        tx_df: pd.DataFrame | None,
-    ) -> dict[str, Any]:
-        """一个反应在转录组中的证据：映射基因的匹配、显著基因与方向。
-
-        显著：padj < cutoff 且 |log2FC| > cutoff；没有统计显著基因时，|log2FC| ≥ fallback 阈值的基因按
-        ``effect_size_only`` 记录。只有直接酶 / 转运体基因提供方向证据，调控与通路邻近基因只记为关联。
-        """
-        if tx_df is None or tx_df.empty:
-            return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_data"}
-
-        flux_id = flux_row.get("flux_id", "")
+    def gene_members(self, flux_id: Any) -> tuple[list[str], set[str]]:
+        """转录组层的成员（全部映射基因）与方向成员。"""
         mapping = self.package.gene_mapping(flux_id)
         genes = list(dict.fromkeys(mapping.get("genes", [])))
         gene_roles = mapping.get("gene_roles", {}) or {}
@@ -343,6 +359,256 @@ class FluxEvidenceBuilder:
         direct_genes -= {member for member, relation in relations.items() if relation == "shared_subunit"}
         if not self.package.semantics(str(flux_id)).directional:
             direct_genes = set()           # 只表示容量：匹配到的基因全部记为关联，不判支持或冲突
+        return genes, direct_genes
+
+    def protein_members(self, flux_id: Any) -> tuple[list[str], list[str]]:
+        """蛋白组层的成员（全部映射蛋白）与方向成员。"""
+        mapping = self.package.enzyme_mapping(flux_id)
+        direct_enzymes: list[str] = list(mapping.get("direct_enzymes", []))
+        directional_proteins = list(direct_enzymes)
+        if not directional_proteins:
+            # 运输/交换反应通常没有 EC 对应的直接酶，此时转运蛋白就是直接执行者。
+            directional_proteins = list(mapping.get("transporters", []))
+        relations = self.package.member_relations(str(flux_id))
+        # 共用亚基只记为关联，不作为方向成员（G17，同转录组）
+        directional_proteins = [p for p in dict.fromkeys(directional_proteins) if relations.get(p) != "shared_subunit"]
+        if not self.package.semantics(str(flux_id)).directional:
+            directional_proteins = []      # 只表示容量：匹配到的蛋白全部记为关联
+        all_proteins: list[str] = list(direct_enzymes)
+        for key in PROTEIN_CATEGORIES[1:]:
+            all_proteins.extend(mapping.get(key, []))
+        return list(dict.fromkeys(all_proteins)), directional_proteins
+
+    def _tx_selection(self, sub: pd.DataFrame, log2fc_col: str, padj_col: str,
+                      evidence_col: str | None) -> tuple[pd.Series, str]:
+        """转录组的入选：padj < cutoff 且 |log2FC| > cutoff；一个也没有时退回效应量判定。返回 (掩码, 判定方式)。"""
+        tx_cut = self.omics_cutoffs["transcriptomics"]
+        # ── Phase 1: standard statistical significance ──
+        sig_mask = pd.Series(True, index=sub.index)
+        if padj_col in sub.columns:
+            sig_mask &= sub[padj_col].fillna(1.0) < tx_cut["pval_cutoff"]
+        if log2fc_col in sub.columns:
+            sig_mask &= sub[log2fc_col].fillna(0.0).abs() > tx_cut["log2fc_cutoff"]
+        # Exclude effect_size_only rows from statistical path
+        if evidence_col and evidence_col in sub.columns:
+            sig_mask &= sub[evidence_col].fillna("") != "effect_size_only"
+        # ── Phase 2: effect-size-only fallback (N=1) ──
+        if not sig_mask.any() and self.fallback_enabled and log2fc_col in sub.columns:
+            # Use the large effect threshold as a stricter substitute for p-value
+            fc_fallback_mask = sub[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large
+            if evidence_col and evidence_col in sub.columns:
+                # Include effect_size_only rows that were excluded from statistical path
+                effect_only_mask = sub[evidence_col].fillna("") == "effect_size_only"
+                fc_fallback_mask |= (effect_only_mask & sub[log2fc_col].fillna(0.0).abs().ge(self.fallback_fc_large))
+            return fc_fallback_mask, "effect_size_only" if fc_fallback_mask.any() else "statistical_test"
+        return sig_mask, "statistical_test"
+
+    def _prot_selection(self, sub: pd.DataFrame, comparison: str) -> tuple[pd.Series, str]:
+        """蛋白组的入选：FDR（没有 FDR 时用原始 p）< cutoff、经过检验且 |log2FC| > cutoff；没有有效 p 值时退回效应量判定。"""
+        pval_col, log2fc_col = f"pval_{comparison}", f"log2fc_{comparison}"
+        padj_col, evidence_col = f"padj_{comparison}", f"evidence_{comparison}"
+        prot_cut = self.omics_cutoffs["proteomics"]
+        # ── Phase 1: standard statistical significance ──
+        sig_mask = pd.Series(True, index=sub.index)
+        # FDR-adjusted p-values are the primary inferential contract. Raw
+        # p-values are used only for audited legacy inputs that have no finite
+        # adjusted values at all.
+        has_valid_pval = False
+        if padj_col in sub.columns and sub[padj_col].notna().any():
+            has_valid_pval = True
+            sig_mask &= sub[padj_col].fillna(1.0) < prot_cut["pval_cutoff"]
+        elif pval_col in sub.columns and sub[pval_col].notna().any():
+            has_valid_pval = True
+            sig_mask &= sub[pval_col].fillna(1.0) < prot_cut["pval_cutoff"]
+        if evidence_col in sub.columns:
+            sig_mask &= sub[evidence_col].astype(str).eq("inferential")
+        if log2fc_col in sub.columns:
+            sig_mask &= sub[log2fc_col].fillna(0.0).abs() > prot_cut["log2fc_cutoff"]
+        # ── Phase 2: effect-size-only fallback (no valid p-value) ──
+        if not sig_mask.any() and self.fallback_enabled and not has_valid_pval and log2fc_col in sub.columns:
+            fc_fallback_mask = sub[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large
+            return fc_fallback_mask, "effect_size_only" if fc_fallback_mask.any() else "statistical_test"
+        return sig_mask, "statistical_test"
+
+    def _metab_selection(self, all_sub: pd.DataFrame, comparison: str) -> tuple[pd.Series, str]:
+        """代谢组的入选：有有效 p 值时 FDR < cutoff 且 |log2FC| > cutoff；整组都没有 p 值时退回效应量判定。"""
+        pval_col, log2fc_col, fdr_col = f"pval_{comparison}", f"log2fc_{comparison}", f"fdr_{comparison}"
+        metab_cut = self.omics_cutoffs["metabolomics"]
+        has_valid_pval = pval_col in all_sub.columns and all_sub[pval_col].notna().any()
+        # ── Phase 1: standard significance ──
+        mask = pd.Series(True, index=all_sub.index)
+        if fdr_col in all_sub.columns:
+            if has_valid_pval:
+                mask &= all_sub[fdr_col].fillna(1.0) < metab_cut["pval_cutoff"]
+            else:
+                mask &= pd.Series(False, index=all_sub.index)
+        elif pval_col in all_sub.columns:
+            mask &= all_sub[pval_col].fillna(1.0) < metab_cut["pval_cutoff"]
+        if log2fc_col in all_sub.columns:
+            mask &= all_sub[log2fc_col].fillna(0.0).abs() > metab_cut["log2fc_cutoff"]
+        # ── Phase 2: effect-size-only fallback ──
+        if not mask.any() and self.fallback_enabled and not has_valid_pval:
+            fallback = all_sub[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large \
+                if log2fc_col in all_sub.columns else pd.Series(False, index=all_sub.index)
+            return fallback, "effect_size_only" if fallback.any() else "statistical_test"
+        return mask, "statistical_test"
+
+    # ---- 反应档案的成员行（G13） ----
+
+    def member_role(self, flux_id: Any, member: str, layer: str) -> tuple[str, str, str, str]:
+        """成员在该层的 (角色, 成员关系, 作用方向, 作用方式)：成员知识表（G17）优先，其次蛋白表的分类，
+        转录组再看基因表的角色；都没有时为 associated。"""
+        annotated = self.package.member_annotation(str(flux_id))
+        if annotated is not None and member in annotated.members:
+            known = annotated.members[member]
+            return known.role, known.relation, known.effect, known.mode
+        protein = self.package.enzyme_mapping(flux_id)
+        role = next((PROTEIN_CATEGORY_ROLE[c] for c in PROTEIN_CATEGORIES if member in (protein.get(c) or [])), "")
+        if not role and layer == "transcriptomics":
+            gene_roles = self.package.gene_mapping(flux_id).get("gene_roles", {}) or {}
+            role = next((GENE_ROLE_ROLE.get(r, r) for r, values in gene_roles.items() if member in (values or [])), "")
+        role = role or "associated"
+        return role, "isozyme" if role in ("direct_enzyme", "carrier") else "", "", ""
+
+    def member_matches(self, layer: str, flux_id: Any, frame: pd.DataFrame | None,
+                       comparison: str = "") -> pd.DataFrame:
+        """一个反应在一层中的成员行（反应档案，G13），列见 :data:`MEMBER_COLUMNS`。
+
+        成员集合、匹配函数与入选规则（``selected``）都与 ``*_evidence`` 的判定相同，所以 ``in_flux_anchored`` 为真的行
+        按层汇总后，与证据长表的映射数、匹配数、入选数一致。每个成员至少一行：没有匹配到时 ``row`` 为 None；
+        匹配到多行时每行一条。``frame`` 为 None 时只列成员（该层没有数据）。代谢组另有派生特征（``layer`` 为
+        ``derived``）、匹配到多个角色的特征（``ambiguous``），以及成员知识表中的别构效应物；后两者不计入证据判定。
+        """
+        if layer in ("transcriptomics", "proteomics"):
+            return self._identifier_members(layer, flux_id, frame, comparison)
+        if layer == "metabolomics":
+            return self._metabolite_members(str(flux_id), frame, comparison)
+        raise ValueError(f"member_matches 不支持的层：{layer}")
+
+    def _identifier_members(self, layer: str, flux_id: Any, frame: pd.DataFrame | None,
+                            comparison: str) -> pd.DataFrame:
+        if layer == "transcriptomics":
+            members, direct = self.gene_members(flux_id)
+            usable = frame is not None and not frame.empty and any(c in frame.columns for c in _GENE_COLUMNS)
+            match = match_gene_features(frame, members) if usable and members else IdentifierMatch((), (), {})
+        else:
+            members, directional = self.protein_members(flux_id)
+            direct = set(directional)
+            usable = frame is not None and not frame.empty and any(c in frame.columns for c in _PROTEIN_COLUMNS)
+            match = match_protein_features(frame, members) if usable and members else IdentifierMatch((), (), {})
+        selected: dict[Any, bool] = {}
+        mode = ""
+        if match.indices:
+            sub = frame.loc[list(match.indices)]
+            if layer == "transcriptomics":
+                padj_col, log2fc_col, evidence_col = _tx_columns(sub)
+                mask, mode = self._tx_selection(sub, log2fc_col, padj_col, evidence_col)
+            elif f"log2fc_{comparison}" in frame.columns:
+                mask, mode = self._prot_selection(sub, comparison)
+            else:
+                mask, mode = pd.Series(False, index=sub.index), "no_data"
+            selected = {index: bool(value) for index, value in mask.items()}
+        rows_by_query: dict[str, list[Any]] = defaultdict(list)
+        for index in match.indices:
+            rows_by_query[match.query_by_index[index]].append(index)
+        records, seen = [], set()
+        for member in members:
+            canonical = _canonical_gene_symbol(member) or str(member)
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            role, relation, effect, regulator_mode = self.member_role(flux_id, str(member), layer)
+            for index in rows_by_query.get(canonical) or [None]:
+                records.append([layer, role, str(member), relation, effect, regulator_mode, member in direct, index,
+                                match.match_method_by_index.get(index, "") if index is not None else "",
+                                selected.get(index, False), mode if index is not None else "", True])
+        return pd.DataFrame(records, columns=MEMBER_COLUMNS, dtype=object)   # object：行索引与 None 不被转成浮点
+
+    def _metabolite_members(self, flux_id: str, frame: pd.DataFrame | None, comparison: str) -> pd.DataFrame:
+        roles = _metabolite_roles(self.package.metabolite_roles(flux_id))
+        usable = frame is not None and not frame.empty and "compound" in frame.columns
+        derived_idx = _derived_indices(flux_id, frame, self.package.lipid_pools(flux_id)) if usable \
+            else {"substrates": [], "products": [], "related": []}
+        measured = frame[frame["feature_type"].isna()] if usable and "feature_type" in frame.columns else frame
+        match = match_metabolite_roles(measured, roles) if usable else None
+        hits = match.indices_by_role if match else {"substrates": (), "products": (), "related": ()}
+        all_idx = list(dict.fromkeys([*hits["substrates"], *hits["products"], *hits["related"],
+                                      *derived_idx["substrates"], *derived_idx["products"], *derived_idx["related"]]))
+        has_effects = usable and f"log2fc_{comparison}" in frame.columns
+        selected: dict[Any, bool] = {}
+        mode = ""
+        if all_idx and has_effects:
+            mask, mode = self._metab_selection(frame.loc[all_idx], comparison)
+            selected = {index: bool(value) for index, value in mask.items()}
+        directional = self.package.semantics(flux_id).directional
+        records: list[list[Any]] = []
+
+        def add(layer: str, role: str, member_id: str, index: Any, direction_member: bool, counted: bool,
+                method: str = "", effect: str = "", regulator_mode: str = "", chosen: dict | None = None,
+                how: str = "") -> None:
+            chosen = selected if chosen is None else chosen
+            records.append([layer, role, member_id, "", effect, regulator_mode, direction_member, index,
+                            method if index is not None else "", bool(chosen.get(index, False)),
+                            (how or mode) if index is not None else "", counted])
+
+        def method_of(index: Any) -> str:
+            return match.match_method_by_index.get(index, "") if match else ""
+
+        for key, role in (("substrates", "substrate"), ("products", "product"), ("related", "related_metabolite")):
+            members = metabolite_members(roles[key])
+            owned: dict[str, list[Any]] = defaultdict(list)
+            for index in hits[key]:
+                owned[metabolite_member_of(measured, index, members) or str(measured.at[index, "compound"])].append(index)
+            for member in members:
+                rows = owned.pop(member.member_id, [])
+                if key == "related" and not rows:
+                    continue                 # 关联代谢物只列测到的（知识表的关联条目含通路名等非代谢物）
+                for index in rows or [None]:
+                    add("metabolomics", role, member.member_id, index, directional and key != "related", True,
+                        method_of(index))
+            for owner, rows in owned.items():
+                for index in rows:
+                    add("metabolomics", role, owner, index, directional and key != "related", True, method_of(index))
+        for index in (match.ambiguous_indices if match else ()):
+            add("metabolomics", "ambiguous", str(measured.at[index, "compound"]), index, False, False,
+                "ambiguous_role", chosen={})
+        for key, indices in derived_idx.items():
+            role = {"substrates": "substrate", "products": "product"}.get(key, "step_ratio")
+            for index in indices:
+                add("derived", role, str(frame.at[index, "compound"]), index, directional and key != "related", True,
+                    "reaction_annotation")
+        annotated = self.package.member_annotation(flux_id)
+        for effector in (annotated.by_role("effector") if annotated else []):
+            found = match_metabolite_roles(measured, {"related": [effector.id]}) if usable else None
+            rows = list(found.indices_by_role["related"]) if found else []
+            chosen, how = {}, ""
+            if rows and has_effects:
+                mask, how = self._metab_selection(frame.loc[rows], comparison)
+                chosen = {index: bool(value) for index, value in mask.items()}
+            for index in rows or [None]:
+                add("metabolomics", "effector", effector.id, index, False, False,
+                    found.match_method_by_index.get(index, "") if found else "", effector.effect, effector.mode,
+                    chosen, how)
+        return pd.DataFrame(records, columns=MEMBER_COLUMNS, dtype=object)
+
+    # ---- 各组学证据 ----
+
+    def transcriptomics_evidence(
+        self,
+        flux_row: pd.Series,
+        tx_df: pd.DataFrame | None,
+    ) -> dict[str, Any]:
+        """一个反应在转录组中的证据：映射基因的匹配、显著基因与方向。
+
+        显著：padj < cutoff 且 |log2FC| > cutoff；没有统计显著基因时，|log2FC| ≥ fallback 阈值的基因按
+        ``effect_size_only`` 记录。只有直接酶 / 转运体基因提供方向证据，调控与通路邻近基因只记为关联。
+        """
+        if tx_df is None or tx_df.empty:
+            return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_data"}
+
+        flux_id = flux_row.get("flux_id", "")
+        genes, direct_genes = self.gene_members(flux_id)
+        relations = self.package.member_relations(str(flux_id))
         if not genes:
             return {"n_genes_checked": 0, "n_sig": 0, "sig_genes": [], "concordant_genes": [], "evidence_mode": "no_mapping"}
 
@@ -373,43 +639,10 @@ class FluxEvidenceBuilder:
         sub = tx_df.loc[list(matched.indices)].copy()
         direct_indices = set(matched_direct.indices)
 
-        tx_cut = self.omics_cutoffs["transcriptomics"]
-        tx_pval_cut = tx_cut["pval_cutoff"]
-        tx_fc_cut = tx_cut["log2fc_cutoff"]
-
-        padj_col = "padj" if "padj" in sub.columns else "pvalue"
-        log2fc_col = "log2fc" if "log2fc" in sub.columns else "log2FoldChange"
-        evidence_col = "evidence_level" if "evidence_level" in sub.columns else None
-
-        # ── Phase 1: standard statistical significance ──
-        sig_mask = pd.Series(True, index=sub.index)
-        if padj_col in sub.columns:
-            sig_mask &= sub[padj_col].fillna(1.0) < tx_pval_cut
-        if log2fc_col in sub.columns:
-            sig_mask &= sub[log2fc_col].fillna(0.0).abs() > tx_fc_cut
-        # Exclude effect_size_only rows from statistical path
-        if evidence_col and evidence_col in sub.columns:
-            sig_mask &= sub[evidence_col].fillna("") != "effect_size_only"
-
+        padj_col, log2fc_col, evidence_col = _tx_columns(sub)
+        sig_mask, tx_evidence_mode = self._tx_selection(sub, log2fc_col, padj_col, evidence_col)
         sig_df = sub[sig_mask]
         n_sig = len(sig_df)
-        tx_evidence_mode = "statistical_test"
-
-        # ── Phase 2: effect-size-only fallback (N=1) ──
-        if n_sig == 0 and self.fallback_enabled and log2fc_col in sub.columns:
-            # No statistically significant genes found → try effect-size-only
-            # Use the large effect threshold as a stricter substitute for p-value
-            fc_fallback_mask = sub[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large
-            # Include effect_size_only rows that were excluded from statistical path
-            if evidence_col and evidence_col in sub.columns:
-                # These rows have padj=NaN or are marked effect_size_only
-                effect_only_mask = sub[evidence_col].fillna("") == "effect_size_only"
-                fc_fallback_mask |= (effect_only_mask & sub[log2fc_col].fillna(0.0).abs().ge(self.fallback_fc_large))
-
-            sig_df = sub[fc_fallback_mask]
-            n_sig = len(sig_df)
-            if n_sig > 0:
-                tx_evidence_mode = "effect_size_only"
 
         gene_column = next(
             column for column in ("gene", "gene_symbol", "canonical_symbol")
@@ -580,21 +813,8 @@ class FluxEvidenceBuilder:
             return {"n_proteins_checked": 0, "n_sig": 0, "sig_proteins": [], "concordant_proteins": [], "evidence_mode": "no_data"}
 
         flux_id = flux_row.get("flux_id", "")
-        mapping = self.package.enzyme_mapping(flux_id)
-        direct_enzymes: list[str] = list(mapping.get("direct_enzymes", []))
-        directional_proteins = list(direct_enzymes)
-        if not directional_proteins:
-            # 运输/交换反应通常没有 EC 对应的直接酶，此时转运蛋白就是直接执行者。
-            directional_proteins = list(mapping.get("transporters", []))
+        all_proteins, directional_proteins = self.protein_members(flux_id)
         relations = self.package.member_relations(str(flux_id))
-        # 共用亚基只记为关联，不作为方向成员（G17，同转录组）
-        directional_proteins = [p for p in dict.fromkeys(directional_proteins) if relations.get(p) != "shared_subunit"]
-        if not self.package.semantics(str(flux_id)).directional:
-            directional_proteins = []      # 只表示容量：匹配到的蛋白全部记为关联
-        all_proteins: list[str] = list(direct_enzymes)
-        for key in PROTEIN_CATEGORIES[1:]:
-            all_proteins.extend(mapping.get(key, []))
-        all_proteins = list(dict.fromkeys(all_proteins))
         if not all_proteins:
             return {"n_proteins_checked": 0, "n_sig": 0, "sig_proteins": [], "concordant_proteins": [], "evidence_mode": "no_mapping"}
 
@@ -633,7 +853,6 @@ class FluxEvidenceBuilder:
         pval_col = f"pval_{comparison}"
         log2fc_col = f"log2fc_{comparison}"
         padj_col = f"padj_{comparison}"
-        evidence_col = f"evidence_{comparison}"
 
         if log2fc_col not in prot_df.columns:
             return {
@@ -650,38 +869,9 @@ class FluxEvidenceBuilder:
                 "evidence_mode": "no_data",
             }
 
-        prot_cut = self.omics_cutoffs["proteomics"]
-        prot_pval_cut = prot_cut["pval_cutoff"]
-        prot_fc_cut = prot_cut["log2fc_cutoff"]
-
-        # ── Phase 1: standard statistical significance ──
-        sig_mask = pd.Series(True, index=sub.index)
-        # FDR-adjusted p-values are the primary inferential contract. Raw
-        # p-values are used only for audited legacy inputs that have no finite
-        # adjusted values at all.
-        has_valid_pval = False
-        if padj_col in sub.columns and sub[padj_col].notna().any():
-            has_valid_pval = True
-            sig_mask &= sub[padj_col].fillna(1.0) < prot_pval_cut
-        elif pval_col in sub.columns and sub[pval_col].notna().any():
-            has_valid_pval = True
-            sig_mask &= sub[pval_col].fillna(1.0) < prot_pval_cut
-        if evidence_col in sub.columns:
-            sig_mask &= sub[evidence_col].astype(str).eq("inferential")
-        if log2fc_col in sub.columns:
-            sig_mask &= sub[log2fc_col].fillna(0.0).abs() > prot_fc_cut
-
+        sig_mask, prot_evidence_mode = self._prot_selection(sub, comparison)
         sig_df = sub[sig_mask]
         n_sig = len(sig_df)
-        prot_evidence_mode = "statistical_test"
-
-        # ── Phase 2: effect-size-only fallback (no valid p-value) ──
-        if n_sig == 0 and self.fallback_enabled and not has_valid_pval and log2fc_col in sub.columns:
-            fc_fallback_mask = sub[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large
-            sig_df = sub[fc_fallback_mask]
-            n_sig = len(sig_df)
-            if n_sig > 0:
-                prot_evidence_mode = "effect_size_only"
 
         sig_proteins_list = sorted(
             sig_df[protein_column].dropna().astype(str).tolist()
@@ -922,53 +1112,10 @@ class FluxEvidenceBuilder:
                 "evidence_mode": "no_data",
             }
 
-        metab_cut = self.omics_cutoffs["metabolomics"]
-        metab_pval_cut = metab_cut["pval_cutoff"]
-        metab_fc_cut = metab_cut["log2fc_cutoff"]
-
-        # Track whether valid p-values exist for fallback detection
-        _global_has_valid_pval = (
-            pval_col in metab_df.columns and metab_df.loc[all_idx, pval_col].notna().any()
-        )
-
-        def _is_sig(df_subset: pd.DataFrame) -> tuple[pd.Series, str]:
-            """Return (sig_mask, evidence_mode) for a metabolite subset."""
-            mask = pd.Series(True, index=df_subset.index)
-            has_valid_pval = (
-                pval_col in df_subset.columns
-                and df_subset[pval_col].notna().any()
-            )
-            if fdr_col in df_subset.columns:
-                if has_valid_pval:
-                    mask &= df_subset[fdr_col].fillna(1.0) < metab_pval_cut
-                else:
-                    mask &= pd.Series(False, index=df_subset.index)
-            elif pval_col in df_subset.columns:
-                mask &= df_subset[pval_col].fillna(1.0) < metab_pval_cut
-            if log2fc_col in df_subset.columns:
-                mask &= df_subset[log2fc_col].fillna(0.0).abs() > metab_fc_cut
-            return mask, "statistical_test"
-
-        def _is_sig_fallback(df_subset: pd.DataFrame) -> pd.Series:
-            """Effect-size-only fallback: use log2FC large threshold only."""
-            if log2fc_col not in df_subset.columns:
-                return pd.Series(False, index=df_subset.index)
-            return df_subset[log2fc_col].fillna(0.0).abs() >= self.fallback_fc_large
-
-        # ── Phase 1: standard significance ──
         all_sub = metab_df.loc[all_idx]
-        sig_mask, _ = _is_sig(all_sub)
+        sig_mask, metab_evidence_mode = self._metab_selection(all_sub, comparison)
         sig_df = all_sub[sig_mask]
         n_sig = len(sig_df)
-        metab_evidence_mode = "statistical_test"
-
-        # ── Phase 2: effect-size-only fallback ──
-        if n_sig == 0 and self.fallback_enabled and not _global_has_valid_pval:
-            fb_mask = _is_sig_fallback(all_sub)
-            sig_df = all_sub[fb_mask]
-            n_sig = len(sig_df)
-            if n_sig > 0:
-                metab_evidence_mode = "effect_size_only"
 
         sig_metab_list = sorted(sig_df["compound"].tolist()) if n_sig > 0 else []
 

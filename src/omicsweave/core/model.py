@@ -65,6 +65,7 @@ class IntegrationMode(str, Enum):
     PATHWAY_CONVERGENCE = "pathway_convergence"
     SAMPLE_LEVEL = "sample_level"
     REVERSAL = "reversal"            # design.reversal_pairs 的逐特征逆转判定
+    REACTION_DOSSIER = "reaction_dossier"   # 反应档案：成员级证据表与格子状态（G13）
 
 
 class _Strict(BaseModel):

@@ -134,6 +134,7 @@ def transcriptomics_frames(diff: pd.DataFrame, id_types: dict[str, str] | None =
         names = rows["feature_name"].fillna(ids) if "feature_name" in rows.columns else ids
         frame = pd.DataFrame({
             "gene": names.astype(str),
+            "feature_id": ids,                             # 反应档案按它回查统一结果表；匹配不读该列
             "log2fc": _numeric(rows, "log2fc"),
             "pvalue": _numeric(rows, "pvalue"),
             "padj": _numeric(rows, "padj"),

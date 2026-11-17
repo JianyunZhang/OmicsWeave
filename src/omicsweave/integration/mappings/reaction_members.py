@@ -264,6 +264,7 @@ def audit_reaction_roles(gene_map: Mapping[str, Any] | None = None, protein_map:
     - ``reaction_roles / out_of_sync``：登记反应中，表的角色与本表不同（registry_value 为本表）；
     - ``reaction_roles / unannotated_member``：登记反应中，表里有、本表没有的成员；
     - ``reaction_roles / effector_unresolved``：效应物名称查不到代谢物 ID；
+    - ``reaction_roles / alias_duplicate``：同一张表中指向同一基因的不同名称（registry_value 为规范符号）；
     - ``regulator_effect / effect_missing``：未登记反应中的调控因子（没有作用方向）。
     """
     from .flux_gene_mapping import FLUX_GENE_MAPPING
@@ -275,6 +276,7 @@ def audit_reaction_roles(gene_map: Mapping[str, Any] | None = None, protein_map:
     rows: list[tuple] = []
     for flux_id in sorted(set(gene_map) | set(protein_map)):
         gene_roles, protein_roles = _table_roles(gene_map.get(flux_id), protein_map.get(flux_id))
+        rows += _alias_duplicates(flux_id, gene_map.get(flux_id), protein_map.get(flux_id))
         annotated = annotations.get(flux_id)
         if annotated is None:
             for member in sorted(set(gene_roles) & set(protein_roles)):
@@ -295,6 +297,22 @@ def audit_reaction_roles(gene_map: Mapping[str, Any] | None = None, protein_map:
                     rows.append(_row("reaction_roles", flux_id, member, f"{label} " + "、".join(sorted(roles)),
                                      f"本表 {known.role}", "out_of_sync"))
     rows += _unresolved_effectors(annotations)
+    return rows
+
+
+def _alias_duplicates(flux_id: str, gene_entry: Mapping[str, Any] | None,
+                      protein_entry: Mapping[str, Any] | None) -> list[tuple]:
+    """同一张表中指向同一基因的不同名称（如 Gpi 与 Gpi1）：匹配时合并，但 flux_anchored 的映射数按名称计两次。"""
+    from .feature_resolver import _canonical_gene_symbol
+
+    rows = []
+    for label, members in (("基因表", (gene_entry or {}).get("genes", []) or []),
+                           ("蛋白表", [m for c in PROTEIN_CATEGORIES for m in (protein_entry or {}).get(c, []) or []])):
+        names: dict[str, list[str]] = defaultdict(list)
+        for member in dict.fromkeys(str(m) for m in members):
+            names[_canonical_gene_symbol(member) or member].append(member)
+        rows += [_row("reaction_roles", flux_id, "、".join(aliases), label, canonical, "alias_duplicate")
+                 for canonical, aliases in sorted(names.items()) if len(aliases) > 1]
     return rows
 
 

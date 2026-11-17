@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
-> 文档类型：设计建议（S0 已实施，S1–S6 待实施）
-> 版本：v0.2（2026-11-17，增加 8.1 实施记录；v0.1 为 2026-11-16）
+> 文档类型：设计建议（S0、S1 已实施，S2–S6 待实施）
+> 版本：v0.3（2026-11-17，8.1 增加 S1 记录；v0.2 同日增加 8.1；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -527,6 +527,24 @@ G17 第 3 项让同工酶加权只在 `isozyme` 之间进行、共用亚基不�
 `flux_evidence_profile` 1,605 行中 4 格变化（PYR_trans 在肾脏与皮下脂肪的 `tx_weighted_capacity_change` 与 `tx_major_member` 变为空，
 因为 Mpc1 与 Mpc2 是复合体亚基，不再按同工酶加权），`flux_evidence_table` 6,420 行中 1 格变化（心脏 PDH_m 转录组的 `n_implied_up` 由 4 变为 3，
 Dld 不再作为方向成员）。
+
+**S1（2026-11-17）**：G13 第一部分。
+
+| 项目 | 实现 | 未做的部分 |
+|---|---|---|
+| 证据构建器的成员行 | 成员集合（`gene_members`、`protein_members`）与各层入选规则（`_tx_selection` 等）从三个 `*_evidence` 中抽出，`flux_anchored` 与新方法 `member_matches` 共用；匹配函数返回每个匹配行对应的规范符号（`query_by_index`）；代谢物别名按与目标计数相同的口径合为成员（`metabolite_members`）。成员行带角色、成员关系、调控方向（取自成员知识表，没有登记时取映射表的分类）、是否方向成员、匹配方式、`selected`、`in_flux_anchored` | — |
+| `reaction_dossier` 模式 | `integration/reaction_dossier/tables/dossier_members.parquet`：不以通量为锚，覆盖有数据的（组织, 比较）× 全部反应；统计量按特征 ID 从统一结果表回查（含 RNA 未收缩的 `log2fc_unshrunk`）；分示踪剂通量行读 `differential_by_tracer.parquet`，参数 `tracers` 中声明而没有数据的记 `not_infused`；别构效应物、关联代谢物、匹配到多个角色的特征（`ambiguous`）、派生比值（`layer` 为 `derived`）各成一行；同工酶的丰度占比与 `minor_isozyme`、重复特征 `duplicate_feature`、单只动物驱动 `single_subject_driven` 记在 `flags` | 第 6 节中的 `replicated`、`replication_fdr`、`mapping_quality` 与其他来源（`sources`）放在 S2；逐只动物表与面板在 S2 |
+| 格子状态 | 4.1 的全部状态。等效判定（双单侧，界限 0.58）用 t 分位数，自由度取 `residual_df`（蛋白组线性模型，不含先验自由度，偏保守），否则 n1 + n2 − 2；RNA 的 apeGLM 收缩估计偏向 0，不做等效判定。通量先判样本数（`insufficient_n`），再判可辨识性 | — |
+| 知识表审计 | `refs audit` 增加 `alias_duplicate`：同一张表中指向同一基因的不同名称。现有 2 处（HEX_c、PGI_c 蛋白表中的 Gpi 与 Gpi1）；档案按规范符号计一个成员，`flux_anchored` 的映射数按名称计两次 | 删去重复名称会改变 `flux_anchored` 的覆盖度，未改 |
+
+在队列 A 上（组学结果包 `run_20261112_102147_5d76`，scratch 目录中进行）：
+
+- `flux_anchored` 的 4 张表与 S0 后的结果逐值相同（重构没有改变输出）；
+- 档案 162 个反应、82,972 行，`flux_anchored` 加档案共约 6.5 分钟；
+- 1,857 个（反应, 组织, 比较, 层）上，档案按层汇总的匹配数、入选数与 `flux_evidence_table` 一致，映射数在合并别名后一致；
+- 附录 A 的 PC_m 与 PDH_m 逐格复现（通量各示踪剂的状态、PCX 蛋白 `changed` 但未入选、Pdk2 RNA 上调指向通量下降等）。
+  与附录 A 不同之处：PDHA1、PDHB、DLAT 蛋白由 `no_evidence` 变为 `equivalent`（附录 A 未做等效检验）；
+  “Aspartic Acid”与“Aspartic acid”两个特征被标为 `duplicate_feature`（第 2 节第 13 条）。
 
 ---
 

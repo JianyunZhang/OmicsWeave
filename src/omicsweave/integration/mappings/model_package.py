@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 from . import FLUX_GENE_MAPPING, FLUX_METABOLITE_MAPPING, REACTION_ENZYME_MAPPING, get_metabolite_roles
 from .network_annotation import ReactionSemantics, lipid_pool_roles, network_reactions, reaction_semantics
-from .reaction_members import member_relations
+from .reaction_members import ReactionMembers, member_relations, reaction_members
 
 
 class ModelPackage(Protocol):
@@ -28,6 +28,10 @@ class ModelPackage(Protocol):
 
     def member_relations(self, flux_id: str) -> dict[str, str]:
         """直接酶 / 转运体之间的关系（isozyme、complex_subunit、shared_subunit）；没有登记的成员按同工酶处理。"""
+        ...
+
+    def member_annotation(self, flux_id: str) -> ReactionMembers | None:
+        """成员知识表（G17）中该反应的条目：角色、调控方向、别构效应物；没有登记时为 None。"""
         ...
 
     def metabolite_roles(self, flux_id: str) -> dict[str, list[str]] | list[str] | None: ...
@@ -49,6 +53,9 @@ class CuratedNetworkPackage:
 
     def member_relations(self, flux_id: str) -> dict[str, str]:
         return member_relations(flux_id)
+
+    def member_annotation(self, flux_id: str) -> ReactionMembers | None:
+        return reaction_members(flux_id)
 
     def metabolite_roles(self, flux_id: str):
         roles = get_metabolite_roles(flux_id)
@@ -84,6 +91,9 @@ class DecoyPackage:
 
     def member_relations(self, flux_id: str) -> dict[str, str]:
         return {}                          # 诱饵成员互不相关，按同工酶处理
+
+    def member_annotation(self, flux_id: str) -> ReactionMembers | None:
+        return None
 
     def metabolite_roles(self, flux_id: str):
         roles = self.metabolites.get(flux_id)

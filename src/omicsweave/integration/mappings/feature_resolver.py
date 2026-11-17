@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Mapping, Sequence
 import re
 import unicodedata
@@ -49,11 +50,12 @@ class MetaboliteRoleMatch:
 
 @dataclass(frozen=True)
 class IdentifierMatch:
-    """基因或蛋白标识符匹配结果。"""
+    """基因或蛋白标识符匹配结果。``query_by_index`` 为每个匹配行对应的规范基因符号（查询）。"""
 
     indices: tuple[Any, ...]
     matched_queries: tuple[str, ...]
     match_method_by_index: dict[Any, str]
+    query_by_index: dict[Any, str] = field(default_factory=dict)
 
 
 def _unique_casefold(pairs: Sequence[tuple[str, str | None]]) -> dict[str, str | None]:
@@ -247,7 +249,8 @@ def match_gene_features(
     matched_queries = tuple(
         query for query in canonical_queries if query in matched_canonical
     )
-    return IdentifierMatch(tuple(matched_indices), matched_queries, methods)
+    return IdentifierMatch(tuple(matched_indices), matched_queries, methods,
+                           {row_index: selected[row_index][0] for row_index in matched_indices})
 
 
 def _uniprot_ids_from_value(value: Any) -> set[str]:
@@ -363,7 +366,8 @@ def match_protein_features(
     matched_queries = tuple(
         query for query in canonical_queries if query in matched_canonical
     )
-    return IdentifierMatch(tuple(matched_indices), matched_queries, methods)
+    return IdentifierMatch(tuple(matched_indices), matched_queries, methods,
+                           {row_index: next(iter(selected_queries[row_index])) for row_index in matched_indices})
 
 
 def _metabolite_feature_index(
@@ -499,10 +503,58 @@ def match_metabolite_roles(
     )
 
 
+@dataclass(frozen=True)
+class MetaboliteMember:
+    """知识表中的一个代谢物成员：指向同一标准 ID（或同一名称）的别名合为一个成员，与
+    :func:`match_metabolite_roles` 统计目标数（``target_count_by_role``）的口径相同。"""
+
+    member_id: str                 # 别名中的显示名（首字母大写者优先）
+    key: str
+    ids: frozenset[str]
+    names: frozenset[str]
+
+
+def metabolite_members(aliases: Sequence[str]) -> list[MetaboliteMember]:
+    return list(_metabolite_members(tuple(str(a) for a in aliases)))
+
+
+@lru_cache(maxsize=4096)
+def _metabolite_members(aliases: tuple[str, ...]) -> tuple[MetaboliteMember, ...]:
+    groups: dict[str, list[str]] = {}
+    for alias in aliases:
+        key = _metabolite_target_key(alias)
+        if key != "name:":
+            groups.setdefault(key, []).append(str(alias))
+    members = []
+    for key, names in groups.items():
+        ids = {normalized for name in names for value in (lookup_metabolite_ids(name) or {}).values()
+               if (normalized := _normalize_database_id(value))}
+        label = next((n for n in names if n[:1].isupper()), names[0])
+        members.append(MetaboliteMember(label, key, frozenset(ids), frozenset(_normalize_name(n) for n in names)))
+    return tuple(members)
+
+
+def metabolite_member_of(dataframe: pd.DataFrame, row_index: Any, members: Sequence[MetaboliteMember],
+                         feature_column: str = "compound") -> str | None:
+    """匹配到的数据行属于哪个成员：与 :func:`match_metabolite_roles` 一样，带数据库 ID 的行按 ID，
+    没有 ID 的行按规范化后的完整名称。"""
+    row_ids: set[str] = set()
+    for column in METABOLITE_ID_COLUMNS:
+        if column in dataframe.columns:
+            row_ids.update(_database_ids_from_value(dataframe.at[row_index, column]))
+    if row_ids:
+        return next((m.member_id for m in members if row_ids & m.ids), None)
+    name = _normalize_name(dataframe.at[row_index, feature_column]) if feature_column in dataframe.columns else ""
+    return next((m.member_id for m in members if name and name in m.names), None)
+
+
 __all__ = [
     "IdentifierMatch",
+    "MetaboliteMember",
     "MetaboliteRoleMatch",
     "match_gene_features",
     "match_metabolite_roles",
     "match_protein_features",
+    "metabolite_member_of",
+    "metabolite_members",
 ]

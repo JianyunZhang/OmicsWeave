@@ -131,6 +131,15 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
   “未逆转”须通过等效性检验（双单侧检验，界限为疾病效应的 `equivalence_margin` 倍，默认 0.5），低功效的不显著结果
   只能是 undetermined；疾病效应本身未建立（padj ≥ `alpha`）时不做判定。输出 `tables/reversal.parquet` 与
   `tables/reversal_summary.parquet`。通路层面的逆转与析因交互项尚未实现（需要公式模型）。
+- `reaction_dossier`（已接入，G13 第一部分）：不以通量为锚，对每个（反应, 组织, 比较）列出各层的每个成员——酶与转运体
+  （RNA、蛋白）、调控因子（带作用方向）、底物与产物、派生比值、别构效应物、各示踪剂与合并的通量——及其统计量与格子状态
+  （changed / nominal / equivalent / no_evidence / not_detected / not_measured / qc_blocked / no_knowledge；通量另有
+  not_infused / insufficient_n / not_identifiable）。成员集合、匹配与入选规则（`selected`）由证据构建器的
+  `member_matches` 给出，与 `flux_anchored` 相同；`in_flux_anchored` 为真的行按层汇总后与 `flux_evidence_table` 的
+  匹配数、入选数一致（映射数按规范基因符号计，`flux_anchored` 按名称计）。等效判定用 t 分位数（自由度取 `residual_df`，
+  否则 n1 + n2 − 2）；RNA 的 apeGLM 收缩估计不做等效判定。参数 `tracers`（应出现的示踪剂，没有数据的记 not_infused）、
+  `reactions`、`tissues`、`label`、`rules`；入选阈值、`tissue_map`、`qc_imbalance` 没写时沿用 `flux_anchored`。
+  输出 `tables/dossier_members.parquet`（设计文档第 6 节的契约）。通路面板、逐只动物表、其他来源与图在 S2。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度
