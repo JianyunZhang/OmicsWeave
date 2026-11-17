@@ -201,7 +201,10 @@ class DossierPanelBundleTest(unittest.TestCase):
                          ["HEX_c", "G6Pase_c"])
         members = pd.read_parquet(base / "tables" / "dossier_members.parquet")
         panel = load_panels(self.root / "experiments" / EXP / "panels.yaml")["liver_glucose"]
-        view = matrix_view(panel, panel_elements(panel), members, "liver", DIET, ["A"], ["glucose", "alanine"])
+        assessment = (pd.read_parquet(base / "tables" / "axis_assessment.parquet"),
+                      pd.read_parquet(base / "tables" / "reaction_assessment.parquet"))
+        view = matrix_view(panel, panel_elements(panel), members, "liver", DIET, ["A"], ["glucose", "alanine"],
+                           assessment)
         # 声明的示踪剂没有数据：矩阵上有 not_infused 的列，预期示踪剂标出
         flux = view[view["block"] == "flux"].set_index(["element_id", "tracer"])
         self.assertEqual(flux.at[("G6Pase_c", "alanine"), "display_state"], "not_infused")
@@ -213,6 +216,13 @@ class DossierPanelBundleTest(unittest.TestCase):
         cell = view[(view["element_id"] == "HEX_c") & (view["column"] == "R:A")].iloc[0]
         self.assertAlmostEqual(exported.loc[exported["element_id"] == "HEX_c", "enzyme R:A log2fc"].iloc[0],
                                round(cell["value"], 4))
+        # 评估块原样取自评估表
+        claim = assessment[1].set_index(["flux_id", "tissue", "contrast_id"]).loc[("HEX_c", "liver", DIET)]
+        exported_claim = exported.set_index("element_id").at["HEX_c", "assessment level state"]
+        self.assertEqual(exported_claim, claim["flux_claim"])
+        capacity = assessment[0][(assessment[0]["flux_id"] == "HEX_c") & (assessment[0]["axis"] == "capacity")
+                                 & (assessment[0]["tissue"] == "liver") & (assessment[0]["contrast_id"] == DIET)].iloc[0]
+        self.assertEqual(exported.set_index("element_id").at["HEX_c", "assessment C state"], capacity["state"])
         keys = ["source", "flux_id", "layer", "role", "member_id", "feature_id", "tracer"]
         exported_members = pd.read_csv(folder / f"matrix_{DIET}_members.tsv", sep="\t", keep_default_na=False)
         source = members[(members["tissue"] == "liver") & (members["contrast_id"] == DIET)

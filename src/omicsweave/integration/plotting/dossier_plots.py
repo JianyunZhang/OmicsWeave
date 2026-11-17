@@ -40,7 +40,13 @@ GLYPHS = {"equivalent": "=", "not_identifiable": "x", "insufficient_n": "!", "no
 GLYPH_LEGEND = [("=", "equivalent (90% CI within ±0.58)"), ("x", "not identifiable"), ("!", "insufficient n"),
                 ("/", "not measured / not infused"), ("?", "mapped, not detected"), ("–", "no member in knowledge"),
                 ("QC", "QC blocked")]
-BLOCK_TITLES = {"flux": "FLUX by tracer", "enzyme": "ENZYME", "regulator": "REGULATOR", "pool": "POOL"}
+BLOCK_TITLES = {"flux": "FLUX by tracer", "enzyme": "ENZYME", "regulator": "REGULATOR", "pool": "POOL",
+                "assessment": "ASSESSMENT"}
+# 评估块：形状表示方向与强度（实心 = changed / established，空心 = suggestive），颜色与色阶的升降一致
+AXIS_GLYPHS = {"unchanged": "=", "mixed": "≠", "undetermined": "·", "not_identifiable": "x", "insufficient_n": "!",
+               "not_detected": "?", "not_measured": "/", "qc_blocked": "QC", "no_knowledge": "–"}
+AXIS_LEGEND = [("filled ▲▼", "changed (flux: established)"), ("hollow", "suggestive"), ("=", "unchanged"),
+               ("≠", "mixed / tracers conflict"), ("·", "undetermined"), ("L3–L0, LX", "claim level (n concordant axes)")]
 IDENTIFIABILITY = {"well_constrained": "#1c5cab", "moderate": "#5598e7", "poorly_constrained": "#b7d3f6",
                    "bound_pinned": "#e1e0d9"}
 
@@ -92,6 +98,24 @@ def _draw_cell(ax: plt.Axes, x: float, y: float, cell: pd.Series) -> None:
                 fontsize=5, color=INK2, zorder=3)
 
 
+def _draw_assessment(ax: plt.Axes, x: float, y: float, cell: pd.Series) -> None:
+    """评估块的一格：四条轴为方向符号，结论等级为文字。"""
+    state, direction = cell["display_state"], int(cell["value"]) if pd.notna(cell["value"]) else 0
+    if cell["column"] == "level":
+        strong = state in ("L1", "L2", "L3")
+        ax.text(x, y, str(cell["text"]), ha="center", va="center", fontsize=7.5 if strong else 7,
+                color=INK if strong or state == "LX" else MUTED, fontweight="bold" if strong else "normal")
+        return
+    if state in ("changed", "suggestive") and direction:
+        # 用标记而不是字形画三角：实心 = changed，空心 = suggestive，大小一致（字体回退会让空心字形变小）
+        color = "#e34948" if direction > 0 else "#2a78d6"
+        ax.scatter([x], [y], s=55, marker="^" if direction > 0 else "v", linewidths=1.2, zorder=3,
+                   facecolors=color if state == "changed" else "none", edgecolors=color)
+        return
+    ax.text(x, y, AXIS_GLYPHS.get(state, "·"), ha="center", va="center", fontsize=8,
+            color=INK2 if state in ("unchanged", "mixed") else MUTED)
+
+
 def _short_label(block: str, column: str, tracer: str) -> str:
     """列的短名：通量列为示踪剂，其余为层的代码（P、R、M）；来源写在上方的来源行。"""
     return str(tracer) if block == "flux" else str(column).split(":")[0]
@@ -107,7 +131,7 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
     columns = view[["block", "column", "source", "tracer"]].drop_duplicates(["block", "column"])
     columns = columns.assign(_s=columns["source"].map(sources.index), _o=range(len(columns)))
     x, positions, labels, block_spans, source_spans = 0.0, {}, {}, {}, []
-    for block in ("flux", "enzyme", "regulator", "pool"):
+    for block in ("flux", "enzyme", "regulator", "pool", "assessment"):
         part = columns[columns["block"] == block].sort_values(["_s", "_o"])
         if part.empty:
             continue
@@ -115,10 +139,12 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
         for source, group in part.groupby("_s", sort=True):
             first = x
             for r in group.itertuples():
-                positions[(block, r.column)] = x
+                step = 1.8 if (block, r.column) == ("assessment", "level") else 1.0
+                positions[(block, r.column)] = x + (step - 1.0) / 2
                 labels[(block, r.column)] = _short_label(block, r.column, r.tracer)
-                x += 1.0
-            source_spans.append((first, x - 1.0, sources[source]))
+                x += step
+            if block != "assessment":                # 评估块综合全部来源，不写来源行
+                source_spans.append((first, x - 1.0, sources[source]))
             x += 0.25                                # 来源之间留一点空
         x -= 0.25
         block_spans[block] = (start, x - 1.0)
@@ -164,7 +190,10 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
             if cell["block"] == "flux" and bool(cell["expected_tracer"]):
                 ax.add_patch(plt.Rectangle((cx - 0.45, cy - 0.45), 0.9, 0.9, fill=False, lw=0.6, ls=(0, (2, 1.5)),
                                            ec=MUTED, zorder=1))
-            _draw_cell(ax, cx, cy, cell)
+            if cell["block"] == "assessment":
+                _draw_assessment(ax, cx, cy, cell)
+            else:
+                _draw_cell(ax, cx, cy, cell)
         fig.text(0.01, 1 - 0.35 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}", fontsize=10, color=INK,
                  fontweight="bold", va="top")
         _matrix_legend(fig, width, height, runs or {})
@@ -189,6 +218,8 @@ def _matrix_legend(fig: plt.Figure, width: float, height: float, runs: dict[str,
     glyphs = "   ".join(f"{g} {label}" for g, label in GLYPH_LEGEND)
     fig.text(0.04, 0.38 / height, glyphs + "   k/n changed / quantified members   dashed box: expected tracer",
              fontsize=6, color=INK2)
+    fig.text(0.04, 0.27 / height, "ASSESSMENT  F flux · C enzyme capacity · R regulation · M substrates/products:   "
+             + "   ".join(f"{g} {label}" for g, label in AXIS_LEGEND), fontsize=6, color=INK2)
     if runs:
         fig.text(0.04, 0.15 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items())
                  + "   P protein · R RNA · M metabolite (pool: metabolite or product/substrate ratio)"

@@ -35,6 +35,8 @@
 - ``tables/dossier_samples.parquet``（逐只动物值）与 ``tables/dossier_sample_contrasts.parquet``（各比较的分子 / 分母样本）；
 - 有面板时：``tables/panel_elements.parquet``，以及 ``figures/<面板>/<组织>/`` 下的 ``matrix_<比较>``（图 A 与同名的
   TSV / XLSX 导出表）、``dossier_<反应>_<比较>``（图 B）、``tracer_coverage_<比较>``（图 C）；
+- ``tables/axis_assessment.parquet`` 与 ``tables/reaction_assessment.parquet``：分轴综合评估（S3，见
+  :mod:`omicsweave.integration.dossier.assessment`）；图 A 的评估块即这两张表；
 - ``qc/contrast_reliability.parquet``（各来源的可靠性表）。
 """
 from __future__ import annotations
@@ -52,6 +54,7 @@ from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
 
+from ..dossier.assessment import RULES as ASSESSMENT_RULES, assess
 from ..dossier.panels import Panel, PanelError, load_panels, panel_elements
 from ..dossier.samples import contrast_samples, dossier_samples
 from ..dossier.sources import DossierSource, other_source, primary_source
@@ -66,12 +69,15 @@ MODE = IntegrationMode.REACTION_DOSSIER
 # 与 flux_anchored 共用（没有写时沿用其参数）
 SHARED = ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "isozyme", "tissue_map", "qc_imbalance")
 DEFAULTS: dict[str, Any] = {**{key: fa.DEFAULTS[key] for key in SHARED}, "tracers": [], "reactions": [],
-                            "tissues": [], "label": "", "rules": {"alpha": 0.05, "equivalence_bound": 0.58},
+                            "tissues": [], "label": "",
+                            "rules": {k: v for k, v in ASSESSMENT_RULES.items() if k != "minor_share"},
                             "sources": [], "panels": "", "figures": {"formats": ["pdf", "png"], "max_reactions": 15}}
 DOSSIER_TABLE = "dossier_members.parquet"
 SAMPLES_TABLE = "dossier_samples.parquet"
 SIDES_TABLE = "dossier_sample_contrasts.parquet"
 ELEMENTS_TABLE = "panel_elements.parquet"
+AXIS_TABLE = "axis_assessment.parquet"
+ASSESSMENT_TABLE = "reaction_assessment.parquet"
 Z95 = 1.959963984540054              # ci_lower / ci_upper 的 95% 区间
 
 COLUMNS = [
@@ -81,6 +87,8 @@ COLUMNS = [
     "n_numerator", "n_denominator", "mean_numerator", "mean_denominator", "abundance_share",
     "cell_state", "state_reason", "selected", "identifiability", "frac_at_bound", "evidence_level", "qc_status",
     "flags", "implied_direction", "direction_evidence", "in_flux_anchored",
+    # 通量合并估计的附加读数（S3 的 F 轴用到）：示踪剂间异质性、逐只去除后的方向稳定性、示踪剂证据类别
+    "heterogeneity_pvalue", "direction_stability", "tracer_evidence",
 ]
 _LONG_STATS = {"log2fc": "log2fc", "log2fc_unshrunk": "log2fc_unshrunk", "effect_size": "effect",
                "effect_size_type": "effect_type", "lfc_se": "se", "pvalue": "pvalue", "padj": "padj", "lfsr": "lfsr",
@@ -103,6 +111,10 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
     configured = dict(ctx.experiment.config.integration.parameters.get(IntegrationMode.FLUX_ANCHORED.value, {}) or {})
     inherited = {key: configured[key] for key in SHARED if key in configured and key not in parameters}
     params = {**DEFAULTS, **inherited, **parameters}
+    bad_rules = sorted(set(parameters.get("rules") or {}) - set(DEFAULTS["rules"]))
+    if bad_rules:
+        raise RunError(f"integration.parameters.{MODE.value}.rules 中有无法识别的阈值：{'、'.join(bad_rules)}"
+                       f"（可用：{'、'.join(DEFAULTS['rules'])}）")
     params["rules"] = {**DEFAULTS["rules"], **(parameters.get("rules") or {})}
     params["inherited_from_flux_anchored"] = sorted(inherited)
     return params
@@ -271,7 +283,7 @@ def _annotate_members(rows: list[dict[str, Any]], minor_share: float) -> None:
 
 
 def _mfa_rows(tables: dict[str, Any], flux_id: str, tissue: str, contrast: str, tracers: list[str],
-              reliability: dict) -> list[dict[str, Any]]:
+              reliability: dict, flagged: set | None = None) -> list[dict[str, Any]]:
     pooled, by_tracer = tables["pooled"], tables["by_tracer"]
     qc_status = reliability.get((Omics.MFA.value, tissue, contrast), "")
     base = {"layer": "mfa", "role": "flux", "member_id": flux_id, "feature_id": flux_id, "feature_name": flux_id,
@@ -296,7 +308,10 @@ def _mfa_rows(tables: dict[str, Any], flux_id: str, tissue: str, contrast: str, 
         reason = "该组织、该比较没有通量数据" if frame.empty else "通量结果中没有该反应"
         rows.append({**base, "tracer": "pooled", "cell_state": "not_measured", "state_reason": reason})
     else:
-        rows.append({**base, **_mfa_stats(hit.iloc[0]), "tracer": "pooled", "in_flux_anchored": True})
+        row = {**base, **_mfa_stats(hit.iloc[0]), "tracer": "pooled", "in_flux_anchored": True}
+        if (Omics.MFA.value, tissue, contrast, flux_id) in (flagged or set()):
+            row["flags"] = row["flags"] + ["single_subject_driven"]    # E5：入选通量逐只去除后反号或减半
+        rows.append(row)
     return rows
 
 
@@ -310,6 +325,8 @@ def _mfa_stats(r: pd.Series) -> dict[str, Any]:
             "mean_numerator": r.get("mean_numerator"), "mean_denominator": r.get("mean_denominator"),
             "identifiability": r.get("identifiability"), "frac_at_bound": r.get("frac_at_bound"),
             "evidence_level": r.get("evidence_level"), "selected": bool(r.get("selected", False)),
+            "heterogeneity_pvalue": r.get("heterogeneity_pvalue"), "direction_stability": r.get("direction_stability"),
+            "tracer_evidence": r.get("tracer_evidence"),
             "flags": [f for f in str(r.get("flags") or "").split(";") if f and f != "nan"]}
 
 
@@ -378,7 +395,7 @@ def build_dossier(builder: FluxEvidenceBuilder, ctx: _Context, params: dict[str,
                 for layer in ctx.frames:
                     rows += _omics_rows(builder, ctx, layer, flux_id, tissue, contrast, minor_share)
                 if Omics.MFA.value in ctx.source.layers:
-                    rows += _mfa_rows(mfa, flux_id, tissue, contrast, tracers, ctx.reliability)
+                    rows += _mfa_rows(mfa, flux_id, tissue, contrast, tracers, ctx.reliability, ctx.flagged)
                 semantics = builder.package.semantics(flux_id).direction_evidence
                 records += _finish(rows, params["rules"], flux_id, tissue, contrast, ctx.label, semantics)
     out = pd.DataFrame(records)
@@ -445,7 +462,18 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     sides = pd.concat(sides, ignore_index=True)
     samples.to_parquet(out / SAMPLES_TABLE, index=False)
     sides.to_parquet(out / SIDES_TABLE, index=False)
-    panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params) if panels else []
+
+    # 分轴综合评估（S3）：预期示踪剂取自面板声明（同一反应出现在多个面板时合并）
+    expected = {}
+    for panel in panels.values():
+        for reaction, tracers in panel.expected_tracers.items():
+            expected[reaction] = list(dict.fromkeys(expected.get(reaction, []) + tracers))
+    rules = {**params["rules"], "minor_share": float((params.get("isozyme") or {}).get("minor_share", 0.2))}
+    axes, reactions_assessed = assess(dossier, label, rules, expected, samples, sides)
+    axes.to_parquet(out / AXIS_TABLE, index=False)
+    reactions_assessed.to_parquet(out / ASSESSMENT_TABLE, index=False)
+    panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params,
+                                (axes, reactions_assessed)) if panels else []
 
     inputs = [p for s in sources for p in s.inputs] + [p for c in contexts for p in c.inputs] \
         + [d / name for d in dataset_dirs for name in ("matrix.parquet", META_FILE) if (d / name).is_file()]
@@ -462,12 +490,18 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     seen = set(dossier.loc[dossier["layer"].eq("mfa") & dossier["cell_state"].ne("not_infused"), "tracer"]) - {"pooled"}
     if declared - seen:
         record.notes.append(f"声明的示踪剂 {'、'.join(sorted(declared - seen))} 在结果包中没有数据，记为 not_infused")
+    if not reactions_assessed.empty:
+        claims = reactions_assessed["flux_claim"].value_counts()
+        record.notes.append("分轴综合评估：结论等级 " + "、".join(f"{k} {claims.get(k, 0)}"
+                                                       for k in ("L3", "L2", "L1", "L0", "LX"))
+                            + f"（{len(reactions_assessed)} 个反应 × 组织 × 比较）")
     record.notes += panel_notes
     return record
 
 
 def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, samples: pd.DataFrame,
-                  sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any]) -> list[str]:
+                  sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any],
+                  assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None) -> list[str]:
     """面板的行表、矩阵视图与导出表、图 A / B / C。"""
     from ..plotting import dossier_plots
 
@@ -487,7 +521,7 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
             for tissue in tissues:
                 folder = base / "figures" / panel.id / tissue
                 for contrast in contrasts:
-                    view = matrix_view(panel, chunk, dossier, tissue, contrast, labels, params["tracers"])
+                    view = matrix_view(panel, chunk, dossier, tissue, contrast, labels, params["tracers"], assessment)
                     if view.empty:
                         continue
                     stem = folder / f"matrix_{contrast}{suffix}"

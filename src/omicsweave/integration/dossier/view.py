@@ -5,8 +5,9 @@
 （各块、各来源、各示踪剂）的格子，全部由 ``dossier_members`` 汇总得到。图只画这张表，导出表就是这张表与
 成员行，所以同一个（反应, 层, 成员）在图、表与档案页中的数值相同。
 
-列分为四块：通量（各示踪剂与合并估计，每个有通量数据的来源一组）、酶（P 蛋白、R RNA，每个来源一列）、
-调控（P、R 与 M 别构效应物）、池（M：代谢物节点的测得值；反应行为一步产物 / 底物比）。第五块评估列在 S3 加入。
+列分为五块：通量（各示踪剂与合并估计，每个有通量数据的来源一组）、酶（P 蛋白、R RNA，每个来源一列）、
+调控（P、R 与 M 别构效应物）、池（M：代谢物节点的测得值；反应行为一步产物 / 底物比）、评估（四条轴 F、C、R、M
+的状态与方向，以及结论等级；原样取自 S3 的 axis_assessment 与 reaction_assessment）。
 
 格子的汇总只用于展示，不是判定（判定见 S3 的四轴）：
 
@@ -36,7 +37,8 @@ MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 FLUX_STATES = ("not_identifiable", "insufficient_n", "not_infused")
 VIEW_COLUMNS = ["panel_id", "tissue", "contrast_id", "row", "element_type", "element_id", "label", "segment",
                 "block", "column", "source", "layer", "tracer", "expected_tracer", "value", "certainty",
-                "display_state", "n_changed", "n_quantified", "ring", "members"]
+                "display_state", "n_changed", "n_quantified", "ring", "members", "text"]
+AXIS_LABELS = {"flux": "F", "capacity": "C", "regulation": "R", "pool": "M"}
 LAYER_CODE = {"proteomics": "P", "transcriptomics": "R", "metabolomics": "M"}
 MEMBER_EXPORT = ["source", "flux_id", "layer", "role", "member_id", "feature_id", "feature_name", "tracer",
                  "member_relation", "regulator_effect", "regulator_mode", "log2fc", "log2fc_unshrunk", "se", "pvalue",
@@ -123,8 +125,10 @@ def _metabolite_key(name: str) -> str:
 
 
 def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tissue: str, contrast: str,
-                sources: list[str], tracers: Iterable[str] = ()) -> pd.DataFrame:
-    """``members``：dossier_members（全部来源）；``sources``：来源标签的顺序（本实验在前）。"""
+                sources: list[str], tracers: Iterable[str] = (),
+                assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None) -> pd.DataFrame:
+    """``members``：dossier_members（全部来源）；``sources``：来源标签的顺序（本实验在前）；``assessment``：
+    （axis_assessment, reaction_assessment），有时加上评估块（四条轴与结论等级，原样取自评估表）。"""
     cell_rows = members[(members["tissue"] == tissue) & (members["contrast_id"] == contrast)
                         & members["flux_id"].isin(panel.reactions)]
     records: list[dict[str, Any]] = []
@@ -180,6 +184,8 @@ def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tis
                     summarize(part[part["role"] == "effector"], _regulator_value, _signed_single))
                 ratio = rows[(rows["source"] == source) & (rows["layer"] == "derived") & (rows["role"] == "step_ratio")]
                 add(element, "pool", f"M:{source}", source, "derived", "", summarize(ratio))
+            if assessment is not None:
+                _assessment_cells(add, element, assessment, reaction, tissue, contrast, sources[0])
         else:
             base = split_metabolite(element["element_id"])[0]
             key = keys.setdefault(base, _metabolite_key(species_labels().get(base, base)))
@@ -200,6 +206,32 @@ def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tis
     return view[VIEW_COLUMNS]
 
 
+def _assessment_cells(add, element: pd.Series, assessment: tuple[pd.DataFrame, pd.DataFrame], reaction: str,
+                      tissue: str, contrast: str, source: str) -> None:
+    axes, reactions = assessment
+    empty = {"value": np.nan, "certainty": np.nan, "n_changed": 0, "n_quantified": 0, "ring": "", "members": ""}
+    here = axes[(axes["flux_id"] == reaction) & (axes["tissue"] == tissue) & (axes["contrast_id"] == contrast)]
+    for axis, label in AXIS_LABELS.items():
+        row = here[here["axis"] == axis]
+        if row.empty:
+            add(element, "assessment", label, source, "", "", {**empty, "display_state": "not_measured", "text": ""})
+            continue
+        row = row.iloc[0]
+        add(element, "assessment", label, source, "", "",
+            {**empty, "display_state": row["state"], "value": float(row["direction"]), "text": row["rule"],
+             "members": row["basis"]})
+    claim = reactions[(reactions["flux_id"] == reaction) & (reactions["tissue"] == tissue)
+                      & (reactions["contrast_id"] == contrast)]
+    if claim.empty:
+        return
+    claim = claim.iloc[0]
+    level = claim["flux_claim"] + (f" ({int(claim['n_concordant_axes'])})" if claim["flux_claim"] in ("L1", "L2", "L3")
+                                   else "")
+    add(element, "assessment", "level", source, "", "",
+        {**empty, "display_state": claim["flux_claim"], "value": float(claim["claim_direction"]), "text": level,
+         "members": claim["phenomena"]})
+
+
 def wide_table(view: pd.DataFrame) -> pd.DataFrame:
     """导出用的宽表：行与图相同，每个格子三列（值、状态、通过数 / 测到数）。"""
     index = ["row", "element_type", "element_id", "label", "segment"]
@@ -207,6 +239,12 @@ def wide_table(view: pd.DataFrame) -> pd.DataFrame:
     for (block, column), cell in view.groupby(["block", "column"], sort=False):
         cell = cell.set_index("row")
         name = f"{block} {column}"
+        if block == "assessment":                 # 评估块：方向（+1 / −1 / 0）、状态；结论等级另写文字
+            out[f"{name} direction"] = cell["value"]
+            out[f"{name} state"] = cell["display_state"]
+            if column == "level":
+                out[f"{name} text"] = cell["text"]
+            continue
         out[f"{name} log2fc"] = cell["value"].round(4)
         out[f"{name} state"] = cell["display_state"]
         out[f"{name} k/n"] = cell.apply(lambda r: f"{int(r.n_changed)}/{int(r.n_quantified)}"

@@ -150,6 +150,12 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
     `dossier_<反应>_<比较>`（每个成员一个面板，逐只动物的点，每个来源一行）、图 C `tracer_coverage_<比较>`
     （示踪剂 × 反应的可辨识性与该比较两组的动物数）。绘图在
     `plotting/dossier_plots.py`；PDF 中的中文字体在部分 fontTools 版本下不能按 Type 42 子集化时改用 Type 3 嵌入。
+  - 分轴综合评估（S3，`integration/dossier/assessment.py`，设计文档第 3 节）：每个（反应, 组织, 比较）在 F 通量、C 酶容量、
+    R 调控、M 底物与产物四条互不依赖的轴上各给出方向与状态（`tables/axis_assessment.parquet`，含依据的成员与所用规则），
+    再由判定表给出结论等级 L3（通量已证实）/ L2（示踪提示）/ L1（酶容量预测，可由 `testable_by` 中的示踪剂检验）/ L0 / LX
+    （示踪剂矛盾）、机制类型（L2 及以上，按调控系数 ρ_h 的分层自助区间）、合取检验与字典序排名
+    （`tables/reaction_assessment.parquet`）。没有加和总分。阈值在 `rules` 中（`flux_min_abs_g`、`heterogeneity_alpha`、
+    `direction_stability_min`、`established_min_group`、`opposition_min_state` 等）。图 A 的评估块即这两张表。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度
