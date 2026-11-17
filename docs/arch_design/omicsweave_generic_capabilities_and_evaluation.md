@@ -1,7 +1,7 @@
 # OmicsWeave 通用多组学分析与评估能力：从 DIO 案例提炼的改进规划
 
 > 文档类型：调研 + 设计建议
-> 版本：v0.2（2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
+> 版本：v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
 > 依据：两个 DIO 队列在 2026-11-03 至 11-13 的分析与映射修复（阶段 0–3，提交 `75f0bb8` 至 `d72b2c7`），以及课题工作区中的评估记录
 > （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库）
 > 配套文档：[架构规划 v2](../omicsweave_arch_design_v2.md)、[OmicsWeave × TheraWeave 开发规划](../omicsweave_theraweave_development_plan.md)。
@@ -464,6 +464,18 @@
 E3 的结果说明，在现有样本量下，组学层的单层“支持”大多不能与随机映射区分，引用证据等级时应以锚点状态、复现（G6）
 与稳健性（E5）为准。队列 B 心脏 RNA 有已知的离群样本（第 2 节第 4 条），其复现结果在登记 `qc_flag` 之前不宜采信。
 
+### 11.6 未完成的事项（2026-11-17 核对）
+
+| 项目 | 现状 | 出处 |
+|---|---|---|
+| 两个 DIO 课题登记 `qc_flag` | 两个课题的 `samples.tsv` 都还没有 `qc_flag` 列，可靠性表因此不会降权；登记后只需重跑整合 | 11.3 说明 2 |
+| G1 样本身份与组成 QC | 未开始。`qc/sample_quality.parquet` 目前只有读取方（`core/reliability.py`、`flux_anchored`），没有生成方 | 11.1 |
+| G5 第 3、4 项 | 锚点类型泛化待 G12；证据画像尚未读取复现结果（`replicated`） | 11.2、11.4 |
+| E7 登记的配置缺口 | 剩 3 项：`defaults.padj_method`、`defaults.random_seed`、`design.stratify_by`（11.2 中的 `factors.*.reference` 已不在缺口表中）；`design.covariates` 在代谢组与 MFA 的两两比较中仍未接入 | `tests/core/test_config_consumers.py` |
+| 代谢物名称查找 | 仍以手写表为主，RefMet 注册表用于审计。审计报出的 22 处不一致已全部处理：10 处修正，12 处登记为可接受的立体异构体或异头物 | 11.4 |
+| 批次 3（G9、G10、G12、E1、E2） | 未开始 | 11.1 |
+| 通路层面的完整展示（G13–G17、E8） | 设计完成，待实施 | [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) |
+
 ---
 
 ## 12. 相关文档
@@ -474,19 +486,4 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 | [开发规划总纲](../omicsweave_theraweave_development_plan.md) | 结果模型、证据层与交换契约 |
 | [整合模块说明](../../src/omicsweave/integration/README.md) | 证据画像与整合模式的现状 |
 | [v2 打分矩阵技术文档（归档）](../history/integration_pipeline_evaluation_v2.md) | 已弃用的加和总分，仅供追溯 |
-
-未完成
-代谢物 ID 表的冲突只报告、未改。RefMet 注册表与手写表有 22 处不一致，其中几处是明确的错配：
-HMG-CoA 写成了 C00418（甲羟戊酸）；
-甘油醛-3-磷酸写成了 C00354（果糖-1,6-二磷酸）；
-苹果酸写成了 C00497（D-苹果酸）。
-
-其余多为立体异构体的不同条目，RefMet 并不总是更准。修正会改变整合中的代谢物匹配，所以我没有直接替换；下方可选择是否先修正这几处明确的错配。
-
-两个 DIO 课题的 samples.tsv 仍未登记 qc_flag。
-G1 需要先有组织标志物表，尚未开始。
-证据画像还没有读取复现结果（G5 第 4 项）。
-
-Batch 2 (G3, E5, G8, G7, E3, G6) is committed as adccea0 and fast-forwarded onto main; nothing pushed. 456 tests pass, and the DIO verification ran only in the scratchpad. Not done: the 22 metabolite ID conflicts RefMet found, qc_flag entries, G1, and G5 reading replication.
-
-Fix the clearly wrong metabolite IDs flagged by RefMet next?
+| [反应档案与分轴综合评估](omicsweave_reaction_dossier_and_assessment.md) | G13–G17、E8：通路层面的完整展示与不做加和的评估方案（待实施） |
