@@ -127,6 +127,24 @@ class DossierBundleTest(unittest.TestCase):
         absent = self.cell(table, "PC_m", "liver", DRUG)
         self.assertIn("not_measured", set(absent.loc[absent["tracer"] == "pooled", "cell_state"]))
 
+    def test_single_named_tracer(self) -> None:
+        """MFA 样本只有一种示踪剂（protocol 只有一个取值）时没有分示踪剂表：统一差异表按该示踪剂另列一行，
+        声明的这种示踪剂不再记为 not_infused。"""
+        path = self.root / "experiments" / EXP / "samples.tsv"
+        samples = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+        if "protocol" not in samples.columns:
+            samples.insert(4, "protocol", "")
+        samples.loc[samples["omics"] == "mfa", "protocol"] = "glucose"
+        samples.to_csv(path, sep="\t", index=False, lineterminator="\n")
+        table, _, notes = self.dossier(tracers=["glucose", "alanine"])
+        flux = self.cell(table, "HEX_c", "liver")
+        flux = flux[flux["layer"] == "mfa"].set_index("tracer")
+        self.assertEqual(flux.at["glucose", "cell_state"], flux.at["pooled", "cell_state"])
+        self.assertEqual(flux.at["glucose", "log2fc"], flux.at["pooled", "log2fc"])
+        self.assertEqual(flux.at["alanine", "cell_state"], "not_infused")
+        self.assertTrue(any("只有一种示踪剂（glucose）" in n for n in notes), notes)
+        self.assertFalse(any("glucose 在结果包中没有数据" in n for n in notes), notes)
+
     def test_counts_match_the_evidence_table(self) -> None:
         """按层汇总后（只计 flux_anchored 也计入的行），映射数、匹配数、入选数与证据长表一致。"""
         table, run_dir, _ = self.dossier()

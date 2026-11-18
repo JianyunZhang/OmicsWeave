@@ -3,7 +3,8 @@
 > 文档类型：调研 + 设计建议
 > 版本：v0.4（2026-11-18，增加 11.7：G10 中不依赖新数据的部分；11.6 记下组学结果包早于批次 2）；v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
 > 依据：两个 DIO 队列在 2026-11-03 至 11-13 的分析与映射修复（阶段 0–3，提交 `75f0bb8` 至 `d72b2c7`），以及课题工作区中的评估记录
-> （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库）
+> （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库；
+> 2026-11-18 起两个课题目录在 `local/projects/` 下）
 > 配套文档：[架构规划 v2](../omicsweave_arch_design_v2.md)、[OmicsWeave × TheraWeave 开发规划](../omicsweave_theraweave_development_plan.md)。
 > 本文的建议按 v2 第 11 节的阶段编号归位（第 7 节），不改变已有决策
 > 范围：只讨论流程能力与评估方法。文中的数字描述的是流程行为（格子数、匹配率、入选数），不含课题的生物学结论

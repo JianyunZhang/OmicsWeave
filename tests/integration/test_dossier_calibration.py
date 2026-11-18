@@ -232,6 +232,25 @@ class CalibrationBundleTest(unittest.TestCase):
         table = pd.read_parquet(base / "evaluation" / "assessment_calibration.parquet")
         self.assertEqual(set(table["method"]), {"invariance", "permutation"})
 
+    def test_single_source_rna_rule(self) -> None:
+        """打开 rna_single_source_changed 只改变标了 rna_single_source 的 C 轴格子，其余轴与格子逐值不变。"""
+        self.source_bundle()
+        default = self.run_dossier(label="A")
+        switched = self.run_dossier(label="A", rules={"rna_single_source_changed": True})
+        self.assertTrue(any(n.startswith("规则 rna_single_source_changed 已打开") for n in self.notes), self.notes)
+        key = ["flux_id", "tissue", "contrast_id", "axis"]
+        before = pd.read_parquet(default / "tables" / "axis_assessment.parquet").set_index(key).sort_index()
+        after = pd.read_parquet(switched / "tables" / "axis_assessment.parquet").set_index(key).sort_index()
+        self.assertEqual(list(before.index), list(after.index))
+        flagged = after["flags"].fillna("").str.contains("rna_single_source")
+        self.assertTrue(flagged.any())
+        self.assertTrue((after.loc[flagged, "state"] == "changed").all())
+        self.assertTrue((before.loc[flagged, "state"] == "suggestive").all())
+        self.assertTrue(set(after.index[flagged].get_level_values("axis")) <= {"capacity"})
+        pd.testing.assert_frame_equal(before[~flagged], after[~flagged])
+        with self.assertRaisesRegex(Exception, "应为 true 或 false"):
+            self.run_dossier(rules={"rna_single_source_changed": "yes"})
+
     def test_unknown_calibration_key(self) -> None:
         self.source_bundle()
         with self.assertRaisesRegex(Exception, "calibration 中有无法识别的项：decoy"):

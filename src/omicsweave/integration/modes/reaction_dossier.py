@@ -138,6 +138,9 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
         raise RunError(f"integration.parameters.{MODE.value}.rules 中有无法识别的阈值：{'、'.join(bad_rules)}"
                        f"（可用：{'、'.join(DEFAULTS['rules'])}）")
     params["rules"] = {**DEFAULTS["rules"], **(parameters.get("rules") or {})}
+    if not isinstance(params["rules"]["rna_single_source_changed"], bool):
+        raise RunError(f"integration.parameters.{MODE.value}.rules.rna_single_source_changed 应为 true 或 false，"
+                       f"实际为 {params['rules']['rna_single_source_changed']!r}")
     for group in ("calibration", "pathway"):
         bad = sorted(set(parameters.get(group) or {}) - set(DEFAULTS[group]))
         if bad:
@@ -249,7 +252,7 @@ class _Context:
                         if c in source.contrast_map}
         self.inputs += robustness_inputs
         self.mfa = _mfa_tables(source) if Omics.MFA.value in source.layers else \
-            {"pooled": {}, "by_tracer": {}, "inputs": []}
+            {"pooled": {}, "by_tracer": {}, "inputs": [], "single_tracer": ""}
         self.inputs += self.mfa["inputs"]
 
 
@@ -393,8 +396,25 @@ def _mfa_tables(source: DossierSource) -> dict[str, Any]:
     path = source.run_dir / "omics" / Omics.MFA.value / "tables" / "differential_by_tracer.parquet"
     # 分示踪剂的结果以（比较, 组织, 反应, 示踪剂）为键，不是统一差异结果表的契约，直接读取
     by_tracer = pd.read_parquet(path) if path.is_file() else None
-    return {"pooled": split(source.tables.get(Omics.MFA.value)), "by_tracer": split(by_tracer),
-            "inputs": [path] if by_tracer is not None else []}
+    inputs = [path] if by_tracer is not None else []
+    pooled = source.tables.get(Omics.MFA.value)
+    single = "" if by_tracer is not None else single_tracer(source)
+    if single and pooled is not None and not pooled.empty:
+        # 单示踪剂实验：MFA 流程不写分示踪剂表，统一差异表就是这一种示踪剂的结果。按示踪剂另列一行（与 pooled 同值），
+        # 否则声明的示踪剂被记为“未输注”，F 轴也取不到按示踪剂、由逐只动物计算的方向稳定性
+        by_tracer = pooled.assign(tracer=single)
+    return {"pooled": split(pooled), "by_tracer": split(by_tracer), "inputs": inputs, "single_tracer": single}
+
+
+def single_tracer(source: DossierSource) -> str:
+    """来源的 MFA 样本只有一种示踪剂（samples.tsv 的 ``protocol`` 只有一个非空取值）时返回它，否则返回空字符串。
+    与 MFA 流程的判断一致：``protocol`` 只有一种取值时按单示踪剂分析，不写分示踪剂表。"""
+    table = source.experiment.samples
+    if "protocol" not in table.columns:
+        return ""
+    protocol = table.loc[table["omics"] == Omics.MFA.value, "protocol"].fillna("").astype(str).str.strip()
+    named = set(protocol) - {""}
+    return next(iter(named)) if len(named) == 1 else ""
 
 
 def _finish(rows: list[dict[str, Any]], rules: dict[str, float], flux_id: str, tissue: str, contrast: str,
@@ -627,6 +647,14 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     states = dossier["cell_state"].value_counts()
     record.notes.append(f"反应档案：{len(sources)} 个来源、{dossier['flux_id'].nunique()} 个反应、{len(dossier)} 行；"
                         "格子状态 " + "、".join(f"{state} {n}" for state, n in states.items()))
+    for ctx in contexts:
+        if ctx.mfa.get("single_tracer"):
+            record.notes.append(f"来源 {ctx.label} 的 MFA 只有一种示踪剂（{ctx.mfa['single_tracer']}），没有分示踪剂表："
+                                "统一差异表即该示踪剂的结果，按示踪剂另列一行")
+    if rules["rna_single_source_changed"]:
+        single = int(axes["flags"].fillna("").str.contains("rna_single_source").sum())
+        record.notes.append(f"规则 rna_single_source_changed 已打开：{single} 个格子的 C 轴由单一来源通过 FDR 的 RNA "
+                            "判为 changed（标 rna_single_source，不算复现）")
     declared = set(params["tracers"])
     seen = set(dossier.loc[dossier["layer"].eq("mfa") & dossier["cell_state"].ne("not_infused"), "tracer"]) - {"pooled"}
     if declared - seen:

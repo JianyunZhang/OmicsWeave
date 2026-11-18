@@ -117,12 +117,15 @@ class FocusProteinMatchingTest(unittest.TestCase):
 
 
 def _example_proteomics() -> Path | None:
-    hits = sorted(REPO.glob("examples/*/analysis_results/*/run_*/omics/proteomics/tables/differential.parquet"))
+    # 示例项目，或本地课题工作区（local/projects，真实课题数据放在这里，不提交）
+    pattern = "*/analysis_results/*/run_*/omics/proteomics/tables/differential.parquet"
+    hits = sorted([*REPO.glob(f"examples/{pattern}"), *REPO.glob(f"local/projects/{pattern}")])
     return hits[-1] if hits else None
 
 
 class RegistryAgainstDataTest(unittest.TestCase):
-    @unittest.skipUnless(_example_proteomics(), "需要示例项目的蛋白组结果包（examples/*/analysis_results）")
+    @unittest.skipUnless(_example_proteomics(),
+                         "需要示例项目或本地课题的蛋白组结果包（examples/ 或 local/projects/ 下的 analysis_results）")
     def test_registry_agrees_with_search_engine_accessions(self) -> None:
         audit = audit_registry_against_data(pd.read_parquet(_example_proteomics()))
 

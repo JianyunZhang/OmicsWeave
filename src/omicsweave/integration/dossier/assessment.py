@@ -11,7 +11,8 @@
   示踪剂之间方向不一致为 conflicting；面板声明的预期示踪剂与数据判定的可辨识性不符时最高为 undetermined；
 - C 酶容量：直接酶（转运反应为载体），蛋白优先、RNA 单独作为第二读数。同工酶按丰度占比判断主要成员，主要成员
   方向相反为 mixed；复合体按整体判断（已定量的核心亚基至少一半同向且至少一个通过 FDR），共用亚基不参与；没有蛋白时
-  RNA 须在两个来源中同向才到 changed（标 rna_only）；
+  RNA 须在两个来源中同向才到 changed（标 rna_only）。规则 ``rna_single_source_changed`` 打开时，只有一个来源测到
+  RNA 的反应在该来源中通过 FDR 即为 changed（另标 rna_single_source，不算复现）；两个来源都测到时仍须同向；
 - R 调控：带符号的调控因子与别构效应物，成员变化乘以作用方向得到对活性的指向；由调控因子的量最多到 suggestive，
   测得的效应物变化才到 changed；方向未知或经由转录 / 信号起作用的成员不参与；
 - M 底物与产物：产物升指向通量升、底物升指向通量降（一步产物 / 底物比与产物同向）；只表示容量的反应不给方向。
@@ -33,7 +34,10 @@ RULES: dict[str, Any] = {"alpha": 0.05, "equivalence_bound": 0.58, "flux_min_abs
                          "direction_stability_min": 0.8, "established_min_group": 3, "minor_share": 0.2,
                          "bootstrap": 2000, "seed": 20261117,
                          # L1 要求 R、M 轴没有相反的指向；suggestive（名义 p）即算指向（设计文档 3.5），可改为 changed
-                         "opposition_min_state": "suggestive"}
+                         "opposition_min_state": "suggestive",
+                         # 没有蛋白、只有一个来源测到 RNA 时，该来源通过 FDR 是否判为 changed（默认要求两个来源同向）。
+                         # 供没有蛋白组、也没有第二个队列的项目使用；打开后应运行诱饵校准，看 C 轴 changed 是否高于诱饵
+                         "rna_single_source_changed": False}
 MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 MISSING_ORDER = ("qc_blocked", "not_detected", "not_measured", "no_knowledge")
 AXIS_COLUMNS = ["flux_id", "tissue", "contrast_id", "axis", "direction", "state", "effect", "ci_lower", "ci_upper",
@@ -342,6 +346,11 @@ def capacity_axis(rows: pd.DataFrame, rules: dict[str, Any], sources: list[str])
             axis.rule = f"没有蛋白数据；RNA 在 {len(changed)} 个来源中同向通过 FDR"
         elif len(directions) > 1:
             axis.state, axis.direction, axis.rule = "mixed", 0, "没有蛋白数据；RNA 在不同来源中方向相反"
+        elif changed and len(rna) == 1 and rules.get("rna_single_source_changed", False):
+            # 只有一个来源测到 RNA：按规则开关接受单一来源的 FDR；第二个来源测到而没有复现时不适用（走下一支）
+            axis.state, axis.direction = "changed", lead.direction
+            axis.flags.append("rna_single_source")
+            axis.rule = "没有蛋白数据；RNA 只有一个来源，在该来源中通过 FDR（rna_single_source_changed）"
         elif changed or any(a.state == "suggestive" for a in rna):
             axis.state = "suggestive"
             axis.direction = lead.direction or next((a.direction for a in rna if a.direction), 0)
@@ -469,7 +478,7 @@ def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = No
         phenomena.append("regulator_inhibitory_up")
     if c.pointing and m.pointing and c.direction == -m.direction:
         phenomena.append("capacity_pool_opposed")
-    for flag in ("rna_protein_discordant", "tracer_expectation_mismatch"):
+    for flag in ("rna_protein_discordant", "tracer_expectation_mismatch", "rna_single_source"):
         if flag in c.flags + f.flags:
             phenomena.append(flag)
     return {"flux_claim": claim, "claim_direction": direction, "n_concordant_axes": len(concordant),

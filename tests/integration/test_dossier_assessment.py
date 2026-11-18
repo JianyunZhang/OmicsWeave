@@ -175,6 +175,38 @@ class AxisTest(unittest.TestCase):
         self.assertEqual(axis.state, "unchanged")
         self.assertIn("rna_protein_discordant", axis.flags)
 
+    def test_single_source_rna_switch(self) -> None:
+        on = {**RULES, "rna_single_source_changed": True}
+        single = frame(changed(1.0, layer="transcriptomics"))
+        # 默认关闭：单一来源最多 suggestive
+        self.assertEqual(capacity_axis(single, {**RULES, "rna_single_source_changed": False}, ["A"]).state, "suggestive")
+        # 打开：单一来源通过 FDR 即 changed，标 rna_single_source，不算复现
+        axis = capacity_axis(single, on, ["A"])
+        self.assertEqual((axis.state, axis.direction, axis.replicated), ("changed", 1, False))
+        self.assertTrue({"rna_only", "rna_single_source"} <= set(axis.flags))
+        # 第二个来源测到 RNA 而没有复现：开关不适用
+        unreplicated = frame(changed(1.0, layer="transcriptomics", source="A"),
+                             row(layer="transcriptomics", source="B", log2fc=0.1, pvalue=0.7))
+        self.assertEqual(capacity_axis(unreplicated, on, ["A", "B"]).state, "suggestive")
+        # 第二个来源有该层、但成员没有检出：只有一个来源测到，开关适用
+        undetected = frame(changed(1.0, layer="transcriptomics", source="A"),
+                           row(layer="transcriptomics", source="B", cell_state="not_detected"))
+        self.assertEqual(capacity_axis(undetected, on, ["A", "B"]).state, "changed")
+        # 由单只动物驱动的不放宽
+        driven = frame(changed(1.0, layer="transcriptomics", flags="single_subject_driven"))
+        self.assertEqual(capacity_axis(driven, on, ["A"]).state, "suggestive")
+        # 只有名义 p：仍为 suggestive
+        nominal = frame(row(layer="transcriptomics", log2fc=1.0, pvalue=0.01, padj=0.2, cell_state="nominal"))
+        self.assertEqual(capacity_axis(nominal, on, ["A"]).state, "suggestive")
+        # 有蛋白时以蛋白为准，开关不起作用
+        protein = frame(row(log2fc=0.02, se=0.1, cell_state="equivalent"), changed(1.2, layer="transcriptomics"))
+        self.assertEqual(capacity_axis(protein, on, ["A"]).state, "unchanged")
+        # 判定表：没有通量证据时成为 L1，现象标签写明依据
+        decision = decide(Axis("flux", "not_identifiable"), axis, Axis("regulation", "no_knowledge"),
+                          Axis("pool", "not_measured"), on)
+        self.assertEqual((decision["flux_claim"], decision["claim_direction"]), ("L1", 1))
+        self.assertIn("rna_single_source", decision["phenomena"])
+
     def test_regulation_rules(self) -> None:
         unsigned = frame(changed(1.0, role="regulator", regulator_effect="unknown", regulator_mode="signaling"))
         self.assertEqual(regulation_axis(unsigned, RULES).state, "no_knowledge")
