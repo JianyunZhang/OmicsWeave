@@ -344,18 +344,33 @@ def _mfa_rows(tables: dict[str, Any], flux_id: str, tissue: str, contrast: str, 
 
 
 def _mfa_stats(r: pd.Series) -> dict[str, Any]:
+    """通量行的统计量。净通量在两组间变号时，旧流程的 log2FC 为两组绝对值之比，符号不一定与净通量的变化同向
+    （如 −28.5 → +8.0 得 −1.84）；这里按组均值之差定号（幅度不变）并标记 ``net_flux_sign_change``。
+    示踪剂间异质性取标准化尺度（``smd_heterogeneity_pvalue``，G10），没有时取绝对尺度。"""
     pvalue = r.get("pvalue")
     if pd.isna(pvalue) and pd.notna(r.get("permutation_pvalue")):
         pvalue = r.get("permutation_pvalue")
-    return {"log2fc": r.get("log2fc"), "effect": r.get("effect_size"), "effect_type": r.get("effect_size_type"),
+    flags = [f for f in str(r.get("flags") or "").split(";") if f and f != "nan"]
+    log2fc = r.get("log2fc")
+    num, den = pd.to_numeric(r.get("mean_numerator"), errors="coerce"), pd.to_numeric(r.get("mean_denominator"),
+                                                                                     errors="coerce")
+    if pd.notna(num) and pd.notna(den) and num * den < 0 and pd.notna(log2fc) and np.isfinite(log2fc):
+        log2fc = float(np.sign(num - den) * abs(log2fc))
+        flags.append("net_flux_sign_change")
+    size = pd.to_numeric(r.get("flux_group_size"), errors="coerce")
+    if pd.notna(size) and size > 1 and isinstance(r.get("flux_group"), str) and r.get("flux_group"):
+        flags.append(f"flux_group:{str(r['flux_group']).split('--', 1)[-1]}")   # 化学计量上锁死，与组内反应同一次检验
+    heterogeneity = r.get("smd_heterogeneity_pvalue")
+    if pd.isna(heterogeneity):
+        heterogeneity = r.get("heterogeneity_pvalue")
+    return {"log2fc": log2fc, "effect": r.get("effect_size"), "effect_type": r.get("effect_size_type"),
             "se": r.get("log2fc_se"), "pvalue": pvalue, "padj": r.get("padj"), "lfsr": r.get("lfsr"),
             "n_numerator": r.get("n_numerator"), "n_denominator": r.get("n_denominator"),
             "mean_numerator": r.get("mean_numerator"), "mean_denominator": r.get("mean_denominator"),
             "identifiability": r.get("identifiability"), "frac_at_bound": r.get("frac_at_bound"),
             "evidence_level": r.get("evidence_level"), "selected": bool(r.get("selected", False)),
-            "heterogeneity_pvalue": r.get("heterogeneity_pvalue"), "direction_stability": r.get("direction_stability"),
-            "tracer_evidence": r.get("tracer_evidence"),
-            "flags": [f for f in str(r.get("flags") or "").split(";") if f and f != "nan"]}
+            "heterogeneity_pvalue": heterogeneity, "direction_stability": r.get("direction_stability"),
+            "tracer_evidence": r.get("tracer_evidence"), "flags": flags}
 
 
 def _mfa_state(row: dict[str, Any], rules: dict[str, float]) -> tuple[str, str]:

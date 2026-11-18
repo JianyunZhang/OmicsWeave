@@ -311,7 +311,20 @@ def _draw_member(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[s
         xs = positions[group] + rng.uniform(-0.12, 0.12, len(part))
         colors = [NUMERATOR if sides.get(s) == "numerator" else DENOMINATOR if sides.get(s) == "denominator"
                   else MUTED for s in part["sample_id"]]
-        ax.scatter(xs, part["value"], s=12, color=colors, edgecolors=SURFACE, linewidths=0.5, zorder=3)
+        if row["layer"] == "mfa" and "fit_low" in part.columns:
+            # 通量：误差线为该动物全部拟合点的四分位距；贴在盒约束边界上的动物画空心点
+            low, high = pd.to_numeric(part["fit_low"], errors="coerce"), pd.to_numeric(part["fit_high"], errors="coerce")
+            spread = low.notna() & high.notna()
+            ax.vlines(xs[spread.to_numpy()], low[spread], high[spread], colors=[c for c, s in zip(colors, spread) if s],
+                      linewidths=0.6, alpha=0.7, zorder=2)
+            pinned = part["at_bound"].fillna(False).astype(bool).to_numpy() if "at_bound" in part.columns \
+                else np.zeros(len(part), dtype=bool)
+            ax.scatter(xs[~pinned], part["value"].to_numpy()[~pinned], s=12, color=np.array(colors, dtype=object)[~pinned],
+                       edgecolors=SURFACE, linewidths=0.5, zorder=3)
+            ax.scatter(xs[pinned], part["value"].to_numpy()[pinned], s=14, facecolors=SURFACE,
+                       edgecolors=np.array(colors, dtype=object)[pinned], linewidths=0.9, zorder=3)
+        else:
+            ax.scatter(xs, part["value"], s=12, color=colors, edgecolors=SURFACE, linewidths=0.5, zorder=3)
         median = part["value"].median()
         if pd.notna(median):
             ax.plot([positions[group] - 0.25, positions[group] + 0.25], [median, median], color=INK2, lw=0.8, zorder=2)
@@ -381,7 +394,8 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
                    bbox_to_anchor=(0.99, 1 - 0.2 / height), ncol=3, fontsize=6, frameon=False)
         if runs:
             fig.text(0.01, 0.12 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items())
-                     + "   values: log2 (CPM + 1 for RNA), net flux linear; at-bound per animal not exported by MFA",
+                     + "   values: log2 (CPM + 1 for RNA), net flux linear; flux whiskers = IQR of that animal's fits, "
+                       "hollow = at a box-constraint bound (from sample_flux_fits; absent in older bundles)",
                      fontsize=5.5, color=MUTED)
         return _save(fig, stem, formats)
 

@@ -6,8 +6,9 @@
 - 值的尺度与差异分析一致：计数为 log2(CPM + 1)，强度与峰面积为 log2，通量为线性（净通量可为负，不取对数）；
 - ``group`` 为该数据集中有变化的动物层因素水平的组合（如 HFD，或 HFD·Sema），``group_order`` 按因素声明的水平排序，
   图的横轴取实验的全部组别，而不只是当前比较的两组；
-- ``tracer`` 为 MFA 样本的示踪剂（样本表的 ``protocol``）；``qc_flag`` 取样本表；``at_bound``（逐只动物的通量是否贴在
-  约束边界上）目前的 MFA 导出没有提供，为空。
+- ``tracer`` 为 MFA 样本的示踪剂（样本表的 ``protocol``）；``qc_flag`` 取样本表；通量另有 ``at_bound``（代表值是否贴在
+  盒约束边界上）与 ``fit_low`` / ``fit_high``（该动物全部拟合点的四分位数），取自结果包的
+  ``omics/mfa/tables/sample_flux_fits.parquet``（G10；旧结果包没有这张表时为空）。
 
 另有比较成员表（:func:`contrast_samples`）：每个比较的分子组与分母组各含哪些样本，图上据此着色。
 """
@@ -28,7 +29,19 @@ from omicsweave.stats.data import analysis_values, sample_table
 from .sources import DossierSource
 
 SAMPLE_COLUMNS = ["source", "layer", "tissue", "feature_id", "tracer", "sample_id", "subject_id", "group",
-                  "group_order", "value", "value_type", "scale", "units", "at_bound", "qc_flag"]
+                  "group_order", "value", "value_type", "scale", "units", "at_bound", "fit_low", "fit_high", "qc_flag"]
+SAMPLE_FITS = Path("omics") / Omics.MFA.value / "tables" / "sample_flux_fits.parquet"
+
+
+def _flux_fits(source: DossierSource) -> pd.DataFrame | None:
+    """结果包中逐只动物的拟合分布，索引为（样本, 组织（共同名称）, 反应）。"""
+    path = source.run_dir / SAMPLE_FITS
+    if not path.is_file():
+        return None
+    table = pd.read_parquet(path, columns=["sample_id", "tissue", "reaction", "fit_q25", "fit_q75", "at_bound"])
+    table["tissue"] = [source.common_tissue(Omics.MFA.value, str(t)) for t in table["tissue"]]
+    return table.astype({"sample_id": str, "reaction": str}).drop_duplicates(["sample_id", "tissue", "reaction"]) \
+        .set_index(["sample_id", "tissue", "reaction"])
 CONTRAST_COLUMNS = ["source", "layer", "contrast_id", "sample_id", "side", "level"]
 
 
@@ -59,6 +72,7 @@ def dossier_samples(source: DossierSource, members: pd.DataFrame) -> tuple[pd.Da
     """``members``：该来源的成员行（dossier_members 的子集）。返回逐只动物表与读取的数据集目录。"""
     measured = members[members["feature_id"].notna() & members["feature_id"].astype(str).ne("")]
     table = sample_table(source.experiment)
+    fits = _flux_fits(source) if (measured["layer"] == Omics.MFA.value).any() else None
     frames, inputs = [], []
     for (layer, tissue), rows in measured.groupby(["layer", "tissue"], sort=True):
         directory = _dataset_dir(source, str(layer), str(tissue))
@@ -76,13 +90,22 @@ def dossier_samples(source: DossierSource, members: pd.DataFrame) -> tuple[pd.Da
             .melt(id_vars="feature_id", var_name="sample_id", value_name="value")
         meta = table.reindex(long["sample_id"])
         tracer = meta["protocol"].fillna("").astype(str).to_numpy() if flux and "protocol" in meta.columns else ""
+        if flux and fits is not None:
+            keys = pd.MultiIndex.from_arrays([long["sample_id"].astype(str), [tissue] * len(long),
+                                              long["feature_id"].astype(str)])
+            spread = fits.reindex(keys)
+            at_bound, low, high = (spread["at_bound"].to_numpy(dtype=object), spread["fit_q25"].to_numpy(float),
+                                   spread["fit_q75"].to_numpy(float))
+        else:
+            at_bound, low, high = np.nan, np.nan, np.nan
         frames.append(pd.DataFrame({
             "source": source.label, "layer": layer, "tissue": tissue, "feature_id": long["feature_id"].astype(str),
             "tracer": tracer, "sample_id": long["sample_id"].astype(str),
             "subject_id": meta["subject_id"].astype(str).to_numpy() if "subject_id" in meta.columns else "",
             "group": long["sample_id"].map(labels), "group_order": long["sample_id"].map(labels).map(order),
             "value": long["value"].to_numpy(dtype=float), "value_type": dataset.meta.value_type.value,
-            "scale": "linear" if flux else "log2", "units": dataset.meta.units or "", "at_bound": np.nan,
+            "scale": "linear" if flux else "log2", "units": dataset.meta.units or "", "at_bound": at_bound,
+            "fit_low": low, "fit_high": high,
             "qc_flag": meta["qc_flag"].fillna("").astype(str).to_numpy() if "qc_flag" in meta.columns else "",
         }))
         inputs.append(directory)

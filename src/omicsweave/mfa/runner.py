@@ -15,6 +15,11 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
 输出（``omics/mfa/``）::
 
     data/<组织>/                    每只动物的代表净通量（分析层数据集；行 = 反应，列 = 样本）
+    tables/sample_flux_fits.parquet 每只动物每条反应的拟合分布：代表值、拟合次数、全部拟合点的四分位数
+                                    （fit_q25 / fit_q75）、IQR 过滤后的四分位数与标准差、是否贴在盒约束边界上（at_bound）
+    tables/flux_groups.parquet      化学计量上锁死的通量组（:mod:`omicsweave.mfa.flux_groups`）；差异分析的 BH 校正中
+                                    每组只计一次，结果表多 flux_group、flux_group_size 两列。``analysis.flux_groups``：
+                                    ``enabled``（默认 true）、``min_abs_correlation``（默认 1 − 1e−6）
     qc/fitting_loss.parquet         每个样本的拟合残差分布
     qc/mid_fit_residuals.parquet    实测与模拟 MID 的残差（有 MID 时）
     tables/differential.parquet     统一差异结果表（所有比较 × 所有组织）
@@ -53,6 +58,7 @@ from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
+from . import flux_groups as fg
 from . import multi_tracer
 from .df_analysis import (
     differential_flux,
@@ -113,6 +119,52 @@ def tracer_strata(experiment: Experiment, samples: list[str], results: MFAResult
     return tracer_of
 
 
+SAMPLE_FIT_COLUMNS = ["sample_id", "tissue", "reaction", "tracer", "net_flux", "n_fits", "fit_q25", "fit_q75",
+                      "fit_p25", "fit_p75", "fit_std", "at_bound"]
+FLUX_GROUP_SETTINGS = {"enabled": True, "min_abs_correlation": fg.DEFAULT_MIN_ABS_CORRELATION}
+
+
+def _write_sample_fits(matrix: pd.DataFrame, out: Path) -> None:
+    """每只动物每条反应的拟合分布（数据集只存代表值）：误差线、贴边标记等逐只动物的读数从这里取。"""
+    table = matrix.copy()
+    if "tracer" not in table.columns:
+        table["tracer"] = ""
+    for column in SAMPLE_FIT_COLUMNS:
+        if column not in table.columns:
+            table[column] = pd.NA
+    (out / "tables").mkdir(parents=True, exist_ok=True)
+    table[SAMPLE_FIT_COLUMNS].to_parquet(out / "tables" / "sample_flux_fits.parquet", index=False)
+
+
+def _flux_group_settings(analysis: dict) -> dict:
+    own = dict((analysis or {}).get("flux_groups") or {})
+    unknown = sorted(set(own) - set(FLUX_GROUP_SETTINGS))
+    if unknown:
+        raise RunError(f"omics.mfa.analysis.flux_groups 中有无法识别的参数：{'、'.join(unknown)}"
+                       f"（可选：{'、'.join(FLUX_GROUP_SETTINGS)}）")
+    return {**FLUX_GROUP_SETTINGS, **own}
+
+
+def _flux_groups(fit_sets: dict[str, dict], settings: dict, out: Path, record: OmicsRun) -> dict[str, dict] | None:
+    """各模型（示踪剂）与合并分析用的通量组：返回 范围 → {(组织, 反应): 组}；关闭时返回 None。"""
+    if not settings["enabled"]:
+        return None
+    threshold = float(settings["min_abs_correlation"])
+    tables = {name: fg.locked_groups({name: fits}, min_abs_correlation=threshold, scope=name)
+              for name, fits in fit_sets.items()}
+    if len(fit_sets) > 1:
+        tables["all"] = fg.locked_groups(fit_sets, min_abs_correlation=threshold, scope="all")
+    found = [t for t in tables.values() if not t.empty]
+    combined = pd.concat(found, ignore_index=True) if found else pd.DataFrame(columns=fg.COLUMNS)
+    (out / "tables").mkdir(parents=True, exist_ok=True)
+    combined.to_parquet(out / "tables" / "flux_groups.parquet", index=False)
+    main = tables.get("all", next(iter(tables.values())) if tables else pd.DataFrame())
+    if not main.empty:
+        record.notes.append(f"通量组：{main['flux_group'].nunique()} 组、{len(main)} 条反应在所有拟合中成线性关系"
+                            "（化学计量上锁死），BH 校正中每组只计一次")
+    return {name: fg.group_map(table) for name, table in tables.items()}
+
+
 def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -> None:
     """每个组织一个分析层数据集：每只动物的代表净通量（拟合点经 IQR 过滤后的中位数）。"""
     for tissue, part in matrix.groupby("tissue", sort=True):
@@ -124,11 +176,12 @@ def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -
                     "estimate": "per-animal median of IQR-filtered net flux fits"},
         )
         write_dataset(out / "data" / str(tissue), Dataset(wide, empty_features(wide.index), meta))
+    _write_sample_fits(matrix, out)
 
 
 def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits: dict, tissues: list[str],
                          details: Path, analysis: dict, flux_units: str, record: OmicsRun,
-                         scope: str = "") -> dict[str, pd.DataFrame]:
+                         scope: str = "", groups: dict | None = None) -> dict[str, pd.DataFrame]:
     """按 ``design.contrasts`` 对 ``flux_df`` 中的样本做差异通量分析，返回 比较 → 统一差异结果表。
 
     ``details`` 下须已有 ``sample_flux_matrix`` 写出的可辨识性表；``scope`` 用于提示中标明示踪剂。
@@ -136,8 +189,8 @@ def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits
     tables: dict[str, pd.DataFrame] = {}
     where = f"（示踪剂 {scope}）" if scope else ""
     for contrast in experiment.config.design.contrasts:
-        groups = {s: g for s, g in contrast_groups(experiment, contrast, Omics.MFA).items() if s in flux_df.index}
-        if not groups:
+        members = {s: g for s, g in contrast_groups(experiment, contrast, Omics.MFA).items() if s in flux_df.index}
+        if not members:
             record.notes.append(f"比较 {contrast.id} 在 MFA{where}中没有样本，已跳过")
             continue
         # 每个比较单独一个明细目录，避免水平相同、subset 不同的比较互相覆盖
@@ -146,8 +199,8 @@ def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits
             (contrast_dir / _IDENTIFIABILITY).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(details / _IDENTIFIABILITY, contrast_dir / _IDENTIFIABILITY)
         pair = (contrast.numerator, contrast.denominator)
-        found = differential_flux(flux_df, all_fits, groups, list(pair), tissues, contrast_dir,
-                                  comparisons=[pair], analysis_config=analysis)
+        found = differential_flux(flux_df, all_fits, members, list(pair), tissues, contrast_dir,
+                                  comparisons=[pair], analysis_config=analysis, flux_groups=groups)
         if not found:
             record.notes.append(f"比较 {contrast.id} 在 MFA{where}中有一组没有样本，已跳过")
             continue
@@ -163,8 +216,9 @@ def _run_single(experiment: Experiment, results: MFAResults, flux_df: pd.DataFra
     matrix = sample_flux_matrix(flux_df, all_fits, labels, tissues, details, analysis)
     if matrix is not None:
         _write_flux_datasets(matrix, results, out)
+    groups = _flux_groups({"all": all_fits}, _flux_group_settings(analysis), out, record)
     tables = _differential_tables(experiment, flux_df, all_fits, tissues, details, analysis,
-                                  results.info.flux_units, record)
+                                  results.info.flux_units, record, groups=(groups or {}).get("all"))
     if tables:
         write_differential(pd.concat(tables.values(), ignore_index=True), out / "tables" / "differential.parquet")
     return list(tables)
@@ -180,10 +234,13 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
         raise RunError(str(exc)) from exc
     units = results.info.flux_units
     animals, identifiability, by_tracer = [], [], []
-    for tracer in sorted(set(tracer_of.values())):
+    tracers = sorted(set(tracer_of.values()))
+    fit_sets = {t: {s: all_fits[s] for s in flux_df.index if tracer_of.get(s) == t and s in all_fits} for t in tracers}
+    group_maps = _flux_groups({t: f for t, f in fit_sets.items() if f}, _flux_group_settings(analysis), out, record) or {}
+    for tracer in tracers:
         samples = [s for s in flux_df.index if tracer_of.get(s) == tracer]
         details = out / "details" / "tracers" / tracer
-        fits = {s: all_fits[s] for s in samples if s in all_fits}
+        fits = fit_sets[tracer]
         matrix = sample_flux_matrix(flux_df.loc[samples], fits, labels, tissues, details, analysis)
         if matrix is None:
             record.notes.append(f"示踪剂 {tracer} 没有可用的通量，未参与合并")
@@ -191,7 +248,7 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
         animals.append(matrix.assign(tracer=tracer))
         identifiability.append(pd.read_csv(details / _IDENTIFIABILITY).assign(tracer=tracer))
         tables = _differential_tables(experiment, flux_df.loc[samples], fits, tissues, details, analysis,
-                                      units, record, scope=tracer)
+                                      units, record, scope=tracer, groups=group_maps.get(tracer))
         by_tracer += [t.assign(tracer=tracer) for t in tables.values()]
     if not animals:
         return []
@@ -216,7 +273,8 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
         pooled = multi_tracer.pool_contrast(animals_df, groups, contrast.numerator, contrast.denominator,
                                             coverage, settings, seed_key=contrast.id)
         table = multi_tracer.to_differential(pooled, contrast_id=contrast.id, contrast_role=contrast.role.value,
-                                             flux_units=units, settings=settings)
+                                             flux_units=units, settings=settings,
+                                             groups=group_maps.get("all", group_maps.get(tracers[0])) if group_maps else None)
         if table.empty:
             continue
         pooled_tables.append(table)

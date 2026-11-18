@@ -1142,8 +1142,12 @@ p、FDR、|log2FC|、Hedges' g 阈值沿用 `analysis.differential_flux`。
 3. 各示踪剂的组间差 Δ_t 与方差 V_t = (s²_A + f̄_A)/n_A + (s²_B + f̄_B)/n_B（s² 为动物间方差，
    f̄ 为拟合点方差均值，约束得不好的估计自动降权）；
 4. 逆方差固定效应合并 Δ̂ = Σ w_t Δ_t / Σ w_t（w_t = 1/V_t）。各示踪剂估计的是同一个比较效应，
-   固定效应是先验正确的模型；Q 检验显著说明模型或“同一代谢状态”的假设对某个示踪剂不成立，
-   此时标为 `multi_tracer_conflict`，不入选；
+   固定效应是先验正确的模型；示踪剂之间**方向相反且异质性显著**说明模型或“同一代谢状态”的假设对某个示踪剂
+   不成立，此时标为 `multi_tracer_conflict`，不入选。异质性在**标准化尺度**上判断（G10，2026-11-18）：各示踪剂的
+   Hedges' g 按 1/Var(g) 合并（`smd`、`smd_se`），Cochran Q 为 `smd_heterogeneity_q` / `smd_heterogeneity_pvalue`。
+   不同示踪剂模型给出的绝对通量可差数十倍（队列 A 心脏的糖酵解，葡萄糖模型约为甘油模型的 50 倍），绝对尺度的 Q
+   （`heterogeneity_*`，仍保留）主要反映尺度差异，按它判冲突会把同向的示踪剂判成冲突。方向一致、只是幅度不一致时
+   不判为冲突，标记 `tracer_magnitude_heterogeneity`。合并的 `effect_size` 也改为标准化尺度上的合并 g；
 5. p 值来自示踪剂内的组标签置换（分层置换，可枚举时精确计算），不依赖正态近似。示踪剂越多可达的
    最小 p 越小：单示踪剂 3 vs 3 为 0.1，四个示踪剂各 3 vs 3 为 2/20⁴ ≈ 1.25×10⁻⁵；
 6. BH-FDR 按比较校正，入选规则与单示踪剂相同；最小可达 p 仍高于阈值时（如只有一个示踪剂能约束、
@@ -1153,7 +1157,9 @@ p、FDR、|log2FC|、Hedges' g 阈值沿用 `analysis.differential_flux`。
 
 | 文件 | 说明 |
 |---|---|
-| `tables/differential.parquet` | 合并结果，每个（比较, 组织, 反应）一行，下游整合（flux_anchored 等）直接使用；附加列 `tracer_evidence`、`tracers_informative` / `tracers_excluded`、`diff` / `diff_se` / `ci_*`、`heterogeneity_q` / `heterogeneity_pvalue` / `i_squared`、`tracer_effects`、`tracer_weights` |
+| `tables/differential.parquet` | 合并结果，每个（比较, 组织, 反应）一行，下游整合（flux_anchored 等）直接使用；附加列 `tracer_evidence`、`tracers_informative` / `tracers_excluded`、`diff` / `diff_se` / `ci_*`、`heterogeneity_q` / `heterogeneity_pvalue` / `i_squared`（绝对尺度）、`smd` / `smd_se` / `smd_heterogeneity_q` / `smd_heterogeneity_pvalue` / `smd_i_squared` / `tracer_smd`（标准化尺度）、`tracer_effects`、`tracer_weights`、`flux_group` / `flux_group_size` |
+| `tables/flux_groups.parquet` | 化学计量上锁死的通量组（单示踪剂与多示踪剂都有）：逐次拟合中成线性关系的反应，`scope` 为示踪剂或 `all`（合并结果用：每个两者都有变化的模型中都锁死）。BH 校正中每组只计一次。`analysis.flux_groups`：`enabled`（默认 true）、`min_abs_correlation`（默认 1 − 1e−6） |
+| `tables/sample_flux_fits.parquet` | 每只动物每条反应的拟合分布（单示踪剂与多示踪剂都有）：代表值、拟合次数、全部拟合点的四分位数 `fit_q25` / `fit_q75`、IQR 过滤后的四分位数与标准差、是否贴在盒约束边界上 `at_bound`。反应档案的图 B 据此画误差线与贴边标记 |
 | `tables/differential_by_tracer.parquet` | 各示踪剂单独分析的结果（多一列 `tracer`），与单示踪剂流程逐列相同 |
 | `tables/tracer_coverage.parquet` | 每个（示踪剂, 组织, 反应）的可辨识性、是否参与合并，`n_informative_tracers` 显示示踪剂之间的互补关系 |
 | `tables/tracer_flux_levels.parquet` | 每个（组织, 反应, 条件）按示踪剂合并的绝对通量，及各示踪剂是否一致（`tracers_consistent`） |

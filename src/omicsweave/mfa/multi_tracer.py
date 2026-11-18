@@ -24,8 +24,11 @@ Cori 循环。示踪剂约束不到的反应，拟合值由约束与初值决定
 3. 各示踪剂的组间差 Δ_t 与方差 V_t = (s²_A + f̄_A)/n_A + (s²_B + f̄_B)/n_B，s² 为动物间方差，
    f̄ 为拟合点方差的均值，约束得不好的估计因此自动降权；
 4. 逆方差固定效应合并 Δ̂ = Σ w_t Δ_t / Σ w_t（w_t = 1/V_t）。各示踪剂估计的是同一个比较效应，
-   固定效应是先验正确的模型；示踪剂间的异质性（Cochran Q）说明模型或“同一代谢状态”的假设对某个示踪剂
-   不成立（例如示踪剂输注本身扰动了通量），此时不做合并结论，标为 ``multi_tracer_conflict``；
+   固定效应是先验正确的模型；示踪剂间方向相反且异质性显著，说明模型或“同一代谢状态”的假设对某个示踪剂不成立
+   （例如示踪剂输注本身扰动了通量），此时不做合并结论，标为 ``multi_tracer_conflict``。异质性在标准化尺度上判断
+   （``smd_*``：各示踪剂的 Hedges' g 按 1/Var(g) 合并后的 Cochran Q）：各示踪剂模型的绝对通量可差数十倍，
+   绝对尺度的 Q（``heterogeneity_*``，仍保留）主要反映尺度差异。方向一致、只是幅度不一致时不判为冲突，标记
+   ``tracer_magnitude_heterogeneity``（每组 3 只时 g 的抽样变异很大）。合并的 ``effect_size`` 是标准化尺度上的合并 g；
 5. p 值由示踪剂内的组标签置换校准（分层置换，各示踪剂内组大小不变），不依赖正态近似。示踪剂越多，
    可达的最小 p 越小：单示踪剂 3 vs 3 为 0.1，四个示踪剂各 3 vs 3 为 2/20⁴；
 6. BH-FDR 按比较校正；入选规则与单示踪剂分析相同（p、FDR 与 |log2FC| 阈值）。最小可达 p 仍高于阈值时，
@@ -244,6 +247,32 @@ def _describe(values: dict[str, float], digits: int = 4) -> str:
     return ";".join(f"{k}:{v:.{digits}g}" for k, v in values.items())
 
 
+def _pool_standardized(g: np.ndarray, n_num: list[int], n_den: list[int]) -> dict[str, Any]:
+    """标准化尺度上的合并（G10：相对尺度）：各示踪剂的 Hedges' g 按 1 / Var(g) 加权，
+    Var(g) = (n₁ + n₂) / (n₁n₂) + g² / (2(n₁ + n₂))（Hedges & Olkin 1985）。
+
+    不同示踪剂的模型给出的绝对通量不在同一个尺度上（同一反应可差数十倍，净通量还可能在两组间变号），按绝对差值
+    做逆方差合并时权重几乎全给数值小的示踪剂，异质性检验也主要反映尺度差异。g 以各示踪剂自己的动物间标准差为
+    单位，变号时也有定义，适合判断各示踪剂的效应是否一致。"""
+    g = np.asarray(g, dtype=float)
+    n1, n2 = np.asarray(n_num, dtype=float), np.asarray(n_den, dtype=float)
+    finite = np.isfinite(g)
+    out = {"smd": np.nan, "smd_se": np.nan, "smd_heterogeneity_q": np.nan, "smd_heterogeneity_pvalue": np.nan,
+           "smd_i_squared": np.nan, "n_tracers_smd": int(finite.sum())}
+    if not finite.any():
+        return out
+    g, n1, n2 = g[finite], n1[finite], n2[finite]
+    weight = 1.0 / ((n1 + n2) / (n1 * n2) + g ** 2 / (2 * (n1 + n2)))
+    pooled = float((weight * g).sum() / weight.sum())
+    out.update(smd=pooled, smd_se=float(math.sqrt(1.0 / weight.sum())))
+    k = len(g)
+    if k > 1:
+        q = float((weight * (g - pooled) ** 2).sum())
+        out.update(smd_heterogeneity_q=q, smd_heterogeneity_pvalue=float(stats.chi2.sf(q, k - 1)),
+                   smd_i_squared=max(0.0, (q - (k - 1)) / q) if q > 0 else 0.0)
+    return out
+
+
 def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int) -> dict[str, Any]:
     stats_rows = []
     for s in strata:
@@ -265,7 +294,6 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
     diff_se = math.sqrt(1.0 / total)
     k = len(strata)
     q = float((weight * (delta - diff) ** 2).sum()) if k > 1 else np.nan
-    finite_g = np.isfinite(g)
     pooled_mean_a = float((weight * mean_a).sum() / total)
     pooled_mean_b = float((weight * mean_b).sum() / total)
     se_a = math.sqrt(float((weight ** 2 * var_mean_a).sum())) / total
@@ -275,7 +303,10 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
                  math.sqrt((se_a / pooled_mean_a) ** 2 + (se_b / pooled_mean_b) ** 2) / math.log(2.0))
     tracers = [s.tracer for s in strata]
     perm = _permutation_test(strata, settings, seed)
+    standardized = _pool_standardized(g, [s.n_num for s in strata], [s.n - s.n_num for s in strata])
     return {
+        **standardized,
+        "tracer_smd": _describe(dict(zip(tracers, g)), 3),
         "k": k,
         "mean_numerator": pooled_mean_a,
         "mean_denominator": pooled_mean_b,
@@ -285,8 +316,8 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
         "ci_upper": diff + _Z_CRITICAL * diff_se,
         "log2fc": _log2fc_from_means(pooled_mean_a, pooled_mean_b, diff, settings.zero_threshold),
         "log2fc_se": log2fc_se,
-        "effect_size": (float((weight[finite_g] * g[finite_g]).sum() / weight[finite_g].sum())
-                        if finite_g.any() else np.nan),
+        # 合并的 Hedges' g 在标准化尺度上按 g 的方差加权（不再借用绝对尺度的权重，见 _pool_standardized）
+        "effect_size": standardized["smd"],
         "statistic": perm["z"],
         "permutation_pvalue": perm["pvalue"],
         "min_achievable_p": perm["p_floor"],
@@ -368,15 +399,28 @@ def _classify(row: dict[str, Any], excluded: list[str], settings: PoolingSetting
         return INSUFFICIENT if low_n else NOT_IDENTIFIABLE
     if k == 1:
         return SINGLE
-    return CONFLICT if row["heterogeneity_pvalue"] < settings.heterogeneity_alpha else CONSISTENT
+    return CONFLICT if heterogeneous(row, settings) and _opposed(row) else CONSISTENT
+
+
+def heterogeneous(row: dict[str, Any], settings: PoolingSettings) -> bool:
+    """示踪剂间异质性：在标准化尺度上判断（两种以上示踪剂的 g 有定义时），否则退回绝对尺度。"""
+    standardized = row.get("smd_heterogeneity_pvalue", np.nan)
+    pvalue = standardized if pd.notna(standardized) else row.get("heterogeneity_pvalue", np.nan)
+    return bool(pd.notna(pvalue) and pvalue < settings.heterogeneity_alpha)
+
+
+def _opposed(row: dict[str, Any]) -> bool:
+    """参与合并的示踪剂中既有组间差为正的，也有为负的。"""
+    return int(row.get("n_tracers_up", 0) or 0) > 0 and int(row.get("n_tracers_down", 0) or 0) > 0
 
 
 def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: str, flux_units: str,
-                    settings: PoolingSettings) -> pd.DataFrame:
+                    settings: PoolingSettings, groups: dict[tuple[str, str], str] | None = None) -> pd.DataFrame:
     """合并结果 → 统一差异结果表（``omicsweave.contract.tables.DIFFERENTIAL_COLUMNS``）。
 
     - 置换检验在该设计下可达 p 阈值时 ``evidence_level = statistical_test``：p 为置换 p，BH-FDR 在本比较内校正，
-      入选需 p、FDR 与 |log2FC| 都过阈值；
+      入选需 p、FDR 与 |log2FC| 都过阈值；``groups``（:mod:`omicsweave.mfa.flux_groups`）给出时，化学计量上锁死的
+      反应在校正中只计一次；
     - 不可达时与单示踪剂分析一样只给效应量（``effect_size_only``），按合并的 |Hedges' g| 与 |log2FC| 判定；
     - 没有可合并的示踪剂为 ``insufficient``；示踪剂之间冲突（``multi_tracer_conflict``）或参与合并的示踪剂
       少于 ``min_tracers`` 时不入选。
@@ -396,7 +440,12 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
     pvalue = table["permutation_pvalue"].where(statistical)
     padj = pd.Series(np.nan, index=table.index)
     tested = pvalue.notna()
-    if tested.any():
+    keys = None
+    if groups is not None:
+        from .flux_groups import group_keys, grouped_bh
+        keys = group_keys(table["tissue"], table["reaction"], groups)
+        padj = grouped_bh(pvalue, keys)
+    elif tested.any():
         from statsmodels.stats.multitest import multipletests
         padj[tested] = multipletests(pvalue[tested], method="fdr_bh")[1]
 
@@ -426,6 +475,8 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
             marks.append("tracer_conflict")
         elif row["tracer_evidence"] == SINGLE:
             marks.append(SINGLE)
+        elif row["tracer_evidence"] == CONSISTENT and heterogeneous(row, settings):
+            marks.append("tracer_magnitude_heterogeneity")     # 方向一致、幅度不一致：不阻止结论，单独标出
         if row["identifiability"] in UNCONSTRAINED_LABELS:
             marks.append(f"identifiability:{row['identifiability']}")
         flags.append(";".join(marks))
@@ -462,9 +513,13 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
     for column in ("tracer_evidence", "n_tracers", "n_tracers_informative", "tracers_informative", "tracers_excluded",
                    "diff", "diff_se", "ci_lower", "ci_upper", "log2fc_se", "heterogeneity_q", "heterogeneity_pvalue",
                    "i_squared", "n_tracers_up", "n_tracers_down", "tracer_effects", "tracer_weights",
-                   "n_permutations", "permutation_exact"):
+                   "n_permutations", "permutation_exact", "smd", "smd_se", "smd_heterogeneity_q",
+                   "smd_heterogeneity_pvalue", "smd_i_squared", "n_tracers_smd", "tracer_smd"):
         if column in table.columns:
-            out[column] = table[column]
+            out[column] = table[column].to_numpy()
+    if keys is not None:
+        out["flux_group"] = [groups.get((str(t), str(r)), "") for t, r in zip(table["tissue"], table["reaction"])]
+        out["flux_group_size"] = keys.map(keys.value_counts()).astype(int).to_numpy()
     annotations = annotate_flux_dataframe(pd.DataFrame({"reaction": out["feature_id"]}))
     for column in ("kegg_reaction", "kegg_pathway", "reactome_id", "ec_number"):
         out[column] = annotations[column]

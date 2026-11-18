@@ -308,6 +308,15 @@ class MultiTracerRunTest(unittest.TestCase):
         self.assertEqual(len(self.table), len(REACTIONS))
         self.assertTrue((self.table["inference_unit"] == "biological_replicate").all())
 
+    def test_pooled_table_carries_flux_groups_and_standardized_scale(self) -> None:
+        # 合并结果也按通量组做 BH（G10）；标准化尺度的异质性列与各示踪剂的 g 一并写出
+        for column in ("flux_group", "flux_group_size", "smd", "smd_heterogeneity_pvalue", "tracer_smd"):
+            self.assertIn(column, self.table.columns)
+        self.assertTrue((self.table["flux_group_size"] >= 1).all())
+        self.assertTrue((self.mfa / "tables" / "flux_groups.parquet").is_file())
+        fits = pd.read_parquet(self.mfa / "tables" / "sample_flux_fits.parquet")
+        self.assertEqual(set(fits["tracer"]), set(TRACERS))
+
     def test_consistent_reaction_reaches_significance_after_pooling(self) -> None:
         pdh = self.table.loc[("liver", "PDH_m")]
         self.assertEqual(pdh["tracer_evidence"], mt.CONSISTENT)

@@ -621,7 +621,7 @@ def flux_pca(flux_df, sample_conditions, output_dir, tissues,
 
 def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
                       tissues, output_dir, comparisons=None, tissue_filter=None,
-                      analysis_config=None):
+                      analysis_config=None, flux_groups=None):
     """
     每个生物学样本先汇总为一个通量估计，再进行差异通量分析。
 
@@ -643,6 +643,9 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
         比较对列表，如 [("hfd", "lfd")]。
     tissue_filter : list of str, optional
         限制特定组织。
+    flux_groups : dict, optional
+        （组织, 反应）→ 通量组标识（:mod:`omicsweave.mfa.flux_groups`）。给出时，化学计量上锁死的反应在 BH
+        校正中只计一次，结果多 ``flux_group``、``flux_group_size`` 两列；不给时与旧流程相同。
 
     Returns
     -------
@@ -843,29 +846,40 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
             continue
 
         df = pd.DataFrame(rows)
+        group_key = None
+        if flux_groups is not None:
+            from .flux_groups import group_keys
+            group_key = group_keys(df["tissue"], df["reaction"], flux_groups)
+            df["flux_group"] = [flux_groups.get((str(t), str(r)), "") for t, r in zip(df["tissue"], df["reaction"])]
+            df["flux_group_size"] = group_key.map(group_key.value_counts()).astype(int)
 
         # 样本量下界（与数据无关，同一比较内为常数）
         df["min_achievable_pvalue"] = p_floor
         df["rank_test_underpowered"] = rank_test_underpowered
         if np.isfinite(p_floor):
-            n_at_floor = int(df["pvalue_mannwhitney"].le(p_floor + 1e-12).sum())
+            at_floor = df["pvalue_mannwhitney"].le(p_floor + 1e-12)
+            if group_key is None:
+                n_tests, n_at_floor = len(df), int(at_floor.sum())
+            else:   # 通量组只计一次
+                n_tests, n_at_floor = int(group_key.nunique()), int(group_key[at_floor].nunique())
             df["min_achievable_fdr"] = min_achievable_bh_fdr(
-                p_floor, len(df), max(1, n_at_floor)
+                p_floor, n_tests, max(1, n_at_floor)
             )
         else:
             df["min_achievable_fdr"] = np.nan
 
         if multiple_testing == "fdr_bh":
             from statsmodels.stats.multitest import multipletests
-            mask = df["pvalue_ttest"].notna()
-            if mask.sum() > 0:
-                _, fdr, _, _ = multipletests(df.loc[mask, "pvalue_ttest"], method="fdr_bh")
-                df.loc[mask, "fdr_ttest"] = fdr
-
-            mask = df["pvalue_mannwhitney"].notna()
-            if mask.sum() > 0:
-                _, fdr, _, _ = multipletests(df.loc[mask, "pvalue_mannwhitney"], method="fdr_bh")
-                df.loc[mask, "fdr_mannwhitney"] = fdr
+            for p_column, fdr_column in (("pvalue_ttest", "fdr_ttest"), ("pvalue_mannwhitney", "fdr_mannwhitney")):
+                mask = df[p_column].notna()
+                if mask.sum() == 0:
+                    continue
+                if group_key is None:
+                    _, fdr, _, _ = multipletests(df.loc[mask, p_column], method="fdr_bh")
+                    df.loc[mask, fdr_column] = fdr
+                else:
+                    from .flux_groups import grouped_bh
+                    df.loc[mask, fdr_column] = grouped_bh(df[p_column], group_key)[mask]
 
         # BH 校正后的可达下界只有在检验总数已知后才能算。选择规则是
         # "p < 阈值 **且** FDR <= 阈值"，所以 FDR 不可达时整条 p 值
@@ -1680,6 +1694,13 @@ def sample_flux_matrix(flux_df, flux_all_fits, sample_conditions, tissues,
             value = float(net_value[0])
             p25 = float(np.percentile(fit_points, 25)) if len(fit_points) else np.nan
             p75 = float(np.percentile(fit_points, 75)) if len(fit_points) else np.nan
+            # 全部拟合点（不做 IQR 过滤）的四分位数：作图时的误差线（fit_p25 / fit_p75 取自过滤后的点，用于可辨识性分档）
+            raw_points = np.asarray(_compute_net_flux(
+                flux_all_fits, flux_df, [sample_id], tissue, reaction,
+                use_net_flux=use_net_flux, iqr_filter=False,
+            ), dtype=float)
+            raw_points = raw_points[np.isfinite(raw_points)]
+            q25, q75 = (np.percentile(raw_points, [25, 75]) if len(raw_points) else (np.nan, np.nan))
             # 可辨识性代理：拟合点的 IQR 宽度相对于通量本身的大小。
             # 拟合迭代不是生物学重复，但它们**确实**刻画了「在这只动物的
             # 数据下，这条通量被约束得有多紧」。相对宽度很大意味着该通量
@@ -1700,6 +1721,9 @@ def sample_flux_matrix(flux_df, flux_all_fits, sample_conditions, tissues,
                 "fit_p75": p75,
                 "fit_std": float(np.std(fit_points, ddof=1)) if len(fit_points) >= 2 else np.nan,
                 "fit_rel_iqr": rel_iqr,
+                "n_fits": int(len(raw_points)),
+                "fit_q25": float(q25),
+                "fit_q75": float(q75),
                 "use_net_flux": use_net_flux,
                 "iqr_filter": iqr_filter,
             })

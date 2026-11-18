@@ -147,7 +147,8 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
   - 通路面板（S2，`panels: panels.yaml`，相对实验目录，课题内容不进包）：`integration/dossier/panels.py` 解析声明，
     代谢物节点由网络化学计量补全（`tables/panel_elements.parquet`）；`figures/<面板>/<组织>/` 下为图 A
     `matrix_<比较>`（与同名 TSV / XLSX 导出表共用 `integration/dossier/view.py` 的矩阵视图）、图 B
-    `dossier_<反应>_<比较>`（每个成员一个面板，逐只动物的点，每个来源一行）、图 C `tracer_coverage_<比较>`
+    `dossier_<反应>_<比较>`（每个成员一个面板，逐只动物的点，每个来源一行；通量面板的误差线为该动物全部拟合点的四分位距，
+    贴在盒约束边界上的动物为空心点，取自 MFA 结果包的 `sample_flux_fits.parquet`）、图 C `tracer_coverage_<比较>`
     （示踪剂 × 反应的可辨识性与该比较两组的动物数）。绘图在
     `plotting/dossier_plots.py`；PDF 中的中文字体在部分 fontTools 版本下不能按 Type 42 子集化时改用 Type 3 嵌入。
   - 分轴综合评估（S3，`integration/dossier/assessment.py`，设计文档第 3 节）：每个（反应, 组织, 比较）在 F 通量、C 酶容量、

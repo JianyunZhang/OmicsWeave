@@ -47,7 +47,8 @@ class ExportTest(unittest.TestCase):
         path = export_bundle(self.latest)
         self.assertEqual(path, self.latest / "exports" / f"{EXP}_{self.latest.name}.xlsx")
         sheets = pd.read_excel(path, sheet_name=None)
-        self.assertEqual(list(sheets), ["info", "mfa_differential"])
+        # MFA 结果包另有逐只动物的拟合分布与通量组（G10）
+        self.assertEqual(list(sheets), ["info", "mfa_differential", "mfa_flux_groups", "mfa_sample_flux_fits"])
         info = dict(zip(sheets["info"]["field"], sheets["info"]["value"]))
         self.assertEqual(info["run_id"], self.latest.name)
         self.assertEqual(int(info["rows:mfa_differential"]), len(sheets["mfa_differential"]))
@@ -57,7 +58,8 @@ class ExportTest(unittest.TestCase):
     def test_tsv_and_row_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = export_bundle(self.first, "tsv", Path(tmp) / "out")
-            self.assertEqual(sorted(p.name for p in directory.iterdir()), ["info.tsv", "mfa_differential.tsv"])
+            self.assertEqual(sorted(p.name for p in directory.iterdir()),
+                             ["info.tsv", "mfa_differential.tsv", "mfa_flux_groups.tsv", "mfa_sample_flux_fits.tsv"])
             table = pd.read_csv(directory / "mfa_differential.tsv", sep="\t")
             self.assertIn("contrast_id", table.columns)
         with mock.patch.object(export_module, "EXCEL_MAX_ROWS", 3):
