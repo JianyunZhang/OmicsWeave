@@ -616,7 +616,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 
 以下代码迁移到 `local/projects/<课题>/analysis/`（本地，不提交；见仓库中的 `local/README.md`）。迁移前的版本可从本仓库的 Git 历史取回：
 
-- ✅ `multiomics/tissue_pathway_panels.py`、`plot_tissue_pathway_panels.py`、`validate_tissue_pathway_panels.py`（约 1,240 行，六组织图件与脑 HFD/LFD 参照），已移到 `local/projects/dio_mouse/analysis/`
+- ✅ `multiomics/tissue_pathway_panels.py`、`plot_tissue_pathway_panels.py`、`validate_tissue_pathway_panels.py`（约 1,240 行，六组织图件与脑 HFD/LFD 参照），已移到 `local/projects/dio_mouse/analysis/`；2026-11-18 归档到 `local/projects/dio_glp1ra_project/analysis/legacy_dio_mouse/`，功能由 `reaction_dossier`（G13/G14）取代
 - `multiomics/run_cross_tissue_integration.py`（依赖人工整理的 `cross_tissue_evidence.yaml`）：暂留包内。它是 `omicsweave integration cross-tissue` 命令，也是多维证据画像端到端测试的入口；阶段 2.3 的 `omicsweave integrate --mode pathway_convergence` 就绪后再移出
 
 另外，`multiomics/pipeline_evaluation_report.md`（已标注为历史文档）移到 `docs/history/`。
@@ -632,7 +632,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | `proteomics/run_proteomics_analysis.py` | 已标注弃用的兼容入口 | ✅ 已删除 |
 | 兼容转发模块：`multiomics/integration/meta_analysis.py`、`stability.py`，`mappings/reaction_registry.py`、`gene_annotations.py`、`metabolite_annotations.py`、`protein_annotations.py` | 目前没有外部用户，已改为新路径导入 | ✅ 已删除 |
 | `transcriptomics/rerun_de_analysis.py`、`finish_gsea.py`、`summarize_gsea.py`、`run_enrichment.py`、`run_gsea.py` | 一次性补跑或薄包装脚本，由 `omicsweave run --steps` 取代 | 阶段 2 替代命令就绪后删除 |
-| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 | ✅ 已移到本地工作区 `local/projects/dio_mouse/analysis/` |
+| `transcriptomics/check_markers.py`、`qc_one_sample.py` | 调试脚本 | ✅ 已移到本地工作区 `local/projects/dio_mouse/analysis/`；2026-11-18 与上面三个脚本一起归档到 `local/projects/dio_glp1ra_project/analysis/legacy_dio_mouse/` |
 | `transcriptomics/setup_kallisto.py`、`download_transcriptome.py` | 只适用于 Windows 和小鼠；SSL 校验已恢复默认开启 | 阶段 3 由外部工具适配器取代后删除 |
 
 ---
@@ -738,7 +738,7 @@ omicsweave integrate --project --mode meta                       # 多个实验�
 | 开源许可证 | **BSD-3-Clause**（OmicsWeave 与 TheraWeave 相同）：与主要依赖兼容，并含“未经许可不得用作者或单位名义为衍生产品背书”条款，与 scverse 生态（scanpy、anndata）一致。版权方为 “The OmicsWeave Developers”（集体署名；贡献者名单在 `CITATION.cff` 中维护） | 已定；`LICENSE` 与 `pyproject.toml` 许可证字段已加入 |
 | 运行环境 | 当前实现 Windows/Linux 单机运行；以后扩展多节点集群部署与多客户端联网使用（阶段 5）。从阶段 1 起遵守第 4.1 节的预留约束 | 已定 |
 | 旧打分矩阵 `flux_omics_scorer` | 尚未发表，且加和总分的策略过于粗糙：**删除加和总分及 `legacy_*` 输出，不保留 `--legacy`**。不另起一套新的总分：多维证据画像（`evidence_profile`，现已是主结果）作为唯一整合结果，按维度给出证据等级，并用 `stability` 做生物学稳定性校准；各组学的证据提取部分保留并重构（第 10.3 节） | 已定，阶段 2.8 已实施 |
-| 课题专用脚本与数据 | 暂不移动外部项目的原始数据。本仓库预留 `local/` 本地课题工作区（不提交，已建立）：课题数据副本放 `local/projects/<课题>/`，课题专用脚本放其中的 `analysis/`；通过 `--project-dir`、环境变量 `OMICSWEAVE_PROJECT_DIR` 或 `pytest --project-dir` 指定。包内的课题专用脚本已移到 `local/projects/dio_mouse/analysis/`（第 10.4 节） | 已定，工作区已就绪 |
+| 课题专用脚本与数据 | 暂不移动外部项目的原始数据。本仓库预留 `local/` 本地课题工作区（不提交，已建立）：课题数据副本放 `local/projects/<课题>/`，课题专用脚本放其中的 `analysis/`；通过 `--project-dir`、环境变量 `OMICSWEAVE_PROJECT_DIR` 或 `pytest --project-dir` 指定。包内的课题专用脚本已移到 `local/projects/dio_mouse/analysis/`（第 10.4 节），2026-11-18 归档到 `local/projects/dio_glp1ra_project/analysis/legacy_dio_mouse/`；两个 DIO 课题目录同日移入 `local/projects/` | 已定，工作区已就绪 |
 | 阶段 2 之后先做阶段 3 还是 TheraWeave MVP | 见总纲第 11 节；现有课题数据已处理成表格，倾向先做 TheraWeave MVP | 待定 |
 | 文档语言 | 中文先行，阶段 4 补英文 | 已定 |
 

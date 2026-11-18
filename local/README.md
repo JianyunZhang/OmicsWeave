@@ -10,7 +10,7 @@
 ```text
 local/
 └── projects/
-    └── <课题名>/                      # 例如 dio_mouse
+    └── <课题名>/                      # 例如 dio_project、dio_glp1ra_project
         ├── experiments/<experiment_id>/...   # 从实验项目仓库拷贝的配置与输入数据
         ├── analysis_results/                 # 在本地运行产生的结果
         ├── references/                       # 参考基因组、FASTA、通路库等（可选）
