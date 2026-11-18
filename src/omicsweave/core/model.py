@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from enum import Enum
 from typing import Any, Literal
 
@@ -133,6 +134,45 @@ class ReplicationSet(_Strict):
         return self
 
 
+# omicsweave pipeline 课题脚本命令中可用的占位符
+PIPELINE_PLACEHOLDERS = ("project_dir", "experiment", "run", "run_dir", "integration", "integration_dir")
+PIPELINE_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+
+
+class PipelineScript(_Strict):
+    """``omicsweave pipeline`` 在每个实验的 run / integrate 之后运行的课题脚本（如差异图表、关键结果导出）。
+
+    ``command`` 按 shell 规则拆分（路径用 ``/``，含空格的参数加引号）；首项为 ``.py`` 文件时用运行 omicsweave 的
+    同一个 Python 解释器执行，路径相对于项目目录。占位符替换为本次流程的值：``{experiment}`` 实验 ID，``{run}`` /
+    ``{run_dir}`` 单组学结果包的运行 ID / 目录，``{integration}`` / ``{integration_dir}`` 整合结果包的运行 ID / 目录，
+    ``{project_dir}`` 项目目录。
+    """
+    command: str = Field(min_length=1)
+    name: str | None = None                                      # 默认为脚本文件名（不含扩展名）
+    experiments: list[str] = Field(default_factory=list)         # 只对这些实验运行；默认全部
+
+    @field_validator("command")
+    @classmethod
+    def _check_command(cls, value: str) -> str:
+        unknown = sorted(set(PIPELINE_PLACEHOLDER.findall(value)) - set(PIPELINE_PLACEHOLDERS))
+        if unknown:
+            raise ValueError(f"未知占位符 {'、'.join('{' + u + '}' for u in unknown)}，"
+                             f"可用：{'、'.join('{' + p + '}' for p in PIPELINE_PLACEHOLDERS)}")
+        try:
+            tokens = shlex.split(value)
+        except ValueError as exc:
+            raise ValueError(f"无法拆分命令 {value!r}：{exc}") from None
+        if not tokens:
+            raise ValueError("命令为空")
+        return value
+
+
+class PipelineSettings(_Strict):
+    """``omicsweave pipeline`` 的标准流程：对每个实验依次 validate → run → integrate → 课题脚本。"""
+    experiments: list[str] = Field(default_factory=list)         # 实验 ID；默认项目中的全部实验
+    scripts: list[PipelineScript] = Field(default_factory=list)
+
+
 class ProjectConfig(_Strict):
     schema_version: Literal[1] = SCHEMA_VERSION
     project: ProjectInfo
@@ -140,6 +180,7 @@ class ProjectConfig(_Strict):
     # 相对于项目目录的实验目录；留空时自动查找 paths.experiments 下含 experiment.yaml 的目录
     experiments: list[str] = Field(default_factory=list)
     replication: list[ReplicationSet] = Field(default_factory=list)
+    pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
 
 
 # ── experiment.yaml ───────────────────────────────────────────────────────

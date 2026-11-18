@@ -636,7 +636,8 @@ def migrate_experiment(experiment_id: str, root: str | Path) -> Migration:
     project_yaml = None
     if not (root / PROJECT_FILE).is_file():
         project_id = re.sub(r"[^A-Za-z0-9_.-]", "_", root.name).lstrip("_.-") or "project"
-        project_yaml = PROJECT_TEMPLATE.format(project_id=project_id, species=Species.MOUSE.value)
+        project_yaml = PROJECT_TEMPLATE.format(project_id=project_id, species=Species.MOUSE.value,
+                                               experiment_id=experiment_id)
         notes.append(f"项目目录没有 project.yaml，已按小鼠（{Species.MOUSE.value}）生成，请核对项目 ID 与物种")
 
     report = _report(experiment_id, parts, sources, subjects, samples, notes, has_integration)

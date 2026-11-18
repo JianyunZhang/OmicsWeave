@@ -15,6 +15,7 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] refs list | build <genes|proteins|metabolites|reaction_roles> [...] | audit --experiment 实验ID
     omicsweave [--project-dir DIR] replicate [--set 复现组ID]
     omicsweave [--project-dir DIR] diff 运行A 运行B [--experiment 实验ID] [--output 目录]
+    omicsweave [--project-dir DIR] pipeline [--experiment 实验ID ...] [--from run|integrate|scripts] [--source 运行ID] [--dry-run]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
@@ -23,6 +24,7 @@ omicsweave 命令行入口。
     omicsweave --project-dir D:/lab_project validate
     omicsweave --project-dir D:/lab_project migrate --experiment 20250425_cimr_wt_mice_dio
     omicsweave --project-dir D:/lab_project run --experiment 20250425_cimr_wt_mice_dio --omics mfa
+    omicsweave --project-dir D:/lab_project pipeline        # validate → run → integrate → 课题脚本，一条命令
     omicsweave mfa run --experiment 20250425_cimr_wt_mice_dio      # 旧版流程，读取旧版配置
     omicsweave mfa run --help          # 查看该动作自身的参数
 
@@ -136,6 +138,17 @@ def build_parser() -> argparse.ArgumentParser:
                                               "结果写入新的结果包")
     stats.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
     stats.add_argument("--source", default=None, help="源结果包的运行 ID，默认最近一次含统一结果表的运行")
+
+    pipeline = modules.add_parser("pipeline", help="标准流程：validate → run → integrate → 课题脚本"
+                                                    "（project.yaml 的 pipeline 一节），各步之间传递确切的运行 ID")
+    pipeline.add_argument("--experiment", action="append", default=None,
+                          help="只运行这些实验，可重复；默认 pipeline.experiments，未写时为全部实验")
+    pipeline.add_argument("--omics", action="append", default=None, help="同 run --omics，默认 all")
+    pipeline.add_argument("--from", dest="start", choices=["run", "integrate", "scripts"], default=None,
+                          help="从哪一步开始：integrate / scripts 沿用已有的单组学结果包（--source，默认最近一次）；"
+                               "默认 run，给出 --source 时默认 integrate")
+    pipeline.add_argument("--source", default=None, help="沿用的单组学结果包运行 ID（只能选一个实验）")
+    pipeline.add_argument("--dry-run", action="store_true", help="只做检查并列出各步命令，不运行")
 
     diff = modules.add_parser("diff", help="逐表对照两个结果包，报告是否逐值相同、差值分布与等级转移")
     diff.add_argument("run_a", help="结果包 A：运行 ID 或结果包目录")
@@ -335,9 +348,32 @@ def _run_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_pipeline(args: argparse.Namespace) -> int:
+    from omicsweave.core.pipeline import run_pipeline
+    from omicsweave.core.run import RunError
+
+    start = args.start or ("integrate" if args.source else "run")
+    try:
+        results = run_pipeline(project_dir(), args.experiment, _split(args.omics) or None, start=start,
+                               source=args.source, dry_run=args.dry_run, command=["omicsweave", *args.argv])
+    except RunError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        print("（只列出了各步，没有运行）")
+        return 0
+    for result in results:
+        print(f"[{result.experiment}] 单组学结果包：{result.run_dir}")
+        if result.integration_dir:
+            print(f"[{result.experiment}] 整合结果包：{result.integration_dir}")
+        if result.scripts:
+            print(f"[{result.experiment}] 课题脚本：{'、'.join(result.scripts)}")
+    return 0
+
+
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
-             "refs": _run_refs, "replicate": _run_replicate}
+             "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline}
 
 
 def main(argv: list[str] | None = None) -> None:

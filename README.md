@@ -87,6 +87,37 @@ omicsweave mfa run --help
 | `run --experiment 实验ID [--omics 组学\|all] [--steps 步骤]` | 按 `experiment.yaml` 运行，结果包写到 `analysis_results/<实验ID>/<run_id>/`；四个组学均已接入（转录组、蛋白组为表格层输入），写出差异与富集结果表，并为每个组织 × 比较画火山图（`figures` 步骤，`omics/<组学>/figures/`）；其他图件与解读报告暂用 `omicsweave <组学> run` |
 | `integrate --experiment 实验ID [--mode 模式] [--source 运行ID]` | 读取一次运行的统一结果表做多组学整合，结果写入新的结果包；目前已接入 `flux_anchored`、`pathway_convergence` |
 | `export --experiment 实验ID [--run 运行ID] [--format xlsx\|tsv]` | 把结果包中的结果表导出为 Excel（附运行信息）或 TSV，默认最近一次运行 |
+| `pipeline [--experiment 实验ID ...] [--from run\|integrate\|scripts] [--source 运行ID] [--dry-run]` | 标准流程：对 `project.yaml` 中 `pipeline.experiments` 的每个实验依次 validate → run → integrate → 课题脚本（见下） |
+
+### 标准流程（`pipeline`）
+
+在 `project.yaml` 中写好 `pipeline` 一节后，一条命令完成整个项目的标准分析：
+
+```yaml
+pipeline:
+  experiments: [all_tissues]          # 默认项目中的全部实验
+  scripts:                            # 课题脚本，每个实验 run / integrate 之后依次运行
+    - name: figures
+      command: analysis/plot_results.py --experiment {experiment} --run {run}
+    - name: key_results
+      command: analysis/export_key_results.py --run {run} --integration {integration}
+      experiments: [all_tissues]      # 只对这些实验运行
+```
+
+```bash
+omicsweave --project-dir D:/lab_project pipeline --dry-run           # 先检查并列出各步
+omicsweave --project-dir D:/lab_project pipeline                     # validate → run → integrate → 脚本
+omicsweave --project-dir D:/lab_project pipeline --source <运行ID>   # 沿用单组学结果包，重跑整合与脚本
+omicsweave --project-dir D:/lab_project pipeline --from scripts      # 只重跑脚本（最近一次结果包）
+```
+
+- 各步之间传递确切的运行 ID：integrate 读取本次 run 的结果包，脚本的 `{run}` / `{integration}` 是本次的运行 ID，
+  不依赖“最近一次运行”。其他占位符：`{experiment}`、`{run_dir}`、`{integration_dir}`、`{project_dir}`。
+- 实验名、脚本文件与占位符在开始前全部检查；校验有错误时一步也不运行。实验没有启用整合
+  （`integration.enabled` 与 `modes`）时跳过 integrate。
+- 脚本在项目目录下运行，`OMICSWEAVE_PROJECT_DIR` 指向项目目录；`.py` 脚本用运行 omicsweave 的同一个 Python 执行，
+  其他命令（如 `Rscript ...`）按 PATH 查找。命令按 shell 规则拆分，路径用 `/`。
+- 某一步失败时停止，并给出续跑命令（`--from integrate|scripts --source <运行ID>`）。
 
 各组学流程的命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
 这些流程目前仍读取旧的各组学配置（`experiments/<id>/<组学>_data/`），阶段 2 改为读取上面的统一项目配置。

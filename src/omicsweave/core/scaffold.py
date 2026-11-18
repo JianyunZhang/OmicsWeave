@@ -30,6 +30,11 @@ defaults:
   alpha: 0.05
   random_seed: 20261029
 experiments: []                     # 留空时自动查找 experiments/ 下含 experiment.yaml 的目录
+# omicsweave pipeline 的标准流程（validate → run → integrate → 课题脚本），可省略：
+# pipeline:
+#   experiments: [{experiment_id}]
+#   scripts:
+#     - command: analysis/plot_results.py --experiment {{experiment}} --run {{run}}
 """
 
 EXPERIMENT_TEMPLATE = """\
@@ -102,7 +107,8 @@ def create_project(root: str | Path, project_id: str, species: Species = Species
         directory.mkdir(parents=True, exist_ok=True)
 
     files = {
-        project_file: PROJECT_TEMPLATE.format(project_id=project_id, species=Species(species).value),
+        project_file: PROJECT_TEMPLATE.format(project_id=project_id, species=Species(species).value,
+                                              experiment_id=experiment_id),
         exp_dir / EXPERIMENT_FILE: EXPERIMENT_TEMPLATE.format(experiment_id=experiment_id),
         exp_dir / "subjects.tsv": SUBJECTS_HEADER,
         exp_dir / "samples.tsv": SAMPLES_HEADER,
