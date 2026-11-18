@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import textwrap
+import unicodedata
 from pathlib import Path
 from typing import Iterable
 
@@ -269,15 +270,64 @@ def _member_samples(row: pd.Series, samples: pd.DataFrame) -> pd.DataFrame:
     return part
 
 
+# 图 B 面板标题每行最多的显示宽度（ASCII 记 1、全角字符记 2）：6 pt 字号下约 0.046 英寸 / 字符，面板列距 1.75 英寸，
+# 留出间隙后约 34 个字符；超过时在分隔符处折行，否则会压到右侧面板的标题上
+TITLE_WIDTH = 34
+TITLE_MAX_LINES = 4
+
+
+def _text_width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _hard_wrap(text: str, width: int) -> list[str]:
+    """单个片段超过宽度时折行：优先在空格处断开，没有空格时按显示宽度逐字断开。"""
+    if _text_width(text) <= width:
+        return [text]
+    lines, current = [], ""
+    for word in text.split(" "):
+        candidate = f"{current} {word}" if current else word
+        if _text_width(candidate) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = ""
+        for ch in word:
+            if _text_width(current + ch) > width:
+                lines.append(current)
+                current = ""
+            current += ch
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _pack(parts: list[str], sep: str, width: int = TITLE_WIDTH) -> list[str]:
+    """把片段用 ``sep`` 依次拼接，超过 ``width`` 时另起一行；片段本身过长时折行。"""
+    lines, current = [], ""
+    for part in (p for p in parts if p):
+        candidate = f"{current}{sep}{part}" if current else part
+        if current and _text_width(candidate) > width:
+            lines.append(current)
+            current = part
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return [piece for line in lines for piece in _hard_wrap(line, width)]
+
+
 def _panel_title(row: pd.Series) -> str:
+    """成员名与来源一行、状态与统计量一行；任一行超过面板宽度时在分隔符处折行，最多 ``TITLE_MAX_LINES`` 行。"""
     name = row["member_id"] or row.get("feature_name") or ""
     if row["layer"] == "mfa":
         name = str(row["tracer"])
     tag = {"proteomics": "P", "transcriptomics": "R", "metabolomics": "M", "derived": "ratio", "mfa": "flux"}
-    head = f"{name} · {tag.get(row['layer'], row['layer'])}:{row['source']}"
+    origin = f"{tag.get(row['layer'], row['layer'])}:{row['source']}"
     if row["role"] in ("regulator", "effector") and row.get("regulator_effect"):
-        head += f" ({row['regulator_effect']})"
-    stats = []
+        origin += f" ({row['regulator_effect']})"
+    stats = [str(row["cell_state"])]
     if pd.notna(row.get("log2fc")):
         stats.append(f"log2FC {row['log2fc']:+.2f}")
     if pd.notna(row.get("padj")):
@@ -286,7 +336,11 @@ def _panel_title(row: pd.Series) -> str:
         stats.append(f"p {row['pvalue']:.2g}")
     if row["layer"] == "mfa" and isinstance(row.get("identifiability"), str) and row["identifiability"]:
         stats.append(row["identifiability"])
-    return head + "\n" + row["cell_state"] + ("  " + "  ".join(stats) if stats else "")
+    lines = _pack([str(name), origin], " · ") + _pack(stats, "  ")
+    if len(lines) > TITLE_MAX_LINES:
+        lines = lines[:TITLE_MAX_LINES - 1] + [textwrap.shorten(" ".join(lines[TITLE_MAX_LINES - 1:]), TITLE_WIDTH,
+                                                                placeholder="…")]
+    return "\n".join(lines)
 
 
 def _draw_member(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[str, str]) -> None:

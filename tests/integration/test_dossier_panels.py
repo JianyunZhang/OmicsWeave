@@ -24,6 +24,7 @@ from omicsweave.contract.tables import write_differential
 from omicsweave.core.model import Omics
 from omicsweave.integration.dossier.panels import PanelError, load_panels, panel_elements
 from omicsweave.integration.dossier.view import matrix_view, summarize, wide_table
+from omicsweave.integration.plotting.dossier_plots import TITLE_MAX_LINES, TITLE_WIDTH, _panel_title, _text_width
 from tests.integration.test_flux_anchored import DIET, FluxAnchoredBundleTest
 from tests.mfa.test_mfa_runner import EXP, build_two_factor_project
 
@@ -112,6 +113,36 @@ class SummaryTest(unittest.TestCase):
         self.assertAlmostEqual(cell["value"], 0.8)
         self.assertEqual((cell["display_state"], cell["n_changed"], cell["n_quantified"], cell["ring"]),
                          ("summary", 1, 2, "changed"))
+
+
+class PanelTitleTest(unittest.TestCase):
+    """图 B 的面板标题按面板宽度折行，不压到右侧面板上（真实数据中 alanine 通量面板的状态行有 50 个字符）。"""
+
+    @staticmethod
+    def title_row(**fields) -> pd.Series:
+        base = {"member_id": "Gpd1", "feature_name": "Gpd1", "layer": "proteomics", "source": "dio_project",
+                "role": "direct_enzyme", "regulator_effect": "", "tracer": "", "log2fc": 0.08, "padj": 0.92,
+                "pvalue": 0.5, "cell_state": "equivalent", "identifiability": ""}
+        return pd.Series({**base, **fields})
+
+    def test_short_title_keeps_two_lines(self) -> None:
+        self.assertEqual(_panel_title(self.title_row()), "Gpd1 · P:dio_project\nequivalent  log2FC +0.08  q 0.92")
+
+    def test_long_titles_wrap_at_separators(self) -> None:
+        flux = self.title_row(member_id="", layer="mfa", tracer="alanine", role="flux", log2fc=1.0, padj=np.nan,
+                              pvalue=np.nan, cell_state="not_identifiable", identifiability="poorly_constrained")
+        metabolite = self.title_row(member_id="Dihydroxyacetone phosphate", layer="metabolomics", role="substrate",
+                                    cell_state="not_detected", log2fc=np.nan, padj=np.nan, pvalue=np.nan)
+        wide = self.title_row(member_id="甘油三酯（总量）与甘油二酯之比", layer="derived", role="step_ratio")
+        for row in (flux, metabolite, wide):
+            lines = _panel_title(row).split("\n")
+            with self.subTest(title=lines[0]):
+                self.assertLessEqual(len(lines), TITLE_MAX_LINES)
+                self.assertTrue(all(_text_width(line) <= TITLE_WIDTH for line in lines), lines)
+        # 只在分隔符处断开，内容不丢
+        self.assertEqual(_panel_title(flux).split("\n"),
+                         ["alanine · flux:dio_project", "not_identifiable  log2FC +1.00", "poorly_constrained"])
+        self.assertEqual(_panel_title(metabolite).split("\n")[:2], ["Dihydroxyacetone phosphate", "M:dio_project"])
 
 
 class DossierPanelBundleTest(unittest.TestCase):
