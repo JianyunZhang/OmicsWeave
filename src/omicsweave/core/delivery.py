@@ -18,13 +18,15 @@ from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
 from .config import EXPERIMENT_FILE, PROJECT_FILE, Experiment
 from .provenance import sha256_file
 
-# 交付目录中反应档案面板产出的子目录
+# 交付目录中反应档案面板产出的子目录，与无面板候选表的子目录
 PANELS_DIR = "panels"
+CANDIDATES_DIR = "candidates"
 
 
 class Delivery:
     def __init__(self, experiment: Experiment, scripts: list[str], command: list[str]):
         project = experiment.project
+        self.project_root = project.root
         self.directory = project.path("results") / "_deliveries" / experiment.id / uuid4().hex
         self.directory.mkdir(parents=True, exist_ok=False)
         self.stages = {"validate": {"status": "completed"}}
@@ -143,9 +145,36 @@ class Delivery:
             cell.hyperlink = quote(row["target"].as_posix(), safe="/")
             cell.style = "Hyperlink"
 
+    def write_candidates(self) -> pd.DataFrame | None:
+        """由整合结果包的全局表写出无面板候选表（``candidates/``，见 :mod:`omicsweave.integration.candidates`），
+        并把面板声明的选定方式登记到索引；返回按组织 × 比较的概览，没有整合结果包或全局表时为 None。"""
+        integrate = self.bundles.get("integrate")
+        if not integrate:
+            return None
+        from omicsweave.integration.candidates import write_candidates
+
+        result = write_candidates(self.directory / integrate["path"], self.directory / CANDIDATES_DIR,
+                                  self.project_root)
+        if result is None:
+            return None
+        self.data["panels"] = result.panels.record() if result.panels else None
+        return result.overview
+
+    def _write_candidate_overview(self, writer: pd.ExcelWriter, overview: pd.DataFrame) -> None:
+        target = f"{CANDIDATES_DIR}/candidates.xlsx"
+        overview.assign(明细=target).to_excel(writer, sheet_name="候选概览", index=False)
+        sheet = writer.sheets["候选概览"]
+        sheet.freeze_panes = "C2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for row in range(2, len(overview) + 2):
+            cell = sheet.cell(row, overview.shape[1] + 1)
+            cell.hyperlink = target
+            cell.style = "Hyperlink"
+
     def write_summary(self) -> None:
-        """复制面板产出（:meth:`copy_panels`），再写 ``summary.xlsx``。"""
+        """复制面板产出（:meth:`copy_panels`）、写无面板候选表（:meth:`write_candidates`），再写 ``summary.xlsx``。"""
         panels = self.copy_panels()
+        candidates = self.write_candidates()
         self.collect_exports()
         tables, contrasts = [], []
         for item in self.artifacts:
@@ -167,6 +196,8 @@ class Delivery:
                            "交付 ID": self.directory.name, "阶段": name, **bundle}
                           for name, bundle in self.bundles.items()]).to_excel(writer, sheet_name="运行来源", index=False)
             pd.DataFrame(contrasts).to_excel(writer, sheet_name="差异结果概览", index=False)
+            if candidates is not None:
+                self._write_candidate_overview(writer, candidates)
             self._write_panel_index(writer, panels)
             pd.DataFrame(tables).to_excel(writer, sheet_name="结果表与质控", index=False)
             pd.DataFrame(self.artifacts).to_excel(writer, sheet_name="文件索引", index=False)

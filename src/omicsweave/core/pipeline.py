@@ -345,7 +345,7 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                         raise RunError(f"脚本 {script.name} 缺少预期交付文件：{'、'.join(missing)}")
                     result.scripts.append(script.name)
         current = "summary"
-        step(current, "复制面板矩阵与图件到 panels/，生成 summary.xlsx 与 index.json")
+        step(current, "复制面板矩阵与图件到 panels/，写无面板候选表 candidates/，生成 summary.xlsx 与 index.json")
         if delivery:
             with stage(current):
                 delivery.write_summary()

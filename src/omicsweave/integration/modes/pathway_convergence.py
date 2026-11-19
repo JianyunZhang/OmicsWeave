@@ -59,7 +59,8 @@ def evidence_table(enrichment: pd.DataFrame) -> pd.DataFrame:
         [*columns, "source_probability_column"]]
 
 
-def _agreement(directions: list[str]) -> str:
+def direction_agreement(directions: list[str]) -> str:
+    """各组学方向：up 与 down 并存为 conflicting；至少两层且同号为 consistent；其余 undetermined。"""
     signed = {d for d in directions if d in ("up", "down")}
     if len(signed) == 2:
         return "conflicting"
@@ -83,7 +84,7 @@ def fusion_table(evidence: pd.DataFrame) -> pd.DataFrame:
     keys = list(zip(fused["tissue"], fused["comparison"], fused["pathway_term"]))
     fused["contrast_role"] = fused["comparison"].map(roles)
     fused["omics_directions"] = [";".join(f"{o}:{d}" for o, d in sorted(directions[k].items())) for k in keys]
-    fused["direction_agreement"] = [_agreement(list(directions[k].values())) for k in keys]
+    fused["direction_agreement"] = [direction_agreement(list(directions[k].values())) for k in keys]
     return fused
 
 

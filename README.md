@@ -129,6 +129,11 @@ omicsweave --project-dir D:/lab_project pipeline --results-dir "D:/研究结果/
 打开 `summary.xlsx` 可查看来源、各组织与比较的差异结果行数、可检验数和入选数，以及结果表和质控清单。
 整合包有 `reaction_dossier` 面板产物时，矩阵（XLSX）、分流与模块检验表及矩阵、分流、示踪剂覆盖图件复制到交付目录的
 `panels/<面板>/<组织>/`；摘要中的「面板结果」可按面板和组织筛选并链接到这些副本（逐反应档案页仍在整合包中）。
+有整合包时另写无面板候选表 `candidates/`（`candidates.xlsx` 与 `reactions*.tsv`、`pathways*.tsv`，摘要中为「候选概览」）：
+反应取 L1 及以上的全部加每个组织 × 比较排名前 10，通路取融合显著、多层显著的全部加各层单层显著的前 5 条；
+入选与面板无关，`panels` 列只作标注，并附诱饵期望、各层 QC 与样本量、各层 padj 与方向（见
+`omicsweave.integration.candidates`）。`panels.yaml` 可写顶层 `selection: {mode: pre_specified | post_hoc, basis: 依据}`，
+登记面板是预设的还是看过结果后选定的。
 `index.json` 登记阶段状态、配置和脚本指纹、源结果包及其产物路径。脚本失败时可按提示传入
 `--from scripts --source <单组学 ID> --integration-run <整合 ID>`，在新的交付目录续跑。
 标准导出和面板 TSV 使用带 BOM 的 UTF-8。Excel 导入时选择制表符，带前导零的 ID 列按文本读取。

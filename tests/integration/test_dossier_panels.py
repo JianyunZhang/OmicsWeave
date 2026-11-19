@@ -276,6 +276,11 @@ class DossierPanelBundleTest(unittest.TestCase):
         delivery.write_summary()
         workbook = load_workbook(delivery.directory / "summary.xlsx")
         try:
+            # 无面板候选表与面板声明一并交付
+            self.assertIn("候选概览", workbook.sheetnames)
+            self.assertTrue((delivery.directory / "candidates" / "candidates.xlsx").is_file())
+            self.assertEqual(delivery.data["panels"]["panels"], ["liver_glucose"])
+            self.assertEqual(delivery.data["panels"]["selection"], "unspecified")
             sheet = workbook["面板结果"]
             matrix = next(row for row in sheet.iter_rows(min_row=2) if row[2].value == "面板矩阵与成员")
             self.assertEqual([cell.value for cell in matrix[:2]], ["liver_glucose", "liver"])

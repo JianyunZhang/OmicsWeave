@@ -7,6 +7,9 @@
 代谢物节点由网络化学计量补全：每个反应上方是它的底物，下方是产物；相邻两个反应中，前一个的产物恰是后一个的
 底物时，节点只出现一次。辅因子（CO2、ATP、NAD(H)、CoA 等）不作为节点。
 
+顶层可另写 ``selection: {mode: pre_specified | post_hoc, basis: 依据}``，记录面板是预设的还是看过结果后选定的
+（:func:`load_panel_selection`）。
+
 格式（顶层键 ``panels``，每个面板）::
 
     title, tissues, contrasts                      # 标题；只为这些组织 / 比较出图（省略时全部）
@@ -30,6 +33,8 @@ from ..mappings.network_annotation import network_reactions, split_metabolite
 
 PANEL_KEYS = {"title", "tissues", "contrasts", "segments", "branch_nodes", "expected_tracers", "signed_modules",
               "controls"}
+TOP_KEYS = {"panels", "selection"}
+SELECTION_MODES = ("pre_specified", "post_hoc")
 ELEMENT_COLUMNS = ["panel_id", "order", "element_type", "element_id", "label", "segment", "branch_node",
                    "exit_label"]
 COFACTORS = {"CO2", "HCO3", "ATP", "ADP", "AMP", "GTP", "GDP", "UTP", "UDP", "NAD", "NADH", "NADP", "NADPH", "FAD",
@@ -90,12 +95,38 @@ def species_label(species: str) -> str:
     return f"{name} ({compartment})" if compartment else name
 
 
-def load_panels(path: str | Path) -> dict[str, Panel]:
-    path = Path(path)
+def _read(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise PanelError(f"找不到面板声明 {path}")
     doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    raw = doc.get("panels") if isinstance(doc, dict) else None
+    if not isinstance(doc, dict):
+        raise PanelError(f"{path.name}：顶层应为 panels: {{面板 ID: 声明}}")
+    unknown = sorted(set(doc) - TOP_KEYS)
+    if unknown:
+        raise PanelError(f"{path.name}：无法识别的顶层键 {unknown}，可选 {sorted(TOP_KEYS)}")
+    return doc
+
+
+def load_panel_selection(path: str | Path) -> dict[str, str]:
+    """顶层 ``selection: {mode, basis}``：面板是看结果之前预设的（``pre_specified``），还是看过结果后选定的
+    （``post_hoc``），``basis`` 写依据（如参考的运行 ID）。未写时 mode 为 ``unspecified``。
+
+    只作交付记录，不影响整合结果；候选表与交付索引照录，便于读者判断面板结论的证据强度。
+    """
+    path = Path(path)
+    spec = _read(path).get("selection")
+    if spec is None:
+        return {"mode": "unspecified", "basis": ""}
+    if not isinstance(spec, dict) or set(spec) - {"mode", "basis"} or spec.get("mode") not in SELECTION_MODES:
+        raise PanelError(f"{path.name}：selection 应为 {{mode: {' | '.join(SELECTION_MODES)}, basis: 依据}}")
+    return {"mode": str(spec["mode"]), "basis": str(spec.get("basis") or "")}
+
+
+def load_panels(path: str | Path) -> dict[str, Panel]:
+    path = Path(path)
+    doc = _read(path)
+    load_panel_selection(path)
+    raw = doc.get("panels")
     if not isinstance(raw, dict) or not raw:
         raise PanelError(f"{path.name}：顶层应为 panels: {{面板 ID: 声明}}")
     network = network_reactions()
