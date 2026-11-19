@@ -75,6 +75,9 @@ from ..dossier.sources import DossierSource, other_source, primary_source
 from ..dossier.view import export_matrix, matrix_view, member_table
 from ..integrate import IntegrationRun, mode_dir
 from ..mappings import FLUX_GENE_MAPPING, FLUX_METABOLITE_MAPPING, REACTION_ENZYME_MAPPING
+from ..mappings.network_layout import LayoutError
+from ..mappings.reaction_aliases import assessment_universe
+from ..pathway_map import DEFAULTS as PATHWAY_MAP_DEFAULTS, render_maps, settings as pathway_map_settings
 from ..mappings.reaction_members import ACTIVITY_MODES
 from ..methods.flux_evidence import FluxEvidenceBuilder
 from . import flux_anchored as fa
@@ -89,7 +92,9 @@ DEFAULTS: dict[str, Any] = {**{key: fa.DEFAULTS[key] for key in SHARED}, "tracer
                             # E8：诱饵重复次数（0 为不运行，每次约等于再建一遍成员行）、随机种子、是否在实际数据上做不变性检查
                             "calibration": {"decoys": 0, "seed": 20261117, "invariance": True},
                             # S5：模块旋转检验的旋转次数与随机种子
-                            "pathway": {"rotations": 9999, "seed": 20261117}}
+                            "pathway": {"rotations": 9999, "seed": 20261117},
+                            # G18：分组织代谢通路总图（图 E），见 omicsweave.integration.pathway_map
+                            "pathway_map": dict(PATHWAY_MAP_DEFAULTS)}
 DOSSIER_TABLE = "dossier_members.parquet"
 SAMPLES_TABLE = "dossier_samples.parquet"
 SIDES_TABLE = "dossier_sample_contrasts.parquet"
@@ -148,6 +153,10 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
             raise RunError(f"integration.parameters.{MODE.value}.{group} 中有无法识别的项：{'、'.join(bad)}"
                            f"（可用：{'、'.join(DEFAULTS[group])}）")
         params[group] = {**DEFAULTS[group], **(parameters.get(group) or {})}
+    try:
+        params["pathway_map"] = pathway_map_settings(parameters.get("pathway_map"))
+    except ValueError as exc:
+        raise RunError(f"integration.parameters.{MODE.value}.{exc}") from exc
     params["inherited_from_flux_anchored"] = sorted(inherited)
     return params
 
@@ -585,9 +594,14 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     scoring = {k: params[k] for k in ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "isozyme")}
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={}, scoring=scoring))
     contexts = [_Context(s, float(params["qc_imbalance"])) for s in sources]
-    reactions = [str(r) for r in params["reactions"]] or sorted(
-        set(FLUX_GENE_MAPPING) | set(REACTION_ENZYME_MAPPING) | set(FLUX_METABOLITE_MAPPING)
-        | {f for frame in contexts[0].mfa["pooled"].values() for f in frame["feature_id"]})
+    # 评估集：映射表条目与 MFA 结果反应 ID 的并集，去掉登记为别名的旧命名条目（G18 M0a；MFA 结果用到的 ID 保留）
+    universe, excluded_aliases = assessment_universe(
+        set(FLUX_GENE_MAPPING) | set(REACTION_ENZYME_MAPPING) | set(FLUX_METABOLITE_MAPPING),
+        {f for frame in contexts[0].mfa["pooled"].values() for f in frame["feature_id"]})
+    if params["reactions"]:
+        reactions, excluded_aliases = [str(r) for r in params["reactions"]], []
+    else:
+        reactions = universe
     tissues = {tissue_map.get(str(t), str(t)) for t in params["tissues"]} or None
     dossier = pd.concat([build_dossier(builder, c, params, reactions, tissues) for c in contexts], ignore_index=True)
 
@@ -636,11 +650,23 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params,
                                 (axes, reactions_assessed), calibration, pathway) if panels else []
 
+    # 分组织代谢通路总图（图 E，G18）：不依赖面板
+    map_layout = params["pathway_map"]["layout"]
+    try:
+        map_notes = render_maps(base, base, params["pathway_map"], label,
+                                {"整合": ctx.run_dir.name, **{f"来源 {c.label}": c.source.run_id for c in contexts}},
+                                members=dossier, axes=axes, assessed=reactions_assessed, calibration=calibration,
+                                root=ctx.experiment.root)
+    except LayoutError as exc:
+        raise RunError(str(exc)) from exc
+    # 课题自己的布局文件登记为输入（包内默认布局随代码版本走）
+    layout_inputs = [ctx.experiment.root / str(map_layout)] if map_layout else []
+
     inputs = [p for s in sources for p in s.inputs] + [p for c in contexts for p in c.inputs] \
         + [d / name for d in dict.fromkeys(dataset_dirs) for name in ("matrix.parquet", META_FILE)
            if (d / name).is_file()]
-    record = IntegrationRun(MODE, inputs=inputs + ([panels_path] if panels_path else []),
-                            parameters={**params, "label": label,
+    record = IntegrationRun(MODE, inputs=inputs + ([panels_path] if panels_path else []) + layout_inputs,
+                            parameters={**params, "label": label, "excluded_aliases": excluded_aliases,
                                         "sources_resolved": {s.label: {"run": s.run_id, "layers": list(s.layers),
                                                                        "contrast_map": s.contrast_map}
                                                              for s in sources},
@@ -648,6 +674,9 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     states = dossier["cell_state"].value_counts()
     record.notes.append(f"反应档案：{len(sources)} 个来源、{dossier['flux_id'].nunique()} 个反应、{len(dossier)} 行；"
                         "格子状态 " + "、".join(f"{state} {n}" for state, n in states.items()))
+    if excluded_aliases:
+        record.notes.append(f"评估集不含 {len(excluded_aliases)} 个登记为网络反应别名的旧命名条目"
+                            f"（reaction_aliases.yaml）：{'、'.join(excluded_aliases)}")
     for ctx in contexts:
         if ctx.mfa.get("single_tracer"):
             record.notes.append(f"来源 {ctx.label} 的 MFA 只有一种示踪剂（{ctx.mfa['single_tracer']}），没有分示踪剂表："
@@ -668,6 +697,7 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     record.notes += calibration_notes(calibration)
     record.notes += pathway_notes(pathway)
     record.notes += panel_notes
+    record.notes += map_notes
     return record
 
 

@@ -140,6 +140,17 @@ def build_parser() -> argparse.ArgumentParser:
     stats.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
     stats.add_argument("--source", default=None, help="源结果包的运行 ID，默认最近一次含统一结果表的运行")
 
+    maps = modules.add_parser("map", help="从已有的整合结果包重画分组织代谢通路总图（图 E），写到新目录，不改动原结果包")
+    maps.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
+    maps.add_argument("--source", default=None, help="整合结果包的运行 ID，默认最近一次含反应档案评估表的运行")
+    maps.add_argument("--layout", default=None,
+                      help="布局文件（相对路径以实验目录为基准）；默认取 experiment.yaml 的 pathway_map.layout，再默认为包内布局")
+    maps.add_argument("--tissue", action="append", default=None, help="只画这些组织，可重复")
+    maps.add_argument("--contrast", action="append", default=None, help="只画这些比较，可重复")
+    maps.add_argument("--format", action="append", default=None, help="图件格式，可重复，默认同 experiment.yaml（pdf、png）")
+    maps.add_argument("--output", type=Path, default=None,
+                      help="输出目录，默认 <结果根>/<实验>/_redraws/<运行 ID>/pathway_map_<时间>/")
+
     pipeline = modules.add_parser("pipeline", help="标准流程：validate → run → integrate → 课题脚本"
                                                     "（project.yaml 的 pipeline 一节），各步之间传递确切的运行 ID")
     pipeline.add_argument("--experiment", action="append", default=None,
@@ -352,6 +363,40 @@ def _run_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_map(args: argparse.Namespace) -> int:
+    from omicsweave.contract.dataset import ContractError
+    from omicsweave.contract.export import find_run
+    from omicsweave.core.config import ConfigError, load_experiment, load_project
+    from omicsweave.integration.mappings.network_layout import LayoutError
+    from omicsweave.integration.pathway_map import redraw
+
+    try:
+        project = load_project(project_dir())
+        experiment = load_experiment(project, args.experiment)
+        base = project.path("results") / args.experiment
+        if args.source:
+            bundle = find_run(project.path("results"), args.experiment, args.source)
+        else:
+            found = sorted(p.parents[3] for p in base.glob(
+                "run_*/integration/reaction_dossier/tables/reaction_assessment.parquet"))
+            if not found:
+                raise ContractError(f"{base} 下没有含反应档案评估表的整合结果包")
+            bundle = found[-1]
+        configured = dict((experiment.config.integration.parameters.get("reaction_dossier") or {})
+                          .get("pathway_map") or {})
+        overrides = {"layout": args.layout, "tissues": args.tissue, "contrasts": args.contrast, "formats": args.format}
+        configured.update({k: v for k, v in overrides.items() if v})
+        configured["enabled"] = True
+        out_dir, notes = redraw(bundle, args.output, configured, experiment.root)
+    except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    for note in notes:
+        print(f"[提示] {note}")
+    print(f"输出目录：{out_dir}")
+    return 0
+
+
 def _run_pipeline(args: argparse.Namespace) -> int:
     from omicsweave.core.pipeline import run_pipeline
     from omicsweave.core.run import RunError
@@ -380,7 +425,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
 
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
-             "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline}
+             "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline, "map": _run_map}
 
 
 def project_pipeline_main(project: Path) -> None:

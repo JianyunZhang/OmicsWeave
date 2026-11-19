@@ -168,6 +168,17 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
     （`core/statistics/rotation.py`，limma `roast` 的 mean 统计量，供 G9 共用；参数 `pathway.rotations`、`pathway.seed`）；
     面板中单底物、单产物的步骤做交叉点分析（上游升、下游降为 restricted）。后两者写入 `tables/pathway_tests.parquet`。
     图 D `node_split_<比较>` 与同名 TSV、`pathway_tests_<比较>.tsv` 在面板的图目录中。标记层的分流比待 G10。
+  - 分组织代谢通路总图（图 E，G18，`integration/pathway_map.py`，设计见 `docs/arch_design/omicsweave_pathway_map.md`）：
+    不依赖面板，每个组织 × 比较一页 `figures/pathway_map/<组织>/map_<比较>.{pdf,png}`，同名 TSV 为该页的视图表
+    （`dossier/map_view.py`，图只画这张表；代谢物节点的值与图 A 的池格子相同）。底图是网络的手工布局
+    `mappings/data/network_layout.yaml`（节点可有多个位置，反应连到最近的一个；网络表改动后校验值失败）；
+    边按生理净方向画，颜色只表示 F 轴，反应旁的四格小条为 F、C、R、M 四轴，L2 及以上实线框、L1 虚线框；
+    只有组学的聚合条目画成方框，成员全部属于画出的网络反应时不另画。`tables/pathway_map.parquet` 为全部页的视图，
+    `tables/pathway_map_coverage.parquet` 记录评估集中每个 ID 在总图上的去向。参数组 `pathway_map`：`enabled`（默认 true）、
+    `layout`（相对实验目录）、`tissues`、`contrasts`、`highlight: {min_claim, top_rank}`、`formats`。
+    `omicsweave map --experiment E [--source 整合运行]` 从已有整合包重画到新目录，不改动原结果包。
+  - 评估集不含 `mappings/reaction_aliases.yaml` 登记的别名（旧 MFA 模型命名的映射表条目，如 `PK_c` 对应 `PYK_c`），
+    MFA 结果用到的 ID 除外；运行备注列出被排除的别名。
 - `sample_level`：待接入，暂用下文的旧命令。
 
 - `flux_anchored` 的同工酶加权（`isozyme.minor_share`，默认 0.2）：转录组与蛋白组的方向成员按该组织的平均丰度

@@ -236,6 +236,12 @@ class FluxAnchoredBundleTest(unittest.TestCase):
     def set_integration(self, **integration) -> None:
         path = self.root / "experiments" / EXP / "experiment.yaml"
         doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # 通路总图（图 E）每页要数秒：合成数据的整合测试默认不出图，test_pathway_map 单独打开
+        parameters = dict(integration.get("parameters") or {})
+        dossier = parameters.get("reaction_dossier")
+        if dossier is None or isinstance(dossier, dict):
+            parameters["reaction_dossier"] = {"pathway_map": {"enabled": False}, **(dossier or {})}
+            integration = {**integration, "parameters": parameters}
         doc["integration"] = integration
         path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 

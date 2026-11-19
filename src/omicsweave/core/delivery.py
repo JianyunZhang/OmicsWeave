@@ -21,6 +21,8 @@ from .provenance import sha256_file
 # 交付目录中反应档案面板产出的子目录，与无面板候选表的子目录
 PANELS_DIR = "panels"
 CANDIDATES_DIR = "candidates"
+# 分组织代谢通路总图（图 E，G18）的副本
+MAPS_DIR = "pathway_map"
 
 
 class Delivery:
@@ -130,6 +132,41 @@ class Delivery:
             shutil.copy2(self.directory / row["source"], destination)
         return rows
 
+    def copy_maps(self) -> list[dict]:
+        """把通路总图（图 E）复制到交付目录 ``pathway_map/<组织>/``：每页的 PDF（没有时取 PNG）与同名视图表。"""
+        paths = {PurePosixPath(item["path"]) for item in self.artifacts
+                 if item["stage"] == "integrate" and not item.get("missing")}
+        rows = []
+        for path in sorted(paths):
+            if path.parts[-6:-2] != ("integration", "reaction_dossier", "figures", "pathway_map") \
+                    or not path.name.startswith("map_"):
+                continue
+            if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tsv"):
+                continue
+            row = {"组织": path.parts[-2], "比较": path.stem.removeprefix("map_"),
+                   "内容": "视图表" if path.suffix == ".tsv" else "图件", "文件": path.name,
+                   "target": PurePosixPath(MAPS_DIR, path.parts[-2], path.name)}
+            destination = self.directory / row["target"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.directory / path, destination)
+            rows.append(row)
+        return rows
+
+    def _write_map_index(self, writer: pd.ExcelWriter, rows: list[dict]) -> None:
+        if not rows:
+            return
+        pd.DataFrame([{k: row[k] for k in ("组织", "比较", "内容", "文件")} for row in rows]).to_excel(
+            writer, sheet_name="通路总图", index=False)
+        sheet = writer.sheets["通路总图"]
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for column, width in zip("ABCD", (18, 24, 10, 40)):
+            sheet.column_dimensions[column].width = width
+        for index, row in enumerate(rows, start=2):
+            cell = sheet.cell(index, 4)
+            cell.hyperlink = quote(row["target"].as_posix(), safe="/")
+            cell.style = "Hyperlink"
+
     def _write_panel_index(self, writer: pd.ExcelWriter, rows: list[dict]) -> None:
         if not rows:
             return
@@ -174,6 +211,7 @@ class Delivery:
     def write_summary(self) -> None:
         """复制面板产出（:meth:`copy_panels`）、写无面板候选表（:meth:`write_candidates`），再写 ``summary.xlsx``。"""
         panels = self.copy_panels()
+        maps = self.copy_maps()
         candidates = self.write_candidates()
         self.collect_exports()
         tables, contrasts = [], []
@@ -199,5 +237,6 @@ class Delivery:
             if candidates is not None:
                 self._write_candidate_overview(writer, candidates)
             self._write_panel_index(writer, panels)
+            self._write_map_index(writer, maps)
             pd.DataFrame(tables).to_excel(writer, sheet_name="结果表与质控", index=False)
             pd.DataFrame(self.artifacts).to_excel(writer, sheet_name="文件索引", index=False)

@@ -87,6 +87,7 @@ omicsweave mfa run --help
 | `run --experiment 实验ID [--omics 组学\|all] [--steps 步骤]` | 按 `experiment.yaml` 运行，结果包写到 `analysis_results/<实验ID>/<run_id>/`；四个组学均已接入（转录组、蛋白组为表格层输入），写出差异与富集结果表，并为每个组织 × 比较画火山图（`figures` 步骤，`omics/<组学>/figures/`）；其他图件与解读报告暂用 `omicsweave <组学> run` |
 | `integrate --experiment 实验ID [--mode 模式] [--source 运行ID]` | 读取一次运行的统一结果表做多组学整合，结果写入新的结果包；目前已接入 `flux_anchored`、`pathway_convergence` |
 | `export --experiment 实验ID [--run 运行ID] [--format xlsx\|tsv]` | 把结果包中的结果表导出为 Excel（附运行信息）或 TSV，默认最近一次运行 |
+| `map --experiment 实验ID [--source 整合运行ID] [--tissue 组织] [--contrast 比较] [--layout 布局文件]` | 从已有整合包重画分组织代谢通路总图（图 E），写到 `<结果根>/<实验ID>/_redraws/<运行ID>/`，不改动原结果包 |
 | `pipeline [--experiment 实验ID ...] [--from run\|integrate\|scripts] [--source 运行ID] [--dry-run]` | 标准流程：对 `project.yaml` 中 `pipeline.experiments` 的每个实验依次 validate → run → integrate → 课题脚本（见下） |
 
 ### 标准流程（`pipeline`）
@@ -129,6 +130,7 @@ omicsweave --project-dir D:/lab_project pipeline --results-dir "D:/研究结果/
 打开 `summary.xlsx` 可查看来源、各组织与比较的差异结果行数、可检验数和入选数，以及结果表和质控清单。
 整合包有 `reaction_dossier` 面板产物时，矩阵（XLSX）、分流与模块检验表及矩阵、分流、示踪剂覆盖图件复制到交付目录的
 `panels/<面板>/<组织>/`；摘要中的「面板结果」可按面板和组织筛选并链接到这些副本（逐反应档案页仍在整合包中）。
+分组织代谢通路总图（图 E，不依赖面板）每页的 PDF 与视图表复制到 `pathway_map/<组织>/`，摘要中为「通路总图」。
 有整合包时另写无面板候选表 `candidates/`（`candidates.xlsx` 与 `reactions*.tsv`、`pathways*.tsv`，摘要中为「候选概览」）：
 反应取 L1 及以上的全部加每个组织 × 比较排名前 10，通路取融合显著、多层显著的全部加各层单层显著的前 5 条；
 入选与面板无关，`panels` 列只作标注，并附诱饵期望、各层 QC 与样本量、各层 padj 与方向（见

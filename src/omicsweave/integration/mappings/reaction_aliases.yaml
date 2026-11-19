@@ -1,0 +1,51 @@
+# 反应 ID 别名（G18 M0a，2026-11-19；设计见 docs/arch_design/omicsweave_pathway_map.md 2.3 与第 7 节）
+#
+# 三张映射表（基因、蛋白、代谢物）中有一批来自旧 MFA 模型命名的条目，与网络表 network_reactions.tsv 中的反应是同一个
+# 转化（底物、产物与区室相同），或是网络中一个合并反应被拆开的部分、一对方向拆开的交换反应。它们在反应档案中与网络反应
+# 各占一行，同一步骤会得到两个等级，候选表也会重复列出。
+#
+# 登记为别名的 ID 不进入反应档案的评估集，除非 MFA 结果用的正是这个 ID（旧模型命名的项目仍可评估）。映射表中的条目保留，
+# flux_anchored 照常可用。别名条目中网络 ID 没有的直接酶与转运体已逐个核对（2026-11-19），都属于其他步骤、调控因子或
+# 无关基因，没有需要并入网络 ID 的成员（见各条 note）；代谢物条目多出的只是同义名。
+#
+# of：对应的反应（网络反应，或本表以外仍保留的映射表条目）；一个别名对应几个反应时全部列出。
+# 不是别名、保留在评估集中的聚合条目（FAO_m、FAS_c、GLYCOLYSIS、UREA_cycle 等）不写在这里，通路总图把它们画成方框。
+
+aliases:
+  # 糖酵解 / 糖异生 / 糖原
+  PK_c: {of: [PYK_c], note: "多出的 Hnrnpa1、Hnrnpa2b1、Ptbp1、Srsf1、Srsf3 是 PKM 剪接因子，Hif1a、Myc、Tp53 是转录因子，旧表记为催化成员，不并入"}
+  GAPDH_c: {of: [GAPD_c]}
+  G6Pase: {of: [G6Pase_c], note: "多出的 Pck1、Fbp1、Pc 是糖异生的其他步骤，不并入"}
+  GLYCOGENOLYSIS: {of: [GLYCOGENOLYSIS_c]}
+  # 磷酸戊糖途径：网络把氧化段合并为一个反应
+  G6PDH_c: {of: [G6PDH2R_PGL_GND_c], note: "多出的 Sod1、Sod2、Cat、Gpx1、Gclc、Gclm 是抗氧化酶，Rpe、Rpia、Tkt、Taldo1 属于非氧化段，不并入"}
+  PGL_c: {of: [G6PDH2R_PGL_GND_c]}
+  GND_c: {of: [G6PDH2R_PGL_GND_c]}
+  # 甘油-3-磷酸：GPS_c 已含 Gpd1、Gpd1l、Gpd2
+  G3PDH_c: {of: [GPS_c]}
+  G3PD_m: {of: [GPS_c], note: "线粒体 Gpd2 在网络中没有单独的反应，GPS_c 已把它作为同工酶"}
+  GLYCK_c: {of: [GK_c], note: "多出的 Gpd1、Gpd2 属于 GPS_c，不并入"}
+  lipid_mobilization: {of: [lipid_mobilization_c]}
+  # 丙酮酸节点与 TCA
+  AKGDH_m: {of: [AKGD_m], note: "多出的 Got1、Got2、Tkt 不属于该步骤"}
+  FUM_m: {of: [FUMH_m], note: "多出的 Mdh1、Mdh2 属于 MDH 步骤，不并入"}
+  FUM1_m: {of: [FUMH_m]}
+  FRD_m: {of: [SUCD_m], note: "延胡索酸还原即 SDH 复合体的逆反应，网络中 SUCD_m 可逆"}
+  MDH1_c: {of: [MDH_c]}
+  MDH2_m: {of: [MDH_m]}
+  ME1_c: {of: [ME2_c], note: "多出的 Me2 在 ME2_c 中已是下游成员"}
+  ME_c: {of: [ME2_c], note: "多出的 Me3 在 ME2_c 中已是下游成员"}
+  ME2_m: {of: [ME_m], note: "与 ME_m 同为线粒体苹果酸酶；网络没有线粒体苹果酸酶，ME_m 保留为聚合条目"}
+  CIT_m: {of: [CIT_trans], note: "只有代谢物条目：柠檬酸 / 苹果酸交换"}
+  AKG_trans: {of: [AKGMAL_m], note: "只有代谢物条目：α-酮戊二酸 / 苹果酸交换"}
+  LAC_trans: {of: [LAC_exchange]}
+  ASPGLu_m: {of: [ASPGLU_m], note: "大小写笔误"}
+  # 酮体
+  ACAC_production: {of: [ACAC_production_m]}
+  BHB_exchange: {of: [BHB_output, BHB_input], note: "网络按方向拆成输出（肝脏）与摄取（心脏）两个反应"}
+  # 脂肪酸与氮代谢
+  CPT1: {of: [CPT1_c]}
+  CARNITINE_shuttle: {of: [CPT1_c, CACT_PALCAR, CPT2_m], note: "只有代谢物条目：酰基辅酶 A → 酰基肉碱"}
+  CPS1_m: {of: [CPS1_c], note: "蛋白表多出的 Slc25a15、Slc25a2 是鸟氨酸载体，不是 CPS1 的成员"}
+  NP_c: {of: [PNP_INO_c, PNP_GUO_c], note: "只有代谢物条目：嘌呤核苷磷酸化酶"}
+  PRO_metabolism: {of: [PRODH_c], note: "只有代谢物条目：脯氨酸 → 吡咯啉-5-羧酸"}
