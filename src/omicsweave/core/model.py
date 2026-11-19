@@ -180,10 +180,20 @@ class PipelineScript(_Strict):
         return value
 
 
+class RetentionSettings(_Strict):
+    """交付目录保留与清理策略（默认关闭，不会自动删除任何历史交付或结果包）。"""
+    enabled: bool = False
+    keep_last: int | None = Field(default=5, ge=1)     # 每个实验保留最近 N 次成功交付；None 表示不按数量淘汰
+    drop_failed: bool = True                           # 清理时是否移除失败与超时中断的交付目录
+    prune_orphan_bundles: bool = False                 # 清理时是否联动移除未被保留交付引用的孤立 run_* 结果包
+    stale_running_hours: float = Field(default=24.0, ge=0)
+
+
 class PipelineSettings(_Strict):
     """``omicsweave pipeline`` 的标准流程：对每个实验依次 validate → run → integrate → 课题脚本。"""
     experiments: list[str] = Field(default_factory=list)         # 实验 ID；默认项目中的全部实验
     scripts: list[PipelineScript] = Field(default_factory=list)
+    retention: RetentionSettings = Field(default_factory=RetentionSettings)
 
 
 class ProjectConfig(_Strict):

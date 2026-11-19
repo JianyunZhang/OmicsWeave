@@ -15,7 +15,9 @@ omicsweave 命令行入口。
     omicsweave [--project-dir DIR] refs list | build <genes|proteins|metabolites|reaction_roles> [...] | audit --experiment 实验ID
     omicsweave [--project-dir DIR] replicate [--set 复现组ID]
     omicsweave [--project-dir DIR] diff 运行A 运行B [--experiment 实验ID] [--output 目录]
-    omicsweave [--project-dir DIR] pipeline [--experiment 实验ID ...] [--from run|integrate|scripts] [--source 运行ID] [--dry-run]
+    omicsweave [--project-dir DIR] pipeline [--experiment 实验ID ...] [--from run|integrate|scripts] [--source 运行ID] [--tag 标签] [--pin] [--dry-run]
+    omicsweave [--project-dir DIR] latest [--experiment 实验ID ...] [--target dir|summary|index] [--path] [--json] [--open] [--list]
+    omicsweave [--project-dir DIR] clean [--experiment 实验ID ...] [--keep-last N] [--prune-bundles] [--dry-run | --apply]
     omicsweave [--project-dir DIR] <模块> <动作> [该动作自身的参数 ...]
 
 示例::
@@ -35,14 +37,28 @@ omicsweave 命令行入口。
 from __future__ import annotations
 
 import argparse
+import contextvars
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from omicsweave import __version__
 from omicsweave.core.model import Species
 from omicsweave.core.project import project_context, project_dir
+
+if TYPE_CHECKING:
+    from omicsweave.core.retention import RetentionPolicy
+
+# 入口脚本（如 run_analysis.py）透传的保留策略上下文，默认均为 None（未启用）
+_ENTRY_RETENTION: contextvars.ContextVar["RetentionPolicy | None"] = contextvars.ContextVar(
+    "omicsweave_entry_retention", default=None,
+)
+_ENTRY_CLEAN_DEFAULTS: contextvars.ContextVar["RetentionPolicy | None"] = contextvars.ContextVar(
+    "omicsweave_entry_clean_defaults", default=None,
+)
 
 # 模块 -> 动作 -> (入口 "包.模块:函数", 简介)
 COMMANDS: dict[str, dict[str, tuple[str, str]]] = {
@@ -162,7 +178,49 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--source", default=None, help="沿用的单组学结果包运行 ID（只能选一个实验）")
     pipeline.add_argument("--results-dir", type=Path, help="覆盖本次结果根目录，相对路径以项目为基准")
     pipeline.add_argument("--integration-run", help="从 scripts 续跑时固定与 --source 对应的整合包")
+    pipeline.add_argument("--tag", default=None, help="给本次交付目录附加人类可读标签（如 v1、manuscript）")
+    pipeline.add_argument("--pin", action="store_true", help="锁定本次交付（写入 .keep 与 pinned 标记），避免被保留策略清理")
     pipeline.add_argument("--dry-run", action="store_true", help="只做检查并列出各步命令，不运行")
+
+    latest = modules.add_parser("latest", help="通过 latest.json 指针查询、列出或打开最新一次成功交付")
+    latest.add_argument("--experiment", action="append", default=None,
+                        help="指定实验 ID，可重复；默认查询结果目录下已有交付的全部实验")
+    latest.add_argument("--results-dir", type=Path, default=None, help="覆盖结果根目录，相对路径以项目为基准")
+    latest.add_argument("--target", choices=["dir", "summary", "index"], default=None,
+                        help="定位目标：dir（交付目录）、summary（summary.xlsx）或 index（index.json）")
+    latest.add_argument("--path", action="store_true", help="仅输出解析后的绝对路径（便于脚本或命令行串联）")
+    latest.add_argument("--json", dest="as_json", action="store_true", help="以 JSON 格式输出最新交付指针与路径")
+    latest.add_argument("--open", dest="open_target", action="store_true",
+                        help="用系统默认程序打开目标文件或目录（未指定 --target 时默认打开 summary.xlsx）")
+    latest.add_argument("--list", dest="list_all", action="store_true",
+                        help="按时间倒序列出全部交付目录及状态、大小、标签与锁定标记")
+
+    clean = modules.add_parser("clean", help="按保留策略预览或清理历史交付目录（及可选的孤立结果包），默认仅预览")
+    clean.add_argument("--experiment", action="append", default=None,
+                       help="只清理这些实验，可重复；默认处理 _deliveries/ 下已有交付的全部实验")
+    clean.add_argument("--results-dir", type=Path, default=None, help="覆盖结果根目录，相对路径以项目为基准")
+    keep_group = clean.add_mutually_exclusive_group()
+    keep_group.add_argument("--keep-last", type=int, default=None,
+                            help="每个实验保留最近 N 次成功交付（>= 1）；默认读取入口/配置（缺省 5）")
+    keep_group.add_argument("--keep-all", action="store_true",
+                            help="不按数量淘汰成功交付，仅清理失败交付或孤立结果包")
+    failed_group = clean.add_mutually_exclusive_group()
+    failed_group.add_argument("--drop-failed", action="store_true", default=False,
+                              help="清理失败及超时未完成的交付目录")
+    failed_group.add_argument("--keep-failed", action="store_true", default=False,
+                              help="保留失败与中断的交付目录")
+    bundle_group = clean.add_mutually_exclusive_group()
+    bundle_group.add_argument("--prune-bundles", action="store_true", default=False,
+                              help="联动清理不再被任何保留交付引用的孤立 run_* 结果包")
+    bundle_group.add_argument("--no-prune-bundles", action="store_true", default=False,
+                              help="不删除 run_* 结果包（覆盖入口或配置默认值）")
+    clean.add_argument("--stale-running-hours", type=float, default=None,
+                       help="超过该小时数仍处于 running 状态的交付视为已中断（默认 24）")
+    mode_group = clean.add_mutually_exclusive_group()
+    mode_group.add_argument("--dry-run", action="store_true", default=False,
+                            help="仅预览待清理目录与预计释放空间，不删除任何文件（默认）")
+    mode_group.add_argument("--apply", action="store_true", default=False,
+                            help="确认执行实际删除操作")
 
     diff = modules.add_parser("diff", help="逐表对照两个结果包，报告是否逐值相同、差值分布与等级转移")
     diff.add_argument("run_a", help="结果包 A：运行 ID 或结果包目录")
@@ -405,7 +463,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     try:
         results = run_pipeline(project_dir(), args.experiment, _split(args.omics) or None, start=start,
                                source=args.source, dry_run=args.dry_run, results_dir=args.results_dir,
-                               integration_run=args.integration_run, command=["omicsweave", *args.argv])
+                               integration_run=args.integration_run, tag=args.tag, pin=args.pin,
+                               retention=_ENTRY_RETENTION.get(), command=["omicsweave", *args.argv])
     except RunError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
@@ -420,22 +479,253 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             print(f"[{result.experiment}] 课题脚本：{'、'.join(result.scripts)}")
         print(f"[{result.experiment}] 结果摘要：{result.delivery_dir / 'summary.xlsx'}")
         print(f"[{result.experiment}] 交付索引：{result.delivery_dir / 'index.json'}")
+        if result.latest_pointer:
+            print(f"[{result.experiment}] 最新指针：{result.latest_pointer}")
     return 0
+
+
+def _resolve_results_root(results_dir: Path | None):
+    from omicsweave.core.config import load_project
+
+    project = load_project(project_dir())
+    root = project.resolve(results_dir).resolve() if results_dir is not None else project.path("results")
+    return project, root
+
+
+def _run_latest(args: argparse.Namespace) -> int:
+    from omicsweave.core.config import ConfigError
+    from omicsweave.core.delivery import (
+        DELIVERIES_DIR,
+        LATEST_POINTER_FILE,
+        build_latest_payload,
+        delivery_experiments,
+        list_deliveries,
+        open_path,
+        resolve_latest_delivery,
+    )
+    from omicsweave.core.retention import directory_size, format_bytes
+
+    try:
+        project, results_root = _resolve_results_root(args.results_dir)
+    except ConfigError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+
+    experiments = (
+        list(dict.fromkeys(args.experiment))
+        if args.experiment
+        else (delivery_experiments(results_root) or list(project.config.pipeline.experiments))
+    )
+    if not experiments:
+        print(f"错误：{results_root / DELIVERIES_DIR} 下没有找到任何交付目录", file=sys.stderr)
+        return 1
+
+    if args.list_all:
+        rows = []
+        for exp_id in experiments:
+            records = list(reversed(list_deliveries(results_root, exp_id)))
+            latest_rec, _ = resolve_latest_delivery(results_root, exp_id)
+            latest_id = latest_rec.delivery_id if latest_rec else None
+            if args.as_json:
+                for rec in records:
+                    rows.append({
+                        **build_latest_payload(rec),
+                        "status": rec.status,
+                        "is_latest": rec.delivery_id == latest_id,
+                        "directory": str(rec.directory),
+                        "size_bytes": directory_size(rec.directory),
+                    })
+                continue
+            print(f"[{exp_id}] 共 {len(records)} 个交付目录（{results_root / DELIVERIES_DIR / exp_id}）：")
+            if not records:
+                print("  （无）")
+                continue
+            for rec in records:
+                flags = []
+                if rec.delivery_id == latest_id:
+                    flags.append("latest")
+                if rec.pinned:
+                    flags.append("pinned")
+                if rec.tag:
+                    flags.append(f"tag={rec.tag}")
+                badge = f" [{' '.join(flags)}]" if flags else ""
+                ts = rec.completed_at or rec.created_at or "-"
+                size = format_bytes(directory_size(rec.directory))
+                print(f"  - {rec.delivery_id} | {rec.status} | {ts} | {size}{badge}")
+        if args.as_json:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+
+    found = []
+    missing = []
+    for exp_id in experiments:
+        record, source = resolve_latest_delivery(results_root, exp_id)
+        if record is None:
+            missing.append(exp_id)
+        else:
+            found.append((record, source))
+
+    if not found:
+        names = "、".join(missing)
+        print(f"错误：实验 {names} 在 {results_root / DELIVERIES_DIR} 下没有已完成的交付", file=sys.stderr)
+        return 1
+
+    if (args.path or args.open_target) and len(found) > 1:
+        names = "、".join(rec.experiment for rec, _ in found)
+        print(f"错误：存在多个实验的交付（{names}），使用 --path 或 --open 时请用 --experiment 指定单个实验",
+              file=sys.stderr)
+        return 1
+
+    if args.as_json:
+        items = []
+        for rec, source in found:
+            pointer_file = results_root / DELIVERIES_DIR / rec.experiment / LATEST_POINTER_FILE
+            items.append({
+                **build_latest_payload(rec),
+                "source": source,
+                "pointer_path": str(pointer_file),
+                "pointer_exists": pointer_file.is_file(),
+                "directory": str(rec.directory),
+                "summary_path": str(rec.summary_path) if rec.summary_path else None,
+                "index_path": str(rec.index_path),
+            })
+        payload = items[0] if len(items) == 1 else items
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.path:
+        rec, _ = found[0]
+        target = args.target or "dir"
+        try:
+            print(rec.target_path(target))
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.open_target:
+        rec, _ = found[0]
+        target = args.target or ("summary" if rec.summary_path and rec.summary_path.is_file() else "dir")
+        try:
+            resolved = rec.target_path(target)
+            open_path(resolved)
+        except Exception as exc:
+            print(f"错误：无法打开目标：{exc}", file=sys.stderr)
+            return 1
+        print(f"已打开：{resolved}")
+        return 0
+
+    for rec, source in found:
+        source_label = "latest.json 指针" if source == "pointer" else "目录扫描回退"
+        pointer_file = results_root / DELIVERIES_DIR / rec.experiment / LATEST_POINTER_FILE
+        print(f"[{rec.experiment}] 最新交付：{rec.delivery_id}（来源：{source_label}）")
+        print(f"  目录：{rec.directory}")
+        if rec.summary_path:
+            print(f"  摘要：{rec.summary_path}")
+        print(f"  索引：{rec.index_path}")
+        print(f"  指针：{pointer_file}{'（存在）' if pointer_file.is_file() else '（未生成）'}")
+        meta = [f"时间：{rec.completed_at or rec.created_at or '-'}"]
+        if rec.tag:
+            meta.append(f"标签：{rec.tag}")
+        if rec.pinned:
+            meta.append("锁定：是")
+        print("  " + "  ".join(meta))
+        if rec.bundles:
+            pairs = "，".join(f"{stage}={run_id}" for stage, run_id in rec.bundles.items())
+            print(f"  关联结果包：{pairs}")
+    return 0
+
+
+def _run_clean(args: argparse.Namespace) -> int:
+    from omicsweave.core.config import ConfigError
+    from omicsweave.core.retention import RetentionPolicy, apply_cleanup, format_cleanup_report
+
+    try:
+        project, results_root = _resolve_results_root(args.results_dir)
+    except ConfigError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+
+    base = _ENTRY_CLEAN_DEFAULTS.get() or RetentionPolicy.from_settings(project.config.pipeline.retention)
+    keep_last = None if args.keep_all else (args.keep_last if args.keep_last is not None else base.keep_last)
+    drop_failed = True if args.drop_failed else (False if args.keep_failed else base.drop_failed)
+    prune_bundles = True if args.prune_bundles else (False if args.no_prune_bundles else base.prune_orphan_bundles)
+    stale_hours = args.stale_running_hours if args.stale_running_hours is not None else base.stale_running_hours
+
+    try:
+        policy = RetentionPolicy(
+            enabled=True,
+            keep_last=keep_last,
+            drop_failed=drop_failed,
+            prune_orphan_bundles=prune_bundles,
+            stale_running_hours=stale_hours,
+        )
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+
+    dry_run = not args.apply
+    experiments = list(dict.fromkeys(args.experiment)) if args.experiment else None
+    report = apply_cleanup(results_root, policy, experiments, dry_run=dry_run)
+    print(format_cleanup_report(report))
+    if dry_run and report.to_remove:
+        print("（预览模式，未删除任何文件；确认执行清理请加 --apply）")
+    return 1 if report.failed else 0
 
 
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
-             "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline, "map": _run_map}
+             "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline, "map": _run_map,
+             "latest": _run_latest, "clean": _run_clean}
 
 
-def project_pipeline_main(project: Path) -> None:
-    """本地课题脚本入口，保持 IDE 与重定向日志中的 Unicode 可读。"""
+def project_pipeline_main(
+    project: Path,
+    *,
+    retention: "RetentionPolicy | None" = None,
+    allow_clean: bool = False,
+    argv: list[str] | None = None,
+) -> None:
+    """本地课题脚本入口，保持 IDE 与重定向日志中的 Unicode 可读。
+
+    默认运行 ``pipeline``，也支持直接传 ``latest`` / ``clean`` 子命令；保留策略与 ``clean`` 开关均默认关闭，
+    需在各课题入口文件（``run_analysis.py``）中显式开启。
+    """
     if os.name == "nt" and "PYTHONIOENCODING" not in os.environ:
         for stream in (sys.stdout, sys.stderr):
             if hasattr(stream, "reconfigure"):
                 stream.reconfigure(encoding="utf-8")
         os.environ["PYTHONIOENCODING"] = "utf-8"
-    main(["--project-dir", str(project), "pipeline", *sys.argv[1:]])
+
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] == "latest":
+        main(["--project-dir", str(project), *raw])
+        return
+
+    if raw and raw[0] == "clean":
+        if any(flag in ("-h", "--help") for flag in raw[1:]):
+            main(["--project-dir", str(project), *raw])
+            return
+        if not allow_clean:
+            print(
+                "错误：本入口的清理命令默认关闭，未执行任何操作。"
+                "如需启用，请在入口文件 run_analysis.py 中将 CLEAN_COMMAND_ENABLED 设为 True。",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        token = _ENTRY_CLEAN_DEFAULTS.set(retention)
+        try:
+            main(["--project-dir", str(project), *raw])
+        finally:
+            _ENTRY_CLEAN_DEFAULTS.reset(token)
+        return
+
+    cmd = raw if (raw and raw[0] == "pipeline") else ["pipeline", *raw]
+    token = _ENTRY_RETENTION.set(retention)
+    try:
+        main(["--project-dir", str(project), *cmd])
+    finally:
+        _ENTRY_RETENTION.reset(token)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -35,6 +35,62 @@ experiments: []                     # 留空时自动查找 experiments/ 下含 
 #   experiments: [{experiment_id}]
 #   scripts:
 #     - command: analysis/plot_results.py --experiment {{experiment}} --run {{run}}
+#   retention:                        # 交付保留策略（默认关闭，也可在 run_analysis.py 中配置）
+#     enabled: false
+#     keep_last: 5
+#     drop_failed: true
+#     prune_orphan_bundles: false
+#     stale_running_hours: 24
+"""
+
+RUN_ANALYSIS_TEMPLATE = """\
+\"\"\"运行本课题 project.yaml 配置的标准流程，并提供 latest / clean 快捷入口。
+
+常用示例：
+  python run_analysis.py                     # 运行完整 pipeline（默认关闭自动清理）
+  python run_analysis.py --dry-run           # 预检，不运行、不写文件
+  python run_analysis.py --tag v1 --pin      # 给本次交付加标签并锁定，免于被清理
+  python run_analysis.py latest              # 查询最新成功交付（支持 --open / --path / --json / --list）
+  python run_analysis.py clean --dry-run     # 预览可清理项（需先将下方 CLEAN_COMMAND_ENABLED 设为 True）
+  python run_analysis.py clean --apply       # 执行清理（需先将下方 CLEAN_COMMAND_ENABLED 设为 True）
+\"\"\"
+from pathlib import Path
+import sys
+
+# ── 交付保留策略与清理开关（默认全部关闭）──────────────────────────────────
+# 仅当设为 True 时，pipeline 成功后才按下方规则自动淘汰旧交付
+RETENTION_ENABLED = False
+# 仅当设为 True 时，才允许通过本入口执行 `clean` 清理命令
+CLEAN_COMMAND_ENABLED = False
+
+# 保留策略参数（仅在启用上述任一开关后生效）
+KEEP_LAST_DELIVERIES = 5          # 每个实验保留最近 N 次成功交付（>= 1）；锁定交付始终保留
+DROP_FAILED_DELIVERIES = True     # 清理时是否一并移除失败及超时中断的交付目录
+PRUNE_ORPHAN_BUNDLES = False      # 清理时是否联动移除不再被保留交付引用的孤立 run_* 结果包
+STALE_RUNNING_HOURS = 24.0        # 超过该小时数仍处于 running 状态的交付视为已中断
+
+
+if __name__ == "__main__":
+    project = Path(__file__).resolve().parent
+    for parent in project.parents:
+        if (parent / "src" / "omicsweave" / "cli.py").is_file():
+            sys.path.insert(0, str(parent / "src"))
+            break
+    from omicsweave.cli import project_pipeline_main
+    from omicsweave.core.retention import RetentionPolicy
+
+    retention = RetentionPolicy(
+        enabled=RETENTION_ENABLED,
+        keep_last=KEEP_LAST_DELIVERIES,
+        drop_failed=DROP_FAILED_DELIVERIES,
+        prune_orphan_bundles=PRUNE_ORPHAN_BUNDLES,
+        stale_running_hours=STALE_RUNNING_HOURS,
+    )
+    project_pipeline_main(
+        project,
+        retention=retention,
+        allow_clean=CLEAN_COMMAND_ENABLED,
+    )
 """
 
 EXPERIMENT_TEMPLATE = """\
@@ -109,6 +165,7 @@ def create_project(root: str | Path, project_id: str, species: Species = Species
     files = {
         project_file: PROJECT_TEMPLATE.format(project_id=project_id, species=Species(species).value,
                                               experiment_id=experiment_id),
+        root / "run_analysis.py": RUN_ANALYSIS_TEMPLATE,
         exp_dir / EXPERIMENT_FILE: EXPERIMENT_TEMPLATE.format(experiment_id=experiment_id),
         exp_dir / "subjects.tsv": SUBJECTS_HEADER,
         exp_dir / "samples.tsv": SAMPLES_HEADER,

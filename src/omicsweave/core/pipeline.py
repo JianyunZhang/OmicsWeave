@@ -36,10 +36,11 @@ import yaml
 from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
 
 from .config import EXPERIMENT_FILE, ConfigError, Experiment, Project, load_experiment, load_project
-from .delivery import Delivery
+from .delivery import Delivery, validate_delivery_tag
 from .model import PIPELINE_PLACEHOLDER, ExperimentConfig, IntegrationMode, Omics
 from .provenance import sha256_file
 from .project import PROJECT_DIR_ENV
+from .retention import CleanupReport, RetentionPolicy, apply_cleanup, format_bytes
 from .run import ALL, METADATA_DIR, RunError, run_experiment, select_omics
 from .validate import validate_project
 
@@ -76,6 +77,8 @@ class PipelineResult:
     integration_dir: Path | None = None
     scripts: list[str] = field(default_factory=list)
     delivery_dir: Path | None = None
+    latest_pointer: Path | None = None
+    cleanup_report: CleanupReport | None = None
 
 
 def _log(text: str) -> None:
@@ -258,7 +261,8 @@ def _run_script(project: Project, exp_id: str, script: Script, tokens: list[str]
 
 def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], start: str,
                     dry_run: bool, command: list[str] | None, log: Callable[[str], None],
-                    warnings: list[str]) -> PipelineResult:
+                    warnings: list[str], *, tag: str | None = None, pin: bool = False,
+                    retention: RetentionPolicy | None = None) -> PipelineResult:
     from omicsweave.integration.integrate import integrate_experiment
 
     exp_id = plan.experiment.id
@@ -267,8 +271,8 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
     delivery = None
     if not dry_run:
         try:
-            delivery = Delivery(plan.experiment, script_keys, command or [])
-        except OSError as exc:
+            delivery = Delivery(plan.experiment, script_keys, command or [], tag=tag, pinned=pin)
+        except (OSError, ValueError) as exc:
             raise RunError(f"无法在 {project.path('results')} 初始化 {exp_id} 的交付目录：{exc}") from exc
         result.delivery_dir = delivery.directory
         delivery.data["validation_warnings"] = warnings
@@ -346,13 +350,30 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                     result.scripts.append(script.name)
         current = "summary"
         step(current, "复制面板矩阵与图件到 panels/、通路总图到 pathway_map/，写无面板候选表 candidates/，"
-                      "生成 summary.xlsx 与 index.json")
+                      "生成 summary.xlsx 与 index.json，并更新 latest.json 指针")
         if delivery:
             with stage(current):
                 delivery.write_summary()
                 delivery.collect_exports()
-            delivery.data["status"] = "completed"
-            delivery.save()
+            result.latest_pointer = delivery.complete()
+        if retention is not None and retention.enabled:
+            if dry_run:
+                step("retention", f"完成后按保留策略自动清理（{retention.describe()}）")
+            elif delivery:
+                cleanup = apply_cleanup(
+                    project.path("results"), retention, [exp_id], dry_run=False,
+                    protected_deliveries={exp_id: {delivery.directory.name}},
+                )
+                result.cleanup_report = cleanup
+                if cleanup.removed:
+                    step("retention", f"已按保留策略清理 {len(cleanup.removed)} 项，"
+                                      f"释放 {format_bytes(cleanup.reclaimed_bytes)}")
+                else:
+                    step("retention", "已检查保留策略，无需清理")
+                for note in cleanup.notes:
+                    log(f"[提示] {note}")
+                for item, error in cleanup.failed:
+                    log(f"[警告] 保留策略未能删除 {item.path}：{error}")
     except Exception as exc:
         message = f"[{exp_id}] {current} 失败：{exc}"
         if result.delivery_dir:
@@ -366,18 +387,26 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
 def run_pipeline(root: str | Path | None = None, experiments: list[str] | None = None,
                  omics: list[str] | None = None, *, start: str = "run", source: str | None = None,
                  results_dir: str | Path | None = None, integration_run: str | None = None,
+                 tag: str | None = None, pin: bool = False,
+                 retention: RetentionPolicy | None = None,
                  dry_run: bool = False, command: list[str] | None = None,
                  log: Callable[[str], None] = _log) -> list[PipelineResult]:
     """运行标准流程，返回每个实验的产出。
 
     ``start`` 为 ``integrate`` 或 ``scripts`` 时沿用已有的单组学结果包（``source``，默认最近一次）；从 ``scripts``
     开始时整合结果包取由该单组学结果包生成的最近一次。``dry_run`` 只做检查并列出各步，不运行、不写文件。
+    ``retention`` 未显式传入时读取 ``project.yaml`` 的 ``pipeline.retention``（默认关闭，不自动清理）。
     配置有误或校验未通过时抛出 :class:`RunError`，一步也不运行。
     """
     if start not in STAGES:
         raise RunError(f"未知的起始步骤 {start!r}，可选：{'、'.join(STAGES)}")
     if source and start == "run":
         raise RunError("--source 只用于 --from integrate / scripts（从 run 开始会新建单组学结果包）")
+    if tag is not None:
+        try:
+            tag = validate_delivery_tag(tag)
+        except ValueError as exc:
+            raise RunError(str(exc)) from exc
     try:
         project = load_project(root)
     except ConfigError as exc:
@@ -393,6 +422,7 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
     if source and len(targets) > 1:
         raise RunError(f"--source 是某一个实验的运行 ID，请用 --experiment 只选一个实验（当前：{'、'.join(targets)}）")
 
+    effective_retention = retention if retention is not None else RetentionPolicy.from_settings(project.config.pipeline.retention)
     log(f"项目 {project.root}；结果根目录 {project.path('results')}；实验 {'、'.join(targets)}；"
         f"从 {start} 开始{'（只列出步骤，不运行）' if dry_run else ''}")
     report = validate_project(project, targets)
@@ -407,7 +437,10 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
         try:
             warnings = [f"{issue.where}: {issue.message}" for issue in report.warnings
                         if issue.where in ("项目", f"实验 {plan.experiment.id}")]
-            results.append(_run_experiment(project, plan, omics or [ALL], start, dry_run, command, log, warnings))
+            results.append(_run_experiment(
+                project, plan, omics or [ALL], start, dry_run, command, log, warnings,
+                tag=tag, pin=pin, retention=effective_retention,
+            ))
         except RunError as exc:
             done = "、".join(r.experiment for r in results)
             raise RunError(f"{exc}" + (f"\n已完成的实验：{done}" if done else "")) from exc

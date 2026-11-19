@@ -88,7 +88,9 @@ omicsweave mfa run --help
 | `integrate --experiment 实验ID [--mode 模式] [--source 运行ID]` | 读取一次运行的统一结果表做多组学整合，结果写入新的结果包；目前已接入 `flux_anchored`、`pathway_convergence` |
 | `export --experiment 实验ID [--run 运行ID] [--format xlsx\|tsv]` | 把结果包中的结果表导出为 Excel（附运行信息）或 TSV，默认最近一次运行 |
 | `map --experiment 实验ID [--source 整合运行ID] [--tissue 组织] [--contrast 比较] [--layout 布局文件]` | 从已有整合包重画分组织代谢通路总图（图 E），写到 `<结果根>/<实验ID>/_redraws/<运行ID>/`，不改动原结果包 |
-| `pipeline [--experiment 实验ID ...] [--from run\|integrate\|scripts] [--source 运行ID] [--dry-run]` | 标准流程：对 `project.yaml` 中 `pipeline.experiments` 的每个实验依次 validate → run → integrate → 课题脚本（见下） |
+| `pipeline [--experiment 实验ID ...] [--from run\|integrate\|scripts] [--source 运行ID] [--tag 标签] [--pin] [--dry-run]` | 标准流程：对 `project.yaml` 中 `pipeline.experiments` 的每个实验依次 validate → run → integrate → 课题脚本（见下） |
+| `latest [--experiment 实验ID ...] [--target dir\|summary\|index] [--path] [--json] [--open] [--list]` | 通过 `_deliveries/<实验>/latest.json` 指针查询、列出或打开最新一次成功交付（跨平台） |
+| `clean [--experiment 实验ID ...] [--keep-last N\|--keep-all] [--prune-bundles] [--dry-run\|--apply]` | 按保留策略预览或清理历史交付及可选的孤立 `run_*` 结果包（默认仅预览，加 `--apply` 才实际删除） |
 
 ### 标准流程（`pipeline`）
 
@@ -126,7 +128,11 @@ omicsweave --project-dir D:/lab_project pipeline --results-dir "D:/研究结果/
   有改动时拒绝沿用，并说明从哪一步重跑，避免交付旧的面板矩阵。
 
 结果根目录默认取 `project.paths.results`（缺省为 `analysis_results`）。单次调用可用 `--results-dir` 覆盖，相对路径以课题根目录为基准。
-每次正式执行在 `<结果根>/_deliveries/<实验 ID>/<交付 ID>/` 新建一次交付；单组学与整合包仍在 `<结果根>/<实验 ID>/<运行 ID>/`。
+每次正式执行在 `<结果根>/_deliveries/<实验 ID>/delivery_YYYYMMDD_HHMMSS_<4位hex>[_<标签>]/` 新建一次不可变交付，
+全部完成后原子更新同级 `latest.json` 跨平台相对路径指针（中途失败不覆盖 `latest.json`）；单组学与整合包仍在 `<结果根>/<实验 ID>/<运行 ID>/`。
+日常可用 `omicsweave latest`（加 `--open` 打开最新 `summary.xlsx`、`--path` 输出路径、`--json` 输出指针、`--list` 列出全部交付）快速访问最新交付；
+重要里程碑可加 `--tag <标签> --pin`（或在目录内放 `.keep`）锁定以防被清理。
+保留策略与清理功能默认关闭（需在课题入口 `run_analysis.py` 中开启 `RETENTION_ENABLED` / `CLEAN_COMMAND_ENABLED`，或在 `project.yaml` 的 `pipeline.retention` 中启用，或使用 `omicsweave clean --apply`）。
 打开 `summary.xlsx` 可查看来源、各组织与比较的差异结果行数、可检验数和入选数，以及结果表和质控清单。
 整合包有 `reaction_dossier` 面板产物时，矩阵（XLSX）、分流与模块检验表及矩阵、分流、示踪剂覆盖图件复制到交付目录的
 `panels/<面板>/<组织>/`；摘要中的「面板结果」可按面板和组织筛选并链接到这些副本（逐反应档案页仍在整合包中）。
