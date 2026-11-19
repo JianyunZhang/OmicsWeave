@@ -2010,3 +2010,214 @@ lipid_mobilization_c:
   products:
   - glycerol
   related: []
+ACSL_PAL_c:
+  substrates:
+  - palmitate
+  products: []
+  related: []
+CRAT_m:
+  substrates:
+  - acetyl-coa
+  products: []
+  related: []
+PAL_beta_oxidation:
+  substrates:
+  - palmitate
+  products:
+  - acetyl-coa
+  related: []
+ELOVL6_c:
+  substrates:
+  - palmitate
+  products: []
+  related: []
+SCD_PAL_c:
+  substrates:
+  - palmitate
+  products: []
+  related: []
+GPAT_c:
+  substrates:
+  - glycerol 3-phosphate
+  products: []
+  related: []
+MGL_c:
+  substrates: []
+  products:
+  - glycerol
+  related: []
+PAL_esterification_c:
+  substrates:
+  - palmitate
+  products: []
+  related: []
+PAL_TG_hydrolysis_c:
+  substrates: []
+  products:
+  - palmitate
+  related: []
+GLYCOGEN_SYNTHESIS_c:
+  substrates:
+  - glucose-1-phosphate
+  products: []
+  related: []
+OTC_c:
+  substrates:
+  - ornithine
+  products:
+  - citrulline
+  related: []
+ASS_ASL_c:
+  substrates:
+  - citrulline
+  - aspartate
+  products:
+  - arginine
+  related: []
+ARGN_c:
+  substrates:
+  - arginine
+  products:
+  - ornithine
+  related: []
+GATM_c:
+  substrates:
+  - arginine
+  - glycine
+  products:
+  - ornithine
+  related: []
+GAMT_c:
+  substrates: []
+  products:
+  - creatine
+  related: []
+OAT_c:
+  substrates:
+  - ornithine
+  products:
+  - glutamate
+  related: []
+P5CS_c:
+  substrates:
+  - glutamate
+  products: []
+  related: []
+PYCR_c:
+  substrates: []
+  products:
+  - proline
+  related: []
+PRODH_c:
+  substrates:
+  - proline
+  products: []
+  related: []
+P5CDH_c:
+  substrates: []
+  products:
+  - glutamate
+  related: []
+ASNS_c:
+  substrates:
+  - aspartate
+  - glutamine
+  products:
+  - asparagine
+  - glutamate
+  related: []
+ASPG_c:
+  substrates:
+  - asparagine
+  products:
+  - aspartate
+  related: []
+SHMT_c:
+  substrates:
+  - serine
+  products:
+  - glycine
+  related: []
+PURINE_DE_NOVO_c:
+  substrates:
+  - glutamine
+  - glycine
+  - aspartate
+  products:
+  - glutamate
+  related: []
+ADSS_ADSL_c:
+  substrates:
+  - aspartate
+  products:
+  - amp
+  related: []
+IMPDH_GMPS_c:
+  substrates:
+  - glutamine
+  products:
+  - glutamate
+  related: []
+AMPD_c:
+  substrates:
+  - amp
+  products: []
+  related: []
+ADA_c:
+  substrates:
+  - adenosine
+  products:
+  - inosine
+  related: []
+NT5_AMP_c:
+  substrates:
+  - amp
+  products:
+  - adenosine
+  related: []
+NT5_GMP_c:
+  substrates: []
+  products:
+  - guanosine
+  related: []
+PNP_INO_c:
+  substrates:
+  - inosine
+  products:
+  - Hypoxanthine
+  related: []
+PNP_GUO_c:
+  substrates:
+  - guanosine
+  products:
+  - Guanine
+  related: []
+PYRIMIDINE_DE_NOVO_c:
+  substrates:
+  - glutamine
+  - aspartate
+  products:
+  - glutamate
+  related: []
+CTPS_c:
+  substrates:
+  - glutamine
+  products:
+  - glutamate
+  related: []
+NT5_UMP_c:
+  substrates: []
+  products:
+  - uridine
+  related: []
+CDA_c:
+  substrates: []
+  products:
+  - uridine
+  related: []
+URI_degradation_c:
+  substrates:
+  - uridine
+  products:
+  - Uracil
+  related: []

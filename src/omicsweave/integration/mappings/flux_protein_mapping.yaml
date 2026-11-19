@@ -1111,3 +1111,532 @@ PHGDH_PSAT_PSP_c:
   transporters: []
   cofactors: []
   description: Serine synthesis (PHGDH / PSAT1 / PSPH) - 丝氨酸从头合成
+ACSL_PAL_c:
+  direct_enzymes:
+  - Acsl1
+  - Acsl3
+  - Acsl4
+  - Acsl5
+  - Acsl6
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Long-chain acyl-CoA synthetase: palmitate + CoA -> palmitoyl-CoA (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+CPT1_c:
+  direct_enzymes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt1c
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Carnitine palmitoyltransferase 1: palmitoyl-CoA -> palmitoylcarnitine
+    (outer membrane) (G18 M0b 2026-11-19; members checked against KEGG EC links for
+    mmu)'
+CACT_PALCAR:
+  direct_enzymes: []
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters:
+  - Slc25a20
+  cofactors: []
+  description: 'Carnitine-acylcarnitine translocase: palmitoylcarnitine into mitochondria
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+CPT2_m:
+  direct_enzymes:
+  - Cpt2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Carnitine palmitoyltransferase 2: palmitoylcarnitine -> palmitoyl-CoA
+    (inner membrane) (G18 M0b 2026-11-19; members checked against KEGG EC links for
+    mmu)'
+CRAT_m:
+  direct_enzymes:
+  - Crat
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Carnitine acetyltransferase: acetyl-CoA <-> acetylcarnitine (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+PAL_beta_oxidation:
+  direct_enzymes:
+  - Acadvl
+  - Acadl
+  - Acadm
+  - Acads
+  - Echs1
+  - Hadh
+  - Hadha
+  - Hadhb
+  - Acaa2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Mitochondrial beta-oxidation of palmitate to acetyl-CoA (lumped) (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)
+ELOVL6_c:
+  direct_enzymes:
+  - Elovl6
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Fatty acid elongase 6: palmitate (C16) -> stearate (C18) (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+SCD_PAL_c:
+  direct_enzymes:
+  - Scd1
+  - Scd2
+  - Scd3
+  - Scd4
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Stearoyl-CoA desaturase: palmitate -> palmitoleate (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+SCD_STE_c:
+  direct_enzymes:
+  - Scd1
+  - Scd2
+  - Scd3
+  - Scd4
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Stearoyl-CoA desaturase: stearate -> oleate (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+GPAT_c:
+  direct_enzymes:
+  - Gpam
+  - Gpat2
+  - Gpat3
+  - Gpat4
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Glycerol-3-phosphate acyltransferase: G3P -> lysophosphatidate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+AGPAT_c:
+  direct_enzymes:
+  - Agpat1
+  - Agpat2
+  - Agpat3
+  - Agpat4
+  - Agpat5
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: '1-Acylglycerol-3-phosphate acyltransferase: LPA -> phosphatidate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+LIPIN_c:
+  direct_enzymes:
+  - Lpin1
+  - Lpin2
+  - Lpin3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Phosphatidate phosphatase (lipin): PA -> DAG (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+DGAT_c:
+  direct_enzymes:
+  - Dgat1
+  - Dgat2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Diacylglycerol acyltransferase: DAG -> TAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+ATGL_c:
+  direct_enzymes:
+  - Pnpla2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Adipose triglyceride lipase: TAG -> DAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+HSL_c:
+  direct_enzymes:
+  - Lipe
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Hormone-sensitive lipase: DAG -> MAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+MGL_c:
+  direct_enzymes:
+  - Mgll
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Monoacylglycerol lipase: MAG -> glycerol (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+PAL_esterification_c:
+  direct_enzymes:
+  - Gpam
+  - Gpat3
+  - Gpat4
+  - Agpat2
+  - Lpin1
+  - Lpin2
+  - Dgat1
+  - Dgat2
+  - Mogat1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Palmitate esterification to triacylglycerol (lumped; members as FA_esterification_c)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)
+PAL_TG_hydrolysis_c:
+  direct_enzymes:
+  - Pnpla2
+  - Lipe
+  - Mgll
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Hydrolysis of palmitate-containing triacylglycerol (lumped lipolysis)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)
+GLYCOGEN_SYNTHESIS_c:
+  direct_enzymes:
+  - Ugp2
+  - Gys1
+  - Gys2
+  - Gbe1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Glycogen synthesis from glucose-1-phosphate (UGP2, glycogen synthase,
+    branching enzyme; lumped) (G18 M0b 2026-11-19; members checked against KEGG EC
+    links for mmu)
+CPS1_c:
+  direct_enzymes:
+  - Cps1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Carbamoyl-phosphate synthetase 1: NH3 -> carbamoyl phosphate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+OTC_c:
+  direct_enzymes:
+  - Otc
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Ornithine transcarbamylase: ornithine + carbamoyl phosphate -> citrulline
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ASS_ASL_c:
+  direct_enzymes:
+  - Ass1
+  - Asl
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Argininosuccinate synthetase + lyase: citrulline + aspartate -> arginine
+    (lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ARGN_c:
+  direct_enzymes:
+  - Arg1
+  - Arg2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Arginase: arginine -> ornithine + urea (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+GATM_c:
+  direct_enzymes:
+  - Gatm
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Glycine amidinotransferase: arginine + glycine -> ornithine + guanidinoacetate
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+GAMT_c:
+  direct_enzymes:
+  - Gamt
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Guanidinoacetate N-methyltransferase: guanidinoacetate -> creatine
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+OAT_c:
+  direct_enzymes:
+  - Oat
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Ornithine aminotransferase: ornithine -> P5C + glutamate (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+P5CS_c:
+  direct_enzymes:
+  - Aldh18a1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'P5C synthase: glutamate -> 1-pyrroline-5-carboxylate (lumped) (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+PYCR_c:
+  direct_enzymes:
+  - Pycr1
+  - Pycr2
+  - Pycr3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'P5C reductase: P5C -> proline (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+PRODH_c:
+  direct_enzymes:
+  - Prodh
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Proline dehydrogenase: proline -> P5C (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+P5CDH_c:
+  direct_enzymes:
+  - Aldh4a1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'P5C dehydrogenase: P5C -> glutamate (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+ASNS_c:
+  direct_enzymes:
+  - Asns
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Asparagine synthetase: aspartate + glutamine -> asparagine + glutamate
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ASPG_c:
+  direct_enzymes:
+  - Aspg
+  - Asrgl1
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Asparaginase: asparagine -> aspartate + NH3 (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+SHMT_c:
+  direct_enzymes:
+  - Shmt1
+  - Shmt2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Serine hydroxymethyltransferase: serine <-> glycine (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+PURINE_DE_NOVO_c:
+  direct_enzymes:
+  - Ppat
+  - Gart
+  - Pfas
+  - Paics
+  - Adsl
+  - Atic
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: De novo purine synthesis to IMP (lumped) (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)
+ADSS_ADSL_c:
+  direct_enzymes:
+  - Adss1
+  - Adss2
+  - Adsl
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Adenylosuccinate synthase + lyase: IMP + aspartate -> AMP (lumped)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+IMPDH_GMPS_c:
+  direct_enzymes:
+  - Impdh1
+  - Impdh2
+  - Gmps
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'IMP dehydrogenase + GMP synthase: IMP -> GMP (lumped) (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+AMPD_c:
+  direct_enzymes:
+  - Ampd1
+  - Ampd2
+  - Ampd3
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'AMP deaminase: AMP -> IMP + NH3 (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+ADA_c:
+  direct_enzymes:
+  - Ada
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Adenosine deaminase: adenosine -> inosine + NH3 (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+NT5_AMP_c:
+  direct_enzymes:
+  - Nt5e
+  - Nt5c
+  - Nt5c1a
+  - Nt5c2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: '5''-Nucleotidase: AMP -> adenosine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+NT5_GMP_c:
+  direct_enzymes:
+  - Nt5e
+  - Nt5c
+  - Nt5c2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: '5''-Nucleotidase: GMP -> guanosine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+PNP_INO_c:
+  direct_enzymes:
+  - Pnp
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Purine nucleoside phosphorylase: inosine -> hypoxanthine (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+PNP_GUO_c:
+  direct_enzymes:
+  - Pnp
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Purine nucleoside phosphorylase: guanosine -> guanine (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+PYRIMIDINE_DE_NOVO_c:
+  direct_enzymes:
+  - Cad
+  - Dhodh
+  - Umps
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: De novo pyrimidine synthesis to UMP (lumped) (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)
+CTPS_c:
+  direct_enzymes:
+  - Ctps1
+  - Ctps2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'CTP synthase: UTP + glutamine -> CTP + glutamate (network: UMP ->
+    CMP) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+NT5_UMP_c:
+  direct_enzymes:
+  - Nt5c3
+  - Nt5c
+  - Nt5e
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: '5''-Nucleotidase: UMP -> uridine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+NT5_CMP_c:
+  direct_enzymes:
+  - Nt5c3
+  - Nt5c
+  - Nt5e
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: '5''-Nucleotidase: CMP -> cytidine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+CDA_c:
+  direct_enzymes:
+  - Cda
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Cytidine deaminase: cytidine -> uridine + NH3 (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+RNR_DCYTD_c:
+  direct_enzymes:
+  - Rrm1
+  - Rrm2
+  - Rrm2b
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Ribonucleotide reductase: CDP -> dCDP (network: CMP -> deoxycytidine,
+    lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+URI_degradation_c:
+  direct_enzymes:
+  - Upp1
+  - Upp2
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: 'Uridine phosphorylase: uridine -> uracil (start of pyrimidine degradation)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+DCYTD_degradation_c:
+  direct_enzymes:
+  - Cda
+  - Tymp
+  upstream_regulators: []
+  downstream_enzymes: []
+  transporters: []
+  cofactors: []
+  description: Deoxycytidine catabolism (cytidine deaminase, thymidine phosphorylase;
+    lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)

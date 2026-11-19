@@ -2138,3 +2138,608 @@ PHGDH_PSAT_PSP_c:
     - Psph
   pathway: Amino Acid Metabolism
   description: Serine synthesis (PHGDH / PSAT1 / PSPH) - 丝氨酸从头合成
+ACSL_PAL_c:
+  genes:
+  - Acsl1
+  - Acsl3
+  - Acsl4
+  - Acsl5
+  - Acsl6
+  gene_roles:
+    catalytic:
+    - Acsl1
+    - Acsl3
+    - Acsl4
+    - Acsl5
+    - Acsl6
+  pathway: Fatty Acid Oxidation
+  description: 'Long-chain acyl-CoA synthetase: palmitate + CoA -> palmitoyl-CoA (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+CPT1_c:
+  genes:
+  - Cpt1a
+  - Cpt1b
+  - Cpt1c
+  gene_roles:
+    catalytic:
+    - Cpt1a
+    - Cpt1b
+    - Cpt1c
+  pathway: Fatty Acid Oxidation
+  description: 'Carnitine palmitoyltransferase 1: palmitoyl-CoA -> palmitoylcarnitine
+    (outer membrane) (G18 M0b 2026-11-19; members checked against KEGG EC links for
+    mmu)'
+CACT_PALCAR:
+  genes:
+  - Slc25a20
+  gene_roles:
+    transporter:
+    - Slc25a20
+  pathway: Fatty Acid Oxidation
+  description: 'Carnitine-acylcarnitine translocase: palmitoylcarnitine into mitochondria
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+CPT2_m:
+  genes:
+  - Cpt2
+  gene_roles:
+    catalytic:
+    - Cpt2
+  pathway: Fatty Acid Oxidation
+  description: 'Carnitine palmitoyltransferase 2: palmitoylcarnitine -> palmitoyl-CoA
+    (inner membrane) (G18 M0b 2026-11-19; members checked against KEGG EC links for
+    mmu)'
+CRAT_m:
+  genes:
+  - Crat
+  gene_roles:
+    catalytic:
+    - Crat
+  pathway: Fatty Acid Oxidation
+  description: 'Carnitine acetyltransferase: acetyl-CoA <-> acetylcarnitine (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+PAL_beta_oxidation:
+  genes:
+  - Acadvl
+  - Acadl
+  - Acadm
+  - Acads
+  - Echs1
+  - Hadh
+  - Hadha
+  - Hadhb
+  - Acaa2
+  gene_roles:
+    catalytic:
+    - Acadvl
+    - Acadl
+    - Acadm
+    - Acads
+    - Echs1
+    - Hadh
+    - Hadha
+    - Hadhb
+    - Acaa2
+  pathway: Fatty Acid Oxidation
+  description: Mitochondrial beta-oxidation of palmitate to acetyl-CoA (lumped) (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)
+ELOVL6_c:
+  genes:
+  - Elovl6
+  gene_roles:
+    catalytic:
+    - Elovl6
+  pathway: Fatty Acid Synthesis
+  description: 'Fatty acid elongase 6: palmitate (C16) -> stearate (C18) (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+SCD_PAL_c:
+  genes:
+  - Scd1
+  - Scd2
+  - Scd3
+  - Scd4
+  gene_roles:
+    catalytic:
+    - Scd1
+    - Scd2
+    - Scd3
+    - Scd4
+  pathway: Fatty Acid Synthesis
+  description: 'Stearoyl-CoA desaturase: palmitate -> palmitoleate (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+SCD_STE_c:
+  genes:
+  - Scd1
+  - Scd2
+  - Scd3
+  - Scd4
+  gene_roles:
+    catalytic:
+    - Scd1
+    - Scd2
+    - Scd3
+    - Scd4
+  pathway: Fatty Acid Synthesis
+  description: 'Stearoyl-CoA desaturase: stearate -> oleate (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+GPAT_c:
+  genes:
+  - Gpam
+  - Gpat2
+  - Gpat3
+  - Gpat4
+  gene_roles:
+    catalytic:
+    - Gpam
+    - Gpat2
+    - Gpat3
+    - Gpat4
+  pathway: Glycerolipid Metabolism
+  description: 'Glycerol-3-phosphate acyltransferase: G3P -> lysophosphatidate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+AGPAT_c:
+  genes:
+  - Agpat1
+  - Agpat2
+  - Agpat3
+  - Agpat4
+  - Agpat5
+  gene_roles:
+    catalytic:
+    - Agpat1
+    - Agpat2
+    - Agpat3
+    - Agpat4
+    - Agpat5
+  pathway: Glycerolipid Metabolism
+  description: '1-Acylglycerol-3-phosphate acyltransferase: LPA -> phosphatidate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+LIPIN_c:
+  genes:
+  - Lpin1
+  - Lpin2
+  - Lpin3
+  gene_roles:
+    catalytic:
+    - Lpin1
+    - Lpin2
+    - Lpin3
+  pathway: Glycerolipid Metabolism
+  description: 'Phosphatidate phosphatase (lipin): PA -> DAG (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+DGAT_c:
+  genes:
+  - Dgat1
+  - Dgat2
+  gene_roles:
+    catalytic:
+    - Dgat1
+    - Dgat2
+  pathway: Glycerolipid Metabolism
+  description: 'Diacylglycerol acyltransferase: DAG -> TAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+ATGL_c:
+  genes:
+  - Pnpla2
+  gene_roles:
+    catalytic:
+    - Pnpla2
+  pathway: Glycerolipid Metabolism
+  description: 'Adipose triglyceride lipase: TAG -> DAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+HSL_c:
+  genes:
+  - Lipe
+  gene_roles:
+    catalytic:
+    - Lipe
+  pathway: Glycerolipid Metabolism
+  description: 'Hormone-sensitive lipase: DAG -> MAG (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+MGL_c:
+  genes:
+  - Mgll
+  gene_roles:
+    catalytic:
+    - Mgll
+  pathway: Glycerolipid Metabolism
+  description: 'Monoacylglycerol lipase: MAG -> glycerol (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+PAL_esterification_c:
+  genes:
+  - Gpam
+  - Gpat3
+  - Gpat4
+  - Agpat2
+  - Lpin1
+  - Lpin2
+  - Dgat1
+  - Dgat2
+  - Mogat1
+  gene_roles:
+    catalytic:
+    - Gpam
+    - Gpat3
+    - Gpat4
+    - Agpat2
+    - Lpin1
+    - Lpin2
+    - Dgat1
+    - Dgat2
+    - Mogat1
+  pathway: Glycerolipid Metabolism
+  description: Palmitate esterification to triacylglycerol (lumped; members as FA_esterification_c)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)
+PAL_TG_hydrolysis_c:
+  genes:
+  - Pnpla2
+  - Lipe
+  - Mgll
+  gene_roles:
+    catalytic:
+    - Pnpla2
+    - Lipe
+    - Mgll
+  pathway: Glycerolipid Metabolism
+  description: Hydrolysis of palmitate-containing triacylglycerol (lumped lipolysis)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)
+GLYCOGEN_SYNTHESIS_c:
+  genes:
+  - Ugp2
+  - Gys1
+  - Gys2
+  - Gbe1
+  gene_roles:
+    catalytic:
+    - Ugp2
+    - Gys1
+    - Gys2
+    - Gbe1
+  pathway: Glycogen Metabolism
+  description: Glycogen synthesis from glucose-1-phosphate (UGP2, glycogen synthase,
+    branching enzyme; lumped) (G18 M0b 2026-11-19; members checked against KEGG EC
+    links for mmu)
+CPS1_c:
+  genes:
+  - Cps1
+  gene_roles:
+    catalytic:
+    - Cps1
+  pathway: Urea Cycle
+  description: 'Carbamoyl-phosphate synthetase 1: NH3 -> carbamoyl phosphate (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+OTC_c:
+  genes:
+  - Otc
+  gene_roles:
+    catalytic:
+    - Otc
+  pathway: Urea Cycle
+  description: 'Ornithine transcarbamylase: ornithine + carbamoyl phosphate -> citrulline
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ASS_ASL_c:
+  genes:
+  - Ass1
+  - Asl
+  gene_roles:
+    catalytic:
+    - Ass1
+    - Asl
+  pathway: Urea Cycle
+  description: 'Argininosuccinate synthetase + lyase: citrulline + aspartate -> arginine
+    (lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ARGN_c:
+  genes:
+  - Arg1
+  - Arg2
+  gene_roles:
+    catalytic:
+    - Arg1
+    - Arg2
+  pathway: Urea Cycle
+  description: 'Arginase: arginine -> ornithine + urea (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+GATM_c:
+  genes:
+  - Gatm
+  gene_roles:
+    catalytic:
+    - Gatm
+  pathway: Creatine Metabolism
+  description: 'Glycine amidinotransferase: arginine + glycine -> ornithine + guanidinoacetate
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+GAMT_c:
+  genes:
+  - Gamt
+  gene_roles:
+    catalytic:
+    - Gamt
+  pathway: Creatine Metabolism
+  description: 'Guanidinoacetate N-methyltransferase: guanidinoacetate -> creatine
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+OAT_c:
+  genes:
+  - Oat
+  gene_roles:
+    catalytic:
+    - Oat
+  pathway: Proline Metabolism
+  description: 'Ornithine aminotransferase: ornithine -> P5C + glutamate (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+P5CS_c:
+  genes:
+  - Aldh18a1
+  gene_roles:
+    catalytic:
+    - Aldh18a1
+  pathway: Proline Metabolism
+  description: 'P5C synthase: glutamate -> 1-pyrroline-5-carboxylate (lumped) (G18
+    M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+PYCR_c:
+  genes:
+  - Pycr1
+  - Pycr2
+  - Pycr3
+  gene_roles:
+    catalytic:
+    - Pycr1
+    - Pycr2
+    - Pycr3
+  pathway: Proline Metabolism
+  description: 'P5C reductase: P5C -> proline (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+PRODH_c:
+  genes:
+  - Prodh
+  gene_roles:
+    catalytic:
+    - Prodh
+  pathway: Proline Metabolism
+  description: 'Proline dehydrogenase: proline -> P5C (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+P5CDH_c:
+  genes:
+  - Aldh4a1
+  gene_roles:
+    catalytic:
+    - Aldh4a1
+  pathway: Proline Metabolism
+  description: 'P5C dehydrogenase: P5C -> glutamate (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+ASNS_c:
+  genes:
+  - Asns
+  gene_roles:
+    catalytic:
+    - Asns
+  pathway: Amino Acid Metabolism
+  description: 'Asparagine synthetase: aspartate + glutamine -> asparagine + glutamate
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+ASPG_c:
+  genes:
+  - Aspg
+  - Asrgl1
+  gene_roles:
+    catalytic:
+    - Aspg
+    - Asrgl1
+  pathway: Amino Acid Metabolism
+  description: 'Asparaginase: asparagine -> aspartate + NH3 (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)'
+SHMT_c:
+  genes:
+  - Shmt1
+  - Shmt2
+  gene_roles:
+    catalytic:
+    - Shmt1
+    - Shmt2
+  pathway: Amino Acid Metabolism
+  description: 'Serine hydroxymethyltransferase: serine <-> glycine (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+PURINE_DE_NOVO_c:
+  genes:
+  - Ppat
+  - Gart
+  - Pfas
+  - Paics
+  - Adsl
+  - Atic
+  gene_roles:
+    catalytic:
+    - Ppat
+    - Gart
+    - Pfas
+    - Paics
+    - Adsl
+    - Atic
+  pathway: Purine Metabolism
+  description: De novo purine synthesis to IMP (lumped) (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)
+ADSS_ADSL_c:
+  genes:
+  - Adss1
+  - Adss2
+  - Adsl
+  gene_roles:
+    catalytic:
+    - Adss1
+    - Adss2
+    - Adsl
+  pathway: Purine Metabolism
+  description: 'Adenylosuccinate synthase + lyase: IMP + aspartate -> AMP (lumped)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+IMPDH_GMPS_c:
+  genes:
+  - Impdh1
+  - Impdh2
+  - Gmps
+  gene_roles:
+    catalytic:
+    - Impdh1
+    - Impdh2
+    - Gmps
+  pathway: Purine Metabolism
+  description: 'IMP dehydrogenase + GMP synthase: IMP -> GMP (lumped) (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+AMPD_c:
+  genes:
+  - Ampd1
+  - Ampd2
+  - Ampd3
+  gene_roles:
+    catalytic:
+    - Ampd1
+    - Ampd2
+    - Ampd3
+  pathway: Purine Metabolism
+  description: 'AMP deaminase: AMP -> IMP + NH3 (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+ADA_c:
+  genes:
+  - Ada
+  gene_roles:
+    catalytic:
+    - Ada
+  pathway: Purine Metabolism
+  description: 'Adenosine deaminase: adenosine -> inosine + NH3 (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+NT5_AMP_c:
+  genes:
+  - Nt5e
+  - Nt5c
+  - Nt5c1a
+  - Nt5c2
+  gene_roles:
+    catalytic:
+    - Nt5e
+    - Nt5c
+    - Nt5c1a
+    - Nt5c2
+  pathway: Purine Metabolism
+  description: '5''-Nucleotidase: AMP -> adenosine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+NT5_GMP_c:
+  genes:
+  - Nt5e
+  - Nt5c
+  - Nt5c2
+  gene_roles:
+    catalytic:
+    - Nt5e
+    - Nt5c
+    - Nt5c2
+  pathway: Purine Metabolism
+  description: '5''-Nucleotidase: GMP -> guanosine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+PNP_INO_c:
+  genes:
+  - Pnp
+  gene_roles:
+    catalytic:
+    - Pnp
+  pathway: Purine Metabolism
+  description: 'Purine nucleoside phosphorylase: inosine -> hypoxanthine (G18 M0b
+    2026-11-19; members checked against KEGG EC links for mmu)'
+PNP_GUO_c:
+  genes:
+  - Pnp
+  gene_roles:
+    catalytic:
+    - Pnp
+  pathway: Purine Metabolism
+  description: 'Purine nucleoside phosphorylase: guanosine -> guanine (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+PYRIMIDINE_DE_NOVO_c:
+  genes:
+  - Cad
+  - Dhodh
+  - Umps
+  gene_roles:
+    catalytic:
+    - Cad
+    - Dhodh
+    - Umps
+  pathway: Pyrimidine Metabolism
+  description: De novo pyrimidine synthesis to UMP (lumped) (G18 M0b 2026-11-19; members
+    checked against KEGG EC links for mmu)
+CTPS_c:
+  genes:
+  - Ctps1
+  - Ctps2
+  gene_roles:
+    catalytic:
+    - Ctps1
+    - Ctps2
+  pathway: Pyrimidine Metabolism
+  description: 'CTP synthase: UTP + glutamine -> CTP + glutamate (network: UMP ->
+    CMP) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+NT5_UMP_c:
+  genes:
+  - Nt5c3
+  - Nt5c
+  - Nt5e
+  gene_roles:
+    catalytic:
+    - Nt5c3
+    - Nt5c
+    - Nt5e
+  pathway: Pyrimidine Metabolism
+  description: '5''-Nucleotidase: UMP -> uridine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+NT5_CMP_c:
+  genes:
+  - Nt5c3
+  - Nt5c
+  - Nt5e
+  gene_roles:
+    catalytic:
+    - Nt5c3
+    - Nt5c
+    - Nt5e
+  pathway: Pyrimidine Metabolism
+  description: '5''-Nucleotidase: CMP -> cytidine (G18 M0b 2026-11-19; members checked
+    against KEGG EC links for mmu)'
+CDA_c:
+  genes:
+  - Cda
+  gene_roles:
+    catalytic:
+    - Cda
+  pathway: Pyrimidine Metabolism
+  description: 'Cytidine deaminase: cytidine -> uridine + NH3 (G18 M0b 2026-11-19;
+    members checked against KEGG EC links for mmu)'
+RNR_DCYTD_c:
+  genes:
+  - Rrm1
+  - Rrm2
+  - Rrm2b
+  gene_roles:
+    catalytic:
+    - Rrm1
+    - Rrm2
+    - Rrm2b
+  pathway: Pyrimidine Metabolism
+  description: 'Ribonucleotide reductase: CDP -> dCDP (network: CMP -> deoxycytidine,
+    lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+URI_degradation_c:
+  genes:
+  - Upp1
+  - Upp2
+  gene_roles:
+    catalytic:
+    - Upp1
+    - Upp2
+  pathway: Pyrimidine Metabolism
+  description: 'Uridine phosphorylase: uridine -> uracil (start of pyrimidine degradation)
+    (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)'
+DCYTD_degradation_c:
+  genes:
+  - Cda
+  - Tymp
+  gene_roles:
+    catalytic:
+    - Cda
+    - Tymp
+  pathway: Pyrimidine Metabolism
+  description: Deoxycytidine catabolism (cytidine deaminase, thymidine phosphorylase;
+    lumped) (G18 M0b 2026-11-19; members checked against KEGG EC links for mmu)
