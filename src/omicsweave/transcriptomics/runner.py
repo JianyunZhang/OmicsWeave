@@ -208,7 +208,7 @@ def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
                 continue
             designs[f"{contrast.id}/{tissue}"] = f"~{formula}" if "pydeseq2" in set(result["test_method"]) \
                 else str(result["test_method"].iloc[0])
-            result.rename_axis("gene").to_csv(details / f"de_{contrast.id}.csv")
+            result.rename_axis("gene").to_csv(details / f"de_{contrast.id}.csv", encoding="utf-8-sig")
             tables.append((contrast, tissue, result,
                            de_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
                                           tissue=tissue)))

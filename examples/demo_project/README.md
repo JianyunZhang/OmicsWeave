@@ -19,6 +19,8 @@ demo_project/
 
 ```bash
 omicsweave --project-dir examples/demo_project validate
+omicsweave --project-dir examples/demo_project pipeline
 ```
 
-`analysis_results/` 等运行输出不会被提交（见根目录 `.gitignore`）。
+此配置可离线执行两层差异分析与逆转评估。合成代谢物表缺少通路注释，此示例的整合模式为 `reversal`。
+完成后打开终端列出的 `summary.xlsx`。`analysis_results/` 等运行输出不会被提交（见根目录 `.gitignore`）。

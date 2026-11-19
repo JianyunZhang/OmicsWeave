@@ -87,6 +87,7 @@ CONSUMERS: dict[str, tuple[str, ...]] = {
     "project.pipeline.scripts[].command": ("omicsweave.core.pipeline:spec.command",),
     "project.pipeline.scripts[].name": ("omicsweave.core.pipeline:spec.name",),
     "project.pipeline.scripts[].experiments": ("omicsweave.core.pipeline:spec.experiments",),
+    "project.pipeline.scripts[].outputs": ("omicsweave.core.pipeline:spec.outputs",),
     "experiment.omics.*.enabled": ("omicsweave.core.run:config.omics.enabled()",),
     "experiment.omics.*.input.level": ('omicsweave.core.validate:spec.level == "raw"',),
     "experiment.omics.*.input.format": ("omicsweave.mfa.runner:input.format",

@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import shlex
 from enum import Enum
+from pathlib import PureWindowsPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -135,7 +136,7 @@ class ReplicationSet(_Strict):
 
 
 # omicsweave pipeline 课题脚本命令中可用的占位符
-PIPELINE_PLACEHOLDERS = ("project_dir", "experiment", "run", "run_dir", "integration", "integration_dir")
+PIPELINE_PLACEHOLDERS = ("project_dir", "experiment", "run", "run_dir", "integration", "integration_dir", "delivery_dir")
 PIPELINE_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
 
 
@@ -145,11 +146,23 @@ class PipelineScript(_Strict):
     ``command`` 按 shell 规则拆分（路径用 ``/``，含空格的参数加引号）；首项为 ``.py`` 文件时用运行 omicsweave 的
     同一个 Python 解释器执行，路径相对于项目目录。占位符替换为本次流程的值：``{experiment}`` 实验 ID，``{run}`` /
     ``{run_dir}`` 单组学结果包的运行 ID / 目录，``{integration}`` / ``{integration_dir}`` 整合结果包的运行 ID / 目录，
-    ``{project_dir}`` 项目目录。
+    ``{project_dir}`` 项目目录，``{delivery_dir}`` 本次交付目录。
     """
     command: str = Field(min_length=1)
     name: str | None = None                                      # 默认为脚本文件名（不含扩展名）
     experiments: list[str] = Field(default_factory=list)         # 只对这些实验运行；默认全部
+    outputs: list[str] = Field(default_factory=list)             # 交付目录内必须生成的相对文件
+
+    @field_validator("outputs")
+    @classmethod
+    def _check_outputs(cls, values: list[str]) -> list[str]:
+        for value in values:
+            path = PureWindowsPath(value)
+            if set(PIPELINE_PLACEHOLDER.findall(value)) - {"experiment"}:
+                raise ValueError("脚本 outputs 只支持 {experiment} 占位符")
+            if not path.parts or path.anchor or ".." in path.parts:
+                raise ValueError(f"脚本预期输出应是交付目录内的相对文件：{value!r}")
+        return values
 
     @field_validator("command")
     @classmethod

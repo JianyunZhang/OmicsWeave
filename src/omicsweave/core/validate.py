@@ -315,6 +315,8 @@ def _check_raw_files(project: Project, omics: Omics, fmt: str, layout: str | Non
 
 
 def _check_integration(exp: Experiment, out: _Collector) -> None:
+    from omicsweave.integration.integrate import MODES
+
     integration = exp.config.integration
     if not integration.enabled:
         return
@@ -325,6 +327,8 @@ def _check_integration(exp: Experiment, out: _Collector) -> None:
         out.warning("声明了 design.reversal_pairs，但 integration.modes 中没有 reversal，逆转判定不会运行"
                     "（也可用 omicsweave integrate --mode reversal 单独运行）")
     for mode in integration.modes:
+        if mode not in MODES:
+            out.warning(f"整合模式 {mode.value} 尚未接入统一运行")
         if mode is IntegrationMode.FLUX_ANCHORED:
             if Omics.MFA not in enabled:
                 out.error("flux_anchored 需要 MFA 数据，当前实验未启用 MFA")
@@ -378,7 +382,7 @@ def _check_registries(exp: Experiment, out: _Collector) -> None:
         out.warning(f"知识表审计未能完成：{exc}")
 
 
-def validate_project(root: str | Path | None = None, experiments: list[str] | None = None) -> ValidationReport:
+def validate_project(root: str | Path | Project | None = None, experiments: list[str] | None = None) -> ValidationReport:
     """校验项目及其实验；``experiments`` 为空时校验全部实验。"""
     report = ValidationReport()
     try:

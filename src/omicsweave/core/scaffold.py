@@ -87,7 +87,7 @@ omics:                              # 按需启用；input.level 为 raw（下�
 
 integration:
   enabled: false
-  modes: []                         # flux_anchored / pathway_convergence / sample_level / reversal
+  modes: []                         # flux_anchored / pathway_convergence / reversal / reaction_dossier
 """
 
 SUBJECTS_HEADER = "subject_id\tdiet\ttreatment\tsex\n"

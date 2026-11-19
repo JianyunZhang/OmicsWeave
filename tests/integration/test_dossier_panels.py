@@ -17,10 +17,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from openpyxl import load_workbook
 
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
 from omicsweave.contract.manifest import RunManifest, write_manifest
 from omicsweave.contract.tables import write_differential
+from omicsweave.core.config import load_experiment, load_project
+from omicsweave.core.delivery import Delivery
 from omicsweave.core.model import Omics
 from omicsweave.integration.dossier.panels import PanelError, load_panels, panel_elements
 from omicsweave.integration.dossier.view import matrix_view, summarize, wide_table
@@ -267,6 +270,27 @@ class DossierPanelBundleTest(unittest.TestCase):
                                    merged["log2fc"].astype(float), equal_nan=True)
         self.assertEqual(list(merged["cell_state_x"]), list(merged["cell_state"]))
         self.assertTrue(any("面板 liver_glucose" in n for n in self.notes))
+
+        delivery = Delivery(load_experiment(load_project(self.root), EXP), [], [])
+        delivery.bundle("integrate", base.parents[1])
+        delivery.write_summary()
+        workbook = load_workbook(delivery.directory / "summary.xlsx")
+        try:
+            sheet = workbook["面板结果"]
+            matrix = next(row for row in sheet.iter_rows(min_row=2) if row[2].value == "面板矩阵与成员")
+            self.assertEqual([cell.value for cell in matrix[:2]], ["liver_glucose", "liver"])
+            # 面板产出复制进交付目录 panels/<面板>/<组织>/，摘要表链接到副本
+            copies = delivery.directory / "panels" / "liver_glucose" / "liver"
+            self.assertEqual((delivery.directory / matrix[3].hyperlink.target).resolve(),
+                             (copies / f"matrix_{DIET}.xlsx").resolve())
+        finally:
+            workbook.close()
+        self.assertEqual((copies / f"matrix_{DIET}.xlsx").read_bytes(), (folder / f"matrix_{DIET}.xlsx").read_bytes())
+        # 只出 PNG 时复制 PNG；逐反应档案页（图 B）只留在整合结果包中
+        self.assertTrue((copies / f"tracer_coverage_{DIET}.png").is_file())
+        self.assertFalse((copies / "dossier_HEX_c_HFD_vs_LFD.png").exists())
+        self.assertIn(f"panels/liver_glucose/liver/matrix_{DIET}.xlsx",
+                      [item["path"] for item in delivery.artifacts if item["stage"] == "delivery"])
 
     def test_panel_errors_stop_the_run(self) -> None:
         self.source_bundle()

@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from omicsweave.contract.export import write_excel_tsv
 from ..mappings.feature_resolver import metabolite_members
 from ..mappings.reaction_members import ACTIVITY_MODES
 from .panels import Panel, species_labels
@@ -273,8 +274,8 @@ def export_matrix(view: pd.DataFrame, members: pd.DataFrame, stem: Path) -> list
     stem.parent.mkdir(parents=True, exist_ok=True)
     wide = wide_table(view)
     paths = [stem.with_suffix(".tsv"), stem.parent / f"{stem.name}_members.tsv"]
-    wide.to_csv(paths[0], sep="\t", index=False)
-    members.to_csv(paths[1], sep="\t", index=False)
+    write_excel_tsv(wide, paths[0])
+    write_excel_tsv(members, paths[1])
     try:
         with pd.ExcelWriter(stem.with_suffix(".xlsx")) as writer:
             wide.to_excel(writer, sheet_name="matrix", index=False)

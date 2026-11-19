@@ -98,10 +98,11 @@ pipeline:
   experiments: [all_tissues]          # 默认项目中的全部实验
   scripts:                            # 课题脚本，每个实验 run / integrate 之后依次运行
     - name: figures
-      command: analysis/plot_results.py --experiment {experiment} --run {run}
+      command: analysis/plot_results.py --experiment {experiment} --run-dir {run_dir} --output-dir {delivery_dir}/figures
     - name: key_results
-      command: analysis/export_key_results.py --run {run} --integration {integration}
+      command: analysis/export_key_results.py --run-dir {run_dir} --integration-dir {integration_dir} --output-dir {delivery_dir}/key_results
       experiments: [all_tissues]      # 只对这些实验运行
+      outputs: [key_results/tables.md] # 相对于本次交付目录；文件缺失时该步骤失败
 ```
 
 ```bash
@@ -109,15 +110,28 @@ omicsweave --project-dir D:/lab_project pipeline --dry-run           # 先检查
 omicsweave --project-dir D:/lab_project pipeline                     # validate → run → integrate → 脚本
 omicsweave --project-dir D:/lab_project pipeline --source <运行ID>   # 沿用单组学结果包，重跑整合与脚本
 omicsweave --project-dir D:/lab_project pipeline --from scripts      # 只重跑脚本（最近一次结果包）
+omicsweave --project-dir D:/lab_project pipeline --results-dir "D:/研究结果/课题 A"
 ```
 
 - 各步之间传递确切的运行 ID：integrate 读取本次 run 的结果包，脚本的 `{run}` / `{integration}` 是本次的运行 ID，
-  不依赖“最近一次运行”。其他占位符：`{experiment}`、`{run_dir}`、`{integration_dir}`、`{project_dir}`。
+  其他占位符包括 `{experiment}`、`{run_dir}`、`{integration_dir}`、`{project_dir}` 和 `{delivery_dir}`。
 - 实验名、脚本文件与占位符在开始前全部检查；校验有错误时一步也不运行。实验没有启用整合
   （`integration.enabled` 与 `modes`）时跳过 integrate。
 - 脚本在项目目录下运行，`OMICSWEAVE_PROJECT_DIR` 指向项目目录；`.py` 脚本用运行 omicsweave 的同一个 Python 执行，
   其他命令（如 `Rscript ...`）按 PATH 查找。命令按 shell 规则拆分，路径用 `/`。
 - 某一步失败时停止，并给出续跑命令（`--from integrate|scripts --source <运行ID>`）。
+- 沿用已有结果包前核对它登记的输入：单组学结果包对照数据、样本表、参考与 `experiment.yaml` 中 `integration` 以外的各节
+  （只改 `integration`，如打开 `panels`，仍可沿用）；整合结果包对照 `experiment.yaml`、样本表与 `panels.yaml`。
+  有改动时拒绝沿用，并说明从哪一步重跑，避免交付旧的面板矩阵。
+
+结果根目录默认取 `project.paths.results`（缺省为 `analysis_results`）。单次调用可用 `--results-dir` 覆盖，相对路径以课题根目录为基准。
+每次正式执行在 `<结果根>/_deliveries/<实验 ID>/<交付 ID>/` 新建一次交付；单组学与整合包仍在 `<结果根>/<实验 ID>/<运行 ID>/`。
+打开 `summary.xlsx` 可查看来源、各组织与比较的差异结果行数、可检验数和入选数，以及结果表和质控清单。
+整合包有 `reaction_dossier` 面板产物时，矩阵（XLSX）、分流与模块检验表及矩阵、分流、示踪剂覆盖图件复制到交付目录的
+`panels/<面板>/<组织>/`；摘要中的「面板结果」可按面板和组织筛选并链接到这些副本（逐反应档案页仍在整合包中）。
+`index.json` 登记阶段状态、配置和脚本指纹、源结果包及其产物路径。脚本失败时可按提示传入
+`--from scripts --source <单组学 ID> --integration-run <整合 ID>`，在新的交付目录续跑。
+标准导出和面板 TSV 使用带 BOM 的 UTF-8。Excel 导入时选择制表符，带前导零的 ID 列按文本读取。
 
 各组学流程的命令格式为 `omicsweave [--project-dir DIR] <模块> <动作> [参数]`，动作之后的参数原样交给对应流程。
 这些流程目前仍读取旧的各组学配置（`experiments/<id>/<组学>_data/`），阶段 2 改为读取上面的统一项目配置。

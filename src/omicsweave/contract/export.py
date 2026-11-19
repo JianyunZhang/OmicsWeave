@@ -20,6 +20,11 @@ EXCEL_MAX_ROWS = 1_048_576
 FORMATS = ("xlsx", "tsv")
 
 
+def write_excel_tsv(table: pd.DataFrame, path: Path, **options) -> None:
+    """写出便于 Excel 识别编码的制表符文件，保留列值与调用方的精度设置。"""
+    table.to_csv(path, sep="\t", encoding="utf-8-sig", index=False, **options)
+
+
 def find_run(results_root: str | Path, experiment_id: str, run_id: str | None = None) -> Path:
     """实验的结果包目录；不指定 ``run_id`` 时取最近一次运行（运行 ID 按时间排序）。"""
     base = Path(results_root) / experiment_id
@@ -88,7 +93,7 @@ def export_bundle(run_dir: str | Path, fmt: str = "xlsx", output: str | Path | N
 
     directory = Path(output) if output else run_dir / EXPORT_DIR / stem
     directory.mkdir(parents=True, exist_ok=True)
-    info.to_csv(directory / "info.tsv", sep="\t", index=False)
+    write_excel_tsv(info, directory / "info.tsv")
     for name, table in tables.items():
-        table.to_csv(directory / f"{name}.tsv", sep="\t", index=False)
+        write_excel_tsv(table, directory / f"{name}.tsv")
     return directory

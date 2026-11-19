@@ -57,6 +57,7 @@ import pandas as pd
 from scipy.stats import t as student_t
 
 from omicsweave.contract.dataset import META_FILE, read_dataset
+from omicsweave.contract.export import write_excel_tsv
 from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
@@ -862,9 +863,9 @@ def _render_pathway(pathway: dict[str, pd.DataFrame], panel: Panel, tissue: str,
         per_animal = per_animal[(per_animal["panel_id"] == panel.id) & (per_animal["tissue"] == tissue)]
         dossier_plots.plot_node_split(splits, per_animal, sides, panel, tissue, contrast,
                                       folder / f"node_split_{contrast}", formats, runs)
-        splits.to_csv(folder / f"node_split_{contrast}.tsv", sep="\t", index=False)
+        write_excel_tsv(splits, folder / f"node_split_{contrast}.tsv")
     if not tests.empty:
-        tests.to_csv(folder / f"pathway_tests_{contrast}.tsv", sep="\t", index=False)
+        write_excel_tsv(tests, folder / f"pathway_tests_{contrast}.tsv")
 
 
 def _chunks(panel: Panel, elements: pd.DataFrame, limit: int) -> list[pd.DataFrame]:

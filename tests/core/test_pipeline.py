@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,28 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(read_manifest(second_integration).parameters["source_run"], run_dir.name)
         self.assertEqual(self.records()[-1], {**self.records()[0], "integration": second_integration.name})
 
+    def test_reused_bundles_must_match_current_inputs(self) -> None:
+        self.assertEqual(self.pipeline()[0], 0)
+        (run_dir,) = self.bundles("omics")
+        experiment = f"experiments/{EXP}/experiment.yaml"
+        # 只改 integration 一节（如打开 panels）：整合结果包过期，单组学结果包仍可沿用
+        self.edit(experiment, lambda doc: doc["integration"].update(parameters={"reversal": {}}))
+        code, output = self.pipeline("--from", "scripts", "--dry-run")
+        self.assertEqual(code, 1, output)
+        self.assertIn(f"已过期：{experiment} 在整合之后改过", output)
+        self.assertIn(f"--from integrate --source {run_dir.name}", output)
+        code, output = self.pipeline("--source", run_dir.name, "--dry-run")
+        self.assertEqual(code, 0, output)
+        # 样本表或 integration 以外的设置改过：单组学结果包过期，须从 run 开始
+        self.edit(experiment, lambda doc: doc["experiment"].update(description="changed"))
+        with open(self.root / "experiments" / EXP / "subjects.tsv", "a", encoding="utf-8") as handle:
+            handle.write("\n")
+        code, output = self.pipeline("--source", run_dir.name, "--dry-run")
+        self.assertEqual(code, 1, output)
+        self.assertIn(f"单组学结果包 {run_dir.name} 已过期", output)
+        self.assertIn(f"experiments/{EXP}/subjects.tsv", output)
+        self.assertIn("experiment.yaml 的 experiment 一节", output)
+
     def test_dry_run_lists_steps_without_writing(self) -> None:
         code, output = self.pipeline("--dry-run")
         self.assertEqual(code, 0, output)
@@ -155,6 +178,59 @@ class PipelineTest(unittest.TestCase):
         (run_dir,) = self.bundles("omics")
         self.assertIn("脚本 record 失败（退出码 3）", output)
         self.assertIn(f"--from scripts --source {run_dir.name}", output)
+        index, = (self.root / "analysis_results" / "_deliveries" / EXP).glob("*/index.json")
+        failure = json.loads(index.read_text(encoding="utf-8"))
+        self.assertEqual(failure["stages"]["script_1:record"]["status"], "failed")
+        self.assertEqual(failure["stages"]["summary"]["status"], "pending")
+        self.assertTrue(failure["stages"]["script_1:record"]["script_sha256"])
+        self.assertEqual(failure["status"], "failed")
+        self.assertIn("--integration-run " + failure["bundles"]["integrate"]["run_id"], output)
+
+    def test_delivery_in_custom_root_is_isolated_and_resumable(self) -> None:
+        target = self.root / "中文 结果"
+        script = self.root / "analysis" / "交付脚本.py"
+        script.write_text("from pathlib import Path\nimport sys\n"
+                          "Path(sys.argv[1], '表.txt').write_text(sys.argv[2], encoding='utf-8')\n", encoding="utf-8")
+        self.set_pipeline({"scripts": [{"command": "analysis/交付脚本.py {delivery_dir} {run_dir}", "outputs": ["表.txt"]}]})
+        code, output = self.pipeline("--results-dir", str(target))
+        self.assertEqual(code, 0, output)
+        first, = (target / "_deliveries" / EXP).glob("*/index.json")
+        original = first.read_bytes()
+        bundle = json.loads(original)["bundles"]
+        source = bundle["run"]["run_id"]
+        integration = bundle["integrate"]["run_id"]
+        args = ("--results-dir", str(target), "--from", "scripts", "--source", source, "--integration-run")
+        self.assertEqual(self.pipeline(*args, "wrong-run")[0], 1)
+        code, output = self.pipeline(*args, integration)
+        self.assertEqual(code, 0, output)
+        second, = set(first.parent.parent.glob("*/index.json")) - {first}
+        data = json.loads(second.read_bytes())
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["stages"]["integrate"]["status"], "reused")
+        self.assertEqual(first.read_bytes(), original)
+        self.assertEqual((second.parent / "表.txt").read_text(encoding="utf-8"), str(target / EXP / source))
+        self.assertIn("summary.xlsx", [row["path"] for row in data["artifacts"]])
+        self.assertFalse((self.root / "analysis_results").exists())
+        self.set_pipeline({"scripts": [{"command": "analysis/交付脚本.py {delivery_dir} {run_dir}",
+                                        "outputs": ["遗漏.txt"]}]})
+        code, output = self.pipeline(*args, integration)
+        self.assertEqual(code, 1)
+        self.assertIn("遗漏.txt", output)
+
+    def test_dry_run_rejects_unregistered_mode(self) -> None:
+        # demo 的两层组学有共同动物，样本设计本身满足 sample_level 的前提。
+        demo = Path(__file__).resolve().parents[2] / "examples" / "demo_project"
+        root = self.root / "paired"
+        shutil.copytree(demo / "experiments", root / "experiments")
+        shutil.copyfile(demo / "project.yaml", root / "project.yaml")
+        path = root / "experiments/demo_glp1/experiment.yaml"
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
+        config["integration"]["modes"].append("sample_level")
+        path.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+        code, output = run_cli(["--project-dir", str(root), "pipeline", "--dry-run"])
+        self.assertEqual(code, 1)
+        self.assertIn("尚未接入", output)
+        self.assertFalse((root / "analysis_results").exists())
 
 
 if __name__ == "__main__":

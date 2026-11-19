@@ -242,8 +242,9 @@ def write_report(diff: BundleDiff, directory: str | Path) -> Path:
     """写出 tables.tsv、columns.tsv、transitions.tsv 与 report.txt。"""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    diff.table_frame().to_csv(directory / "tables.tsv", sep="\t", index=False)
-    diff.columns.to_csv(directory / "columns.tsv", sep="\t", index=False)
-    diff.transitions.to_csv(directory / "transitions.tsv", sep="\t", index=False)
+    from .export import write_excel_tsv
+    write_excel_tsv(diff.table_frame(), directory / "tables.tsv")
+    write_excel_tsv(diff.columns, directory / "columns.tsv")
+    write_excel_tsv(diff.transitions, directory / "transitions.tsv")
     (directory / "report.txt").write_text(format_report(diff), encoding="utf-8")
     return directory

@@ -164,8 +164,10 @@ def read_table(path: Path) -> pd.DataFrame:
     return table.apply(lambda col: col.str.strip())
 
 
-def load_project(root: str | Path | None = None) -> Project:
+def load_project(root: str | Path | Project | None = None) -> Project:
     """读取项目目录下的 ``project.yaml``；省略 ``root`` 时使用 :func:`project_dir`。"""
+    if isinstance(root, Project):
+        return root
     root_path = Path(root).expanduser().resolve() if root is not None else project_dir()
     path = root_path / PROJECT_FILE
     return Project(root=root_path, config=_parse(ProjectConfig, path, _read_yaml(path)))

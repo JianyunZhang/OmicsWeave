@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -148,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="从哪一步开始：integrate / scripts 沿用已有的单组学结果包（--source，默认最近一次）；"
                                "默认 run，给出 --source 时默认 integrate")
     pipeline.add_argument("--source", default=None, help="沿用的单组学结果包运行 ID（只能选一个实验）")
+    pipeline.add_argument("--results-dir", type=Path, help="覆盖本次结果根目录，相对路径以项目为基准")
+    pipeline.add_argument("--integration-run", help="从 scripts 续跑时固定与 --source 对应的整合包")
     pipeline.add_argument("--dry-run", action="store_true", help="只做检查并列出各步命令，不运行")
 
     diff = modules.add_parser("diff", help="逐表对照两个结果包，报告是否逐值相同、差值分布与等级转移")
@@ -312,7 +315,8 @@ def _run_refs(args: argparse.Namespace) -> int:
     for row in coverage.itertuples():
         print(f"[覆盖] {row.omics} {row.tissue}：反应映射的直接酶测到 {row.data_value}")
     if args.output:
-        table.to_csv(args.output, sep="\t", index=False)
+        from omicsweave.contract.export import write_excel_tsv
+        write_excel_tsv(table, Path(args.output))
         print(f"明细：{args.output}")
     return 0
 
@@ -355,7 +359,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     start = args.start or ("integrate" if args.source else "run")
     try:
         results = run_pipeline(project_dir(), args.experiment, _split(args.omics) or None, start=start,
-                               source=args.source, dry_run=args.dry_run, command=["omicsweave", *args.argv])
+                               source=args.source, dry_run=args.dry_run, results_dir=args.results_dir,
+                               integration_run=args.integration_run, command=["omicsweave", *args.argv])
     except RunError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
@@ -368,12 +373,24 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             print(f"[{result.experiment}] 整合结果包：{result.integration_dir}")
         if result.scripts:
             print(f"[{result.experiment}] 课题脚本：{'、'.join(result.scripts)}")
+        print(f"[{result.experiment}] 结果摘要：{result.delivery_dir / 'summary.xlsx'}")
+        print(f"[{result.experiment}] 交付索引：{result.delivery_dir / 'index.json'}")
     return 0
 
 
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
              "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline}
+
+
+def project_pipeline_main(project: Path) -> None:
+    """本地课题脚本入口，保持 IDE 与重定向日志中的 Unicode 可读。"""
+    if os.name == "nt" and "PYTHONIOENCODING" not in os.environ:
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+    main(["--project-dir", str(project), "pipeline", *sys.argv[1:]])
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import codecs
 import io
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from omicsweave import cli
 from omicsweave.contract import export as export_module
 from omicsweave.contract.dataset import ContractError
 from omicsweave.contract.export import export_bundle, find_run
+from omicsweave.contract.manifest import read_manifest, write_manifest
 from omicsweave.core.run import run_experiment
 from tests.mfa.test_mfa_runner import EXP, build_two_factor_project
 
@@ -80,6 +82,22 @@ class ExportTest(unittest.TestCase):
             cli.main(["--project-dir", str(self.root), "export", "--experiment", "other_exp"])
         self.assertEqual(exit_.exception.code, 1)
         self.assertIn("omicsweave run", err.getvalue())
+
+    def test_unicode_and_text_ids_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_manifest(read_manifest(self.first), root)
+            tables = root / "omics" / "mfa" / "tables"
+            tables.mkdir(parents=True)
+            expected = pd.DataFrame({"样品 ID": ["00017"], "标记": ["肝脏 β μ ¹³C"]})
+            path = tables / "unicode.parquet"
+            expected.to_parquet(path, index=False)
+            tsv = export_bundle(root, "tsv") / "mfa_unicode.tsv"
+            self.assertTrue(tsv.read_bytes().startswith(codecs.BOM_UTF8))
+            pd.testing.assert_frame_equal(pd.read_parquet(path), expected)
+            pd.testing.assert_frame_equal(pd.read_csv(tsv, sep="\t", dtype=str), expected)
+            pd.testing.assert_frame_equal(pd.read_excel(export_bundle(root), sheet_name="mfa_unicode", dtype=str),
+                                          expected)
 
 
 if __name__ == "__main__":

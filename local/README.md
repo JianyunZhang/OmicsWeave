@@ -21,6 +21,16 @@ local/
 
 ## 指定使用哪个课题
 
+在工具包仓库根目录可直接启动本地课题入口（完整执行默认的 `all_tissues`）。
+
+```powershell
+& 'C:/Users/zhang/.conda/envs/tutorial-mfa-2025/python.exe' local/projects/dio_project/run_analysis.py
+& 'C:/Users/zhang/.conda/envs/tutorial-mfa-2025/python.exe' local/projects/dio_glp1ra_project/run_analysis.py
+```
+
+在 PyCharm 中可直接运行相应项目的 `run_analysis.py`。加 `--dry-run` 只做预检，加 `--results-dir "D:/课题结果/DIO"` 可指定单次输出根目录。
+每次调用各有 `_deliveries/<实验>/<交付 ID>/summary.xlsx` 和 `index.json`；DIO 的课题图件与关键表也在该次交付下。
+
 | 场景 | 写法 |
 |---|---|
 | 命令行 | `omicsweave --project-dir local/projects/<课题名> mfa run --experiment <id>` |

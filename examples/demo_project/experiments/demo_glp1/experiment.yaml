@@ -29,6 +29,9 @@ omics:
       level: table
       format: counts_matrix
       files: [experiments/demo_glp1/data/rna_counts.tsv]
+      feature_id_type: ensembl_gene_id
+    analysis:
+      gene_sets: []  # 离线合成示例，随机特征未配置通路库
   metabolomics:
     enabled: true
     input:
@@ -37,7 +40,8 @@ omics:
       source: msdial
       mode: untargeted
       files: [experiments/demo_glp1/data/metabolite_peaks.tsv]
+      feature_id_column: metabolite
 
 integration:
   enabled: true
-  modes: [pathway_convergence, sample_level, reversal]
+  modes: [reversal]  # 两个比较可做逆转评估；本示例没有可用于通路融合的代谢物注释

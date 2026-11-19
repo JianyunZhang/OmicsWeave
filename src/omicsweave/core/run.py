@@ -116,7 +116,7 @@ def _load_runner(omics: Omics) -> tuple[Callable[[RunContext], OmicsRun], tuple[
     return getattr(module, func_name), tuple(getattr(module, "STEPS", ()))
 
 
-def _select_omics(experiment: Experiment, requested: list[str]) -> tuple[list[Omics], list[str]]:
+def select_omics(experiment: Experiment, requested: list[str]) -> tuple[list[Omics], list[str]]:
     enabled = experiment.config.omics.enabled()
     if ALL in requested:
         chosen = [o for o in enabled if o in RUNNERS]
@@ -158,7 +158,7 @@ def _expand(paths: list[Path]) -> list[Path]:
     return list(dict.fromkeys(p.resolve() for p in files))
 
 
-def load_validated(experiment_id: str, root: str | Path | None = None) -> tuple[Project, Experiment]:
+def load_validated(experiment_id: str, root: str | Path | Project | None = None) -> tuple[Project, Experiment]:
     """读取项目与实验；配置未通过校验时抛出 :class:`RunError`，不开始运行。"""
     try:
         project = load_project(root)
@@ -207,11 +207,11 @@ def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], param
 
 
 def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
-                   steps: list[str] | None = None, root: str | Path | None = None,
+                   steps: list[str] | None = None, root: str | Path | Project | None = None,
                    command: list[str] | None = None, run_id: str | None = None) -> tuple[Path, list[str]]:
     """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
     project, experiment = load_validated(experiment_id, root)
-    chosen, notes = _select_omics(experiment, list(omics))
+    chosen, notes = select_omics(experiment, list(omics))
     runners = {o: _load_runner(o) for o in chosen}
     if steps:
         known = sorted(set().union(*(s for _, s in runners.values())))

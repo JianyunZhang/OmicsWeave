@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from omicsweave.contract.manifest import MANIFEST_FILE
+from omicsweave.core.config import Project
 from omicsweave.core.model import IntegrationMode
 from omicsweave.core.run import RunContext, RunError, finish_run, load_validated, start_run
 
@@ -60,7 +61,7 @@ def _load_mode(mode: IntegrationMode) -> Callable[..., IntegrationRun]:
     return getattr(importlib.import_module(module_name), func_name)
 
 
-def _select_modes(requested: list[str], configured: list[IntegrationMode]) -> list[IntegrationMode]:
+def select_modes(requested: list[str], configured: list[IntegrationMode]) -> list[IntegrationMode]:
     if not requested:
         if not configured:
             raise RunError("没有指定整合模式：用 --mode 指定，或在 experiment.yaml 的 integration.modes 中列出")
@@ -80,12 +81,12 @@ def _select_modes(requested: list[str], configured: list[IntegrationMode]) -> li
 
 
 def integrate_experiment(experiment_id: str, modes: list[str] | None = None, *, source: str | None = None,
-                         root: str | Path | None = None, command: list[str] | None = None,
+                         root: str | Path | Project | None = None, command: list[str] | None = None,
                          run_id: str | None = None) -> tuple[Path, list[str]]:
     """运行整合模式，返回 (新结果包目录, 提示)。"""
     project, experiment = load_validated(experiment_id, root)
     settings = experiment.config.integration
-    chosen = _select_modes(list(modes or []), settings.modes)
+    chosen = select_modes(list(modes or []), settings.modes)
     src = source_run(project.path("results"), experiment.id, source)
     ctx = start_run(project, experiment, run_id)
     runs = []
