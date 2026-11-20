@@ -32,7 +32,7 @@ from omicsweave.contract.export import write_excel_tsv
 from ..mappings.feature_resolver import metabolite_members
 from ..mappings.reaction_members import ACTIVITY_MODES
 from .panels import Panel, species_labels
-from ..mappings.network_annotation import split_metabolite
+from ..mappings.network_annotation import NODE_LIPID_CLASSES, NODE_METABOLITE_GROUPS, split_metabolite
 
 MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 FLUX_STATES = ("not_identifiable", "insufficient_n", "not_infused")
@@ -132,7 +132,25 @@ def species_key(species: str, keys: dict[str, str]) -> str:
 
 
 def node_members(rows: pd.DataFrame, species: str, keys: dict[str, str]) -> pd.DataFrame:
-    """成员行中属于某个代谢物节点的底物 / 产物行：有测得特征时按特征去重，否则按成员去重（保留未检出等状态）。"""
+    """成员行中属于某个代谢物节点的底物 / 产物行：有测得特征时按特征去重，否则按成员去重（保留未检出等状态）。
+    网络脂质池节点（TAG/DAG/MAG/PA/LPA/FA/TGPAL/CE/PL/SPH/ETHER）同时匹配代谢组派生特征中的脂质大类总量
+    （``class_total:*``）；多化合物池节点（BILE/POLYAMINE/NAD_POOL）汇总对应组内代谢物。"""
+    base = split_metabolite(species)[0]
+    lipid_cls = NODE_LIPID_CLASSES.get(base)
+    if lipid_cls:
+        targets = (lipid_cls,) if isinstance(lipid_cls, str) else tuple(lipid_cls)
+        fids = {f"class_total:{c}" for c in targets}
+        derived = rows[(rows["layer"] == "derived") & rows["role"].isin(("substrate", "product"))
+                       & rows["feature_id"].astype(str).isin(fids)]
+        if not derived.empty:
+            return derived.drop_duplicates("feature_id")
+    group_names = NODE_METABOLITE_GROUPS.get(base)
+    if group_names:
+        group_keys = {keys.setdefault(f"group:{n}", _metabolite_key(n)) for n in group_names}
+        part = rows[(rows["layer"] == "metabolomics") & rows["role"].isin(("substrate", "product"))]
+        part = part[part["member_id"].map(lambda m: keys.setdefault(f"member:{m}", _metabolite_key(str(m)))).isin(group_keys)]
+        measured = part[part["feature_id"].notna() & part["feature_id"].astype(str).ne("")]
+        return measured.drop_duplicates("feature_id") if not measured.empty else part.drop_duplicates("member_id")
     key = species_key(species, keys)
     part = rows[(rows["layer"] == "metabolomics") & rows["role"].isin(("substrate", "product"))]
     part = part[part["member_id"].map(lambda m: keys.setdefault(f"member:{m}", _metabolite_key(str(m)))) == key]

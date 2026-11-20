@@ -113,5 +113,5 @@ def load_de_results(tissue: str, comparison: str) -> pd.DataFrame | None:
     return None
 
 
-# 统一主题；转录组图件沿用 200 dpi
-apply_theme(dpi=200, save_dpi=200)
+# 统一采用 nature_editorial 出版主题（300 dpi）
+apply_theme(preset="nature_editorial", dpi=150, save_dpi=300)

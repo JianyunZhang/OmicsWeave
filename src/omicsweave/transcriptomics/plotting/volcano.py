@@ -9,6 +9,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from omicsweave.visualization.palettes import NATURE_EDITORIAL
+
 from . import _config as cfg
 
 
@@ -28,9 +30,9 @@ def _plot_single(df, tissue, comparison, output_dir):
     dn_cond = (plot_df['padj'] < cfg.PADJ_CUTOFF) & (plot_df['log2FoldChange'] < -cfg.LOG2FC_CUTOFF)
     ns = ~(up_cond | dn_cond)
 
-    up_color = cfg.PLOT_COLORS.get('volcano_up', '#D32F2F')
-    dn_color = cfg.PLOT_COLORS.get('volcano_down', '#1565C0')
-    ns_color = cfg.PLOT_COLORS.get('volcano_ns', '#BDBDBD')
+    up_color = cfg.PLOT_COLORS.get('volcano_up', NATURE_EDITORIAL.up)
+    dn_color = cfg.PLOT_COLORS.get('volcano_down', NATURE_EDITORIAL.down)
+    ns_color = cfg.PLOT_COLORS.get('volcano_ns', NATURE_EDITORIAL.faint)
 
     # Non-significant first (background)
     ax.scatter(
@@ -153,15 +155,15 @@ def generate_all():
 
             ax.scatter(
                 plot_df.loc[ns, 'log2FoldChange'], plot_df.loc[ns, '-log10p'],
-                c=cfg.PLOT_COLORS.get('volcano_ns', '#BDBDBD'), s=2, alpha=0.3, linewidths=0,
+                c=cfg.PLOT_COLORS.get('volcano_ns', NATURE_EDITORIAL.faint), s=2, alpha=0.3, linewidths=0,
             )
             ax.scatter(
                 plot_df.loc[up, 'log2FoldChange'], plot_df.loc[up, '-log10p'],
-                c=cfg.PLOT_COLORS.get('volcano_up', '#D32F2F'), s=3, alpha=0.5, linewidths=0,
+                c=cfg.PLOT_COLORS.get('volcano_up', NATURE_EDITORIAL.up), s=3, alpha=0.5, linewidths=0,
             )
             ax.scatter(
                 plot_df.loc[down, 'log2FoldChange'], plot_df.loc[down, '-log10p'],
-                c=cfg.PLOT_COLORS.get('volcano_down', '#1565C0'), s=3, alpha=0.5, linewidths=0,
+                c=cfg.PLOT_COLORS.get('volcano_down', NATURE_EDITORIAL.down), s=3, alpha=0.5, linewidths=0,
             )
 
             ax.axhline(-np.log10(cfg.PADJ_CUTOFF), ls='--', lw=0.5, color='grey')

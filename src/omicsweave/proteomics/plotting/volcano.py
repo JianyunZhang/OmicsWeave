@@ -29,9 +29,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from omicsweave.visualization.palettes import NATURE_EDITORIAL
+
 from . import _config as cfg
 
-_PALETTE = {"Up": "#D32F2F", "Down": "#1565C0", "NS": "#BDBDBD"}
+_PALETTE = {"Up": NATURE_EDITORIAL.up, "Down": NATURE_EDITORIAL.down, "NS": NATURE_EDITORIAL.faint}
 _DRAW_ORDER = ("NS", "Down", "Up")
 _MAX_LABELS = 10
 
@@ -159,7 +161,7 @@ def _render(
     )
 
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 

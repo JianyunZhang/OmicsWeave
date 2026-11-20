@@ -1,9 +1,130 @@
-"""跨组学共用的可视化：统一主题（theme）、图件保存（figures）与由统一结果表绘制的通用图。
+"""跨组学共用的通用可视化包（零业务耦合，可供其他课题直接复用）。
 
-已有的通用图：火山图（:mod:`omicsweave.visualization.volcano`）。热图、PCA 等仍在各组学的 ``plotting/`` 中，
-阶段 2 陆续迁入。
+模块分层：
+- :mod:`omicsweave.visualization.palettes`：色盲安全语义色板与连续发散色阶；
+- :mod:`omicsweave.visualization.theme`：出版主题预设引擎（默认 ``nature_editorial``）；
+- :mod:`omicsweave.visualization.figures`：期刊栏宽几何与确定性矢量/位图保存；
+- :mod:`omicsweave.visualization.glyphs`：跨风格、可独立使用的 SVG 图标与 Matplotlib 矢量渲染；
+- :mod:`omicsweave.visualization.primitives`：可复用矢量图元（三点证据阶梯、角标排名、耦合轨道、降噪四轴微条、贝塞尔箭头）；
+- :mod:`omicsweave.visualization.metro`：通用 Beck 地铁拓扑图元（八向折线寻路、实心/空心双轨、内嵌方向 chevron、跑道闭环、圆环换乘站）；
+- :mod:`omicsweave.visualization.volcano`：通用差异火山图；
+- :mod:`omicsweave.visualization.graphical_abstract`：独立的小规模概念摘要图子系统（手绘 ``editorial_ink`` / 像素 ``pixel_abstract`` / 地铁 ``metro_atlas`` / ``nature_editorial``）。
 """
+from .figures import (
+    DOUBLE_COL_IN,
+    FIGURE_FORMATS,
+    ONE_HALF_COL_IN,
+    SAVE_DPI,
+    SINGLE_COL_IN,
+    figure_stem,
+    journal_figsize,
+    mm_to_in,
+    save_figure,
+    save_stem,
+)
+from .glyphs import GLYPH_STYLES, draw_glyph, glyph_ids, read_glyph_svg
+from .graphical_abstract import (
+    GA_STYLES,
+    MAX_HUBS,
+    AbstractCompartment,
+    AbstractFlow,
+    AbstractHub,
+    AbstractSpec,
+    build_abstract_from_pathway_view,
+    load_abstract_spec,
+    render_graphical_abstract,
+)
+from .metro import (
+    draw_metro_coupled_halo,
+    draw_metro_loop,
+    draw_metro_station,
+    draw_metro_track,
+    draw_metro_zone,
+    fillet_polyline,
+    route_octilinear,
+)
+from .palettes import (
+    DEFAULT_NORM,
+    DEFAULT_VMAX,
+    DIRECTIONAL,
+    EVIDENCE_GRADE_COLORS,
+    IDENTIFIABILITY_COLORS,
+    METRO_PATHWAY_COLORS,
+    NATURE_EDITORIAL,
+    PALETTES,
+    VALID_COLOR_MODES,
+    SemanticPalette,
+    get_palette,
+    pathway_family_color,
+    tier_tokens,
+    tint_color,
+)
+from .theme import (
+    DEFAULT_PRESET,
+    PRESETS,
+    StylePreset,
+    apply_theme,
+    font_family,
+    get_preset,
+    has_cjk_font,
+    list_presets,
+    theme_rc,
+    themed,
+)
 
-from .theme import apply_theme, font_family, has_cjk_font, theme_rc, themed
-
-__all__ = ["apply_theme", "font_family", "has_cjk_font", "theme_rc", "themed"]
+__all__ = [
+    "AbstractCompartment",
+    "AbstractFlow",
+    "AbstractHub",
+    "AbstractSpec",
+    "DEFAULT_NORM",
+    "DEFAULT_PRESET",
+    "DEFAULT_VMAX",
+    "DIRECTIONAL",
+    "DOUBLE_COL_IN",
+    "EVIDENCE_GRADE_COLORS",
+    "FIGURE_FORMATS",
+    "GA_STYLES",
+    "GLYPH_STYLES",
+    "IDENTIFIABILITY_COLORS",
+    "MAX_HUBS",
+    "METRO_PATHWAY_COLORS",
+    "NATURE_EDITORIAL",
+    "ONE_HALF_COL_IN",
+    "PALETTES",
+    "PRESETS",
+    "SAVE_DPI",
+    "SINGLE_COL_IN",
+    "SemanticPalette",
+    "StylePreset",
+    "VALID_COLOR_MODES",
+    "apply_theme",
+    "build_abstract_from_pathway_view",
+    "draw_glyph",
+    "draw_metro_coupled_halo",
+    "draw_metro_loop",
+    "draw_metro_station",
+    "draw_metro_track",
+    "draw_metro_zone",
+    "figure_stem",
+    "fillet_polyline",
+    "font_family",
+    "get_palette",
+    "get_preset",
+    "glyph_ids",
+    "has_cjk_font",
+    "journal_figsize",
+    "list_presets",
+    "load_abstract_spec",
+    "mm_to_in",
+    "pathway_family_color",
+    "read_glyph_svg",
+    "render_graphical_abstract",
+    "route_octilinear",
+    "save_figure",
+    "save_stem",
+    "theme_rc",
+    "themed",
+    "tier_tokens",
+    "tint_color",
+]

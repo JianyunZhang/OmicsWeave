@@ -1,0 +1,106 @@
+# Example Graphical Abstract specification (reusable across any project, <= 12 hubs).
+# Render via:
+#   omicsweave abstract --spec examples/graphical_abstract.example.yaml --style editorial_ink
+#   omicsweave abstract --spec examples/graphical_abstract.example.yaml --style pixel_abstract
+#   omicsweave abstract --spec examples/graphical_abstract.example.yaml --style nature_editorial
+
+title: Hepatic Metabolic Rewiring in Diet-Induced Obesity
+subtitle: High-level Conceptual Summary (Example Template · <= 12 Hubs)
+contrast: HFD vs LFD
+takeaway: "Flux-supported TCA entry (Citrate -> a-KG) rises under HFD while cytosolic glycolysis & lipid storage adapt."
+provenance: "Template spec · Replace values from your project's OmicsWeave summary tables."
+canvas: {width: 138, height: 80}
+
+compartments:
+  - id: blood
+    label: Circulation
+    kind: blood
+    box: [2.5, 7.0, 27.5, 28.0]
+  - id: mito
+    label: Mitochondrial Matrix
+    kind: mitochondria
+    box: [33.5, 32.5, 133.5, 77.5]
+
+hubs:
+  - id: blood_glc
+    label: Circulating Fuel
+    xy: [15.0, 17.5]
+    compartment: blood
+    icon: blood
+    direction: -1
+    magnitude: 1.0
+    evidence_tier: omics
+    subtitle: "Glc ↓ · β-HB ↑"
+  - id: glycolysis
+    label: Glycolysis / GNG
+    xy: [47.0, 17.5]
+    compartment: cytosol
+    icon: glucose
+    direction: 1
+    magnitude: 1.1
+    evidence_tier: L1
+    subtitle: "Enzyme ↑ · 4 L1"
+  - id: glycerolipid
+    label: G3P & TAG Storage
+    xy: [16.0, 45.0]
+    compartment: cytosol
+    icon: glycerolipid
+    direction: 1
+    magnitude: 1.6
+    evidence_tier: L1
+    subtitle: "Pool ↑ · 2 L1"
+  - id: pyruvate
+    label: Pyruvate Hub
+    xy: [47.5, 45.0]
+    compartment: mitochondria
+    icon: pyruvate
+    direction: 1
+    magnitude: 1.0
+    evidence_tier: L1
+    subtitle: "PC / MPC ↑"
+  - id: tca
+    label: TCA Cycle
+    xy: [83.0, 47.0]
+    compartment: mitochondria
+    icon: tca
+    direction: 1
+    magnitude: 1.8
+    evidence_tier: L2
+    subtitle: "Flux ↑ · 3 L2+"
+  - id: ketone
+    label: Ketone Bodies
+    xy: [118.5, 45.0]
+    compartment: mitochondria
+    icon: ketone
+    direction: 1
+    magnitude: 1.3
+    evidence_tier: omics
+    subtitle: "β-HB ↑"
+  - id: fatty_acid
+    label: Fatty Acid & β-Ox
+    xy: [118.5, 17.5]
+    compartment: cytosol
+    icon: lipid
+    direction: 1
+    magnitude: 1.4
+    evidence_tier: L1
+    subtitle: "Enzyme ↑ · 4 L1"
+  - id: amino_acid
+    label: Amino Acid Shuttle
+    xy: [47.5, 67.5]
+    compartment: cytosol
+    icon: amino
+    direction: 1
+    magnitude: 0.9
+    evidence_tier: L1
+    subtitle: "BCAA / Glu ↑"
+
+flows:
+  - {source: blood_glc, target: glycolysis, label: "Glc", direction: -1, magnitude: 0.9, evidence_tier: omics}
+  - {source: glycolysis, target: glycerolipid, label: "DHAP -> G3P", direction: 1, magnitude: 1.1, evidence_tier: L1, curve: 2.0}
+  - {source: glycolysis, target: pyruvate, label: "Pyr", direction: 1, magnitude: 1.0, evidence_tier: L1}
+  - {source: pyruvate, target: tca, label: "OAA / Ac-CoA", direction: 1, magnitude: 1.7, evidence_tier: L2, coupled: true}
+  - {source: tca, target: ketone, label: "Ac-CoA", direction: 1, magnitude: 1.2, evidence_tier: omics}
+  - {source: fatty_acid, target: tca, label: "β-Ox", direction: 1, magnitude: 1.3, evidence_tier: L1, curve: 3.0}
+  - {source: fatty_acid, target: ketone, label: "Acyl-CoA", direction: 1, magnitude: 1.1, evidence_tier: L1}
+  - {source: amino_acid, target: tca, label: "Anaplerosis", direction: 1, magnitude: 0.9, evidence_tier: L1, curve: -2.0}

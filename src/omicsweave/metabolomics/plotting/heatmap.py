@@ -136,7 +136,7 @@ def plot_heatmap(
         )
         selection_label = "unsupervised variance" if selection_method == "variance" else "supervised ANOVA"
         g.fig.suptitle(f"{tissue}: Top {top_n} features ({selection_label})", y=1.02)
-        plt.savefig(os.path.join(out_path, f"Heatmap_Top{top_n}.png"), dpi=150, bbox_inches="tight")
+        plt.savefig(os.path.join(out_path, f"Heatmap_Top{top_n}.png"), dpi=300, bbox_inches="tight")
         plt.close()
         print(f"    热力图保存: {out_path}/Heatmap_Top{top_n}.png")
     except Exception as e:

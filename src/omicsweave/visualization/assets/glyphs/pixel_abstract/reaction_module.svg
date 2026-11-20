@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>reaction_module</title>
+  <desc>多步反应或通路模块</desc>
+  <path d="M 10 4 L 28 4 L 28 6 L 10 6 Z M 26 6 L 28 6 L 28 20 L 26 20 Z M 8 8 L 24 8 L 24 10 L 8 10 Z M 22 10 L 24 10 L 24 24 L 22 24 Z" fill="#9A764F"/>
+  <path d="M 4 12 L 20 12 L 20 28 L 4 28 Z" fill="#242E37"/>
+  <path d="M 6 14 L 18 14 L 18 26 L 6 26 Z" fill="#F5ECD6"/>
+  <path d="M 8 16 L 16 16 L 16 18 L 8 18 Z M 8 20 L 16 20 L 16 22 L 8 22 Z" fill="#242E37"/>
+</svg>

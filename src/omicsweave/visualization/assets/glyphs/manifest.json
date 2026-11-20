@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "view_box": [
+    0,
+    0,
+    32,
+    32
+  ],
+  "provenance": "OmicsWeave schematic vector assets, created in project. Pixel hub motifs adapt the original OmicsWeave graphical abstract sprites.",
+  "license": "BSD-3-Clause",
+  "styles": {
+    "nature_editorial": "纯白极简机制图",
+    "editorial_ink": "科学手绘插画风",
+    "pixel_abstract": "现代像素概念风"
+  },
+  "glyphs": {
+    "blood": {
+      "category": "concept",
+      "meaning": "循环或血浆供给",
+      "files": {
+        "nature_editorial": "nature_editorial/blood.svg",
+        "editorial_ink": "editorial_ink/blood.svg",
+        "pixel_abstract": "pixel_abstract/blood.svg"
+      }
+    },
+    "glucose": {
+      "category": "concept",
+      "meaning": "葡萄糖或糖代谢枢纽",
+      "files": {
+        "nature_editorial": "nature_editorial/glucose.svg",
+        "editorial_ink": "editorial_ink/glucose.svg",
+        "pixel_abstract": "pixel_abstract/glucose.svg"
+      }
+    },
+    "ppp": {
+      "category": "concept",
+      "meaning": "磷酸戊糖通路",
+      "files": {
+        "nature_editorial": "nature_editorial/ppp.svg",
+        "editorial_ink": "editorial_ink/ppp.svg",
+        "pixel_abstract": "pixel_abstract/ppp.svg"
+      }
+    },
+    "pyruvate": {
+      "category": "concept",
+      "meaning": "丙酮酸分支枢纽",
+      "files": {
+        "nature_editorial": "nature_editorial/pyruvate.svg",
+        "editorial_ink": "editorial_ink/pyruvate.svg",
+        "pixel_abstract": "pixel_abstract/pyruvate.svg"
+      }
+    },
+    "tca": {
+      "category": "concept",
+      "meaning": "三羧酸循环",
+      "files": {
+        "nature_editorial": "nature_editorial/tca.svg",
+        "editorial_ink": "editorial_ink/tca.svg",
+        "pixel_abstract": "pixel_abstract/tca.svg"
+      }
+    },
+    "ketone": {
+      "category": "concept",
+      "meaning": "酮体池",
+      "files": {
+        "nature_editorial": "nature_editorial/ketone.svg",
+        "editorial_ink": "editorial_ink/ketone.svg",
+        "pixel_abstract": "pixel_abstract/ketone.svg"
+      }
+    },
+    "lipid": {
+      "category": "concept",
+      "meaning": "脂肪酸或脂质主题",
+      "files": {
+        "nature_editorial": "nature_editorial/lipid.svg",
+        "editorial_ink": "editorial_ink/lipid.svg",
+        "pixel_abstract": "pixel_abstract/lipid.svg"
+      }
+    },
+    "glycerolipid": {
+      "category": "concept",
+      "meaning": "甘油脂主题",
+      "files": {
+        "nature_editorial": "nature_editorial/glycerolipid.svg",
+        "editorial_ink": "editorial_ink/glycerolipid.svg",
+        "pixel_abstract": "pixel_abstract/glycerolipid.svg"
+      }
+    },
+    "amino": {
+      "category": "concept",
+      "meaning": "氨基酸主题",
+      "files": {
+        "nature_editorial": "nature_editorial/amino.svg",
+        "editorial_ink": "editorial_ink/amino.svg",
+        "pixel_abstract": "pixel_abstract/amino.svg"
+      }
+    },
+    "atp": {
+      "category": "concept",
+      "meaning": "ATP 或细胞能量主题",
+      "files": {
+        "nature_editorial": "nature_editorial/atp.svg",
+        "editorial_ink": "editorial_ink/atp.svg",
+        "pixel_abstract": "pixel_abstract/atp.svg"
+      }
+    },
+    "redox": {
+      "category": "concept",
+      "meaning": "氧化还原对",
+      "files": {
+        "nature_editorial": "nature_editorial/redox.svg",
+        "editorial_ink": "editorial_ink/redox.svg",
+        "pixel_abstract": "pixel_abstract/redox.svg"
+      }
+    },
+    "nucleotide": {
+      "category": "concept",
+      "meaning": "核苷酸主题",
+      "files": {
+        "nature_editorial": "nature_editorial/nucleotide.svg",
+        "editorial_ink": "editorial_ink/nucleotide.svg",
+        "pixel_abstract": "pixel_abstract/nucleotide.svg"
+      }
+    },
+    "generic": {
+      "category": "concept",
+      "meaning": "通用概念枢纽",
+      "files": {
+        "nature_editorial": "nature_editorial/generic.svg",
+        "editorial_ink": "editorial_ink/generic.svg",
+        "pixel_abstract": "pixel_abstract/generic.svg"
+      }
+    },
+    "grid_square": {
+      "category": "layout",
+      "meaning": "平铺方格，适用于布局参考或低密度背景",
+      "files": {
+        "nature_editorial": "nature_editorial/grid_square.svg",
+        "editorial_ink": "editorial_ink/grid_square.svg",
+        "pixel_abstract": "pixel_abstract/grid_square.svg"
+      }
+    },
+    "grid_dots": {
+      "category": "layout",
+      "meaning": "平铺点阵，适用于布局参考或低密度背景",
+      "files": {
+        "nature_editorial": "nature_editorial/grid_dots.svg",
+        "editorial_ink": "editorial_ink/grid_dots.svg",
+        "pixel_abstract": "pixel_abstract/grid_dots.svg"
+      }
+    },
+    "node_metabolite": {
+      "category": "node",
+      "meaning": "通用代谢物池节点，测量状态由上下文指定",
+      "files": {
+        "nature_editorial": "nature_editorial/node_metabolite.svg",
+        "editorial_ink": "editorial_ink/node_metabolite.svg",
+        "pixel_abstract": "pixel_abstract/node_metabolite.svg"
+      }
+    },
+    "node_significant": {
+      "category": "node",
+      "meaning": "双环，表示图例定义的统计阈值已通过",
+      "files": {
+        "nature_editorial": "nature_editorial/node_significant.svg",
+        "editorial_ink": "editorial_ink/node_significant.svg",
+        "pixel_abstract": "pixel_abstract/node_significant.svg"
+      }
+    },
+    "node_missing": {
+      "category": "node",
+      "meaning": "斜线节点，表示未测或缺测，具体状态由图例注明",
+      "files": {
+        "nature_editorial": "nature_editorial/node_missing.svg",
+        "editorial_ink": "editorial_ink/node_missing.svg",
+        "pixel_abstract": "pixel_abstract/node_missing.svg"
+      }
+    },
+    "reaction_step": {
+      "category": "reaction",
+      "meaning": "单步反应过程节点",
+      "files": {
+        "nature_editorial": "nature_editorial/reaction_step.svg",
+        "editorial_ink": "editorial_ink/reaction_step.svg",
+        "pixel_abstract": "pixel_abstract/reaction_step.svg"
+      }
+    },
+    "reaction_transport": {
+      "category": "reaction",
+      "meaning": "跨区室运输，箭头方向须由具体反应决定",
+      "files": {
+        "nature_editorial": "nature_editorial/reaction_transport.svg",
+        "editorial_ink": "editorial_ink/reaction_transport.svg",
+        "pixel_abstract": "pixel_abstract/reaction_transport.svg"
+      }
+    },
+    "reaction_module": {
+      "category": "reaction",
+      "meaning": "多步反应或通路模块",
+      "files": {
+        "nature_editorial": "nature_editorial/reaction_module.svg",
+        "editorial_ink": "editorial_ink/reaction_module.svg",
+        "pixel_abstract": "pixel_abstract/reaction_module.svg"
+      }
+    },
+    "evidence_l1": {
+      "category": "evidence",
+      "meaning": "L1，酶容量层支持的预测候选",
+      "files": {
+        "nature_editorial": "nature_editorial/evidence_l1.svg",
+        "editorial_ink": "editorial_ink/evidence_l1.svg",
+        "pixel_abstract": "pixel_abstract/evidence_l1.svg"
+      }
+    },
+    "evidence_l2": {
+      "category": "evidence",
+      "meaning": "L2，通量支持",
+      "files": {
+        "nature_editorial": "nature_editorial/evidence_l2.svg",
+        "editorial_ink": "editorial_ink/evidence_l2.svg",
+        "pixel_abstract": "pixel_abstract/evidence_l2.svg"
+      }
+    },
+    "evidence_l3": {
+      "category": "evidence",
+      "meaning": "L3，符合项目定义的已确认通量",
+      "files": {
+        "nature_editorial": "nature_editorial/evidence_l3.svg",
+        "editorial_ink": "editorial_ink/evidence_l3.svg",
+        "pixel_abstract": "pixel_abstract/evidence_l3.svg"
+      }
+    }
+  }
+}

@@ -163,9 +163,45 @@ def build_parser() -> argparse.ArgumentParser:
                       help="布局文件（相对路径以实验目录为基准）；默认取 experiment.yaml 的 pathway_map.layout，再默认为包内布局")
     maps.add_argument("--tissue", action="append", default=None, help="只画这些组织，可重复")
     maps.add_argument("--contrast", action="append", default=None, help="只画这些比较，可重复")
+    maps.add_argument("--mode", choices=["atlas", "publication"], default=None,
+                      help="出图模式：atlas（完整诊断总图，默认）或 publication（双栏聚焦出版图）")
+    maps.add_argument("--style", choices=["metro_atlas", "nature_editorial", "slide_dark"], default=None,
+                      help="视觉主题预设：metro_atlas（默认，Beck 八向地铁轨道风格）/ nature_editorial / slide_dark")
+    maps.add_argument("--color-mode", choices=["semantic", "pathway"], default=None,
+                      help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝涨跌色）/ pathway（低饱和莫兰迪通路分区色）")
+    maps.add_argument("--strip-mode", choices=["omics", "axes"], default=None,
+                      help="四格微条内容：omics（默认，Flux / Protein / mRNA / Metab 四层组学图标）/ axes（S3 四机制轴）")
+    maps.add_argument("--region", action="append", default=None,
+                      help="publication 模式下显式指定保留的通路区域 ID，可重复；省略时自动聚焦活跃区域")
+    maps.add_argument("--submap", action="append", default=None,
+                      help="指定生成的正文代谢子通路专题图 ID（如 central_carbon / fatty_acid_ketone / glycerolipid / "
+                           "amino_acid / urea_creatine / nucleotide / redox_one_carbon / all），可重复")
+    maps.add_argument("--no-submaps", action="store_true", default=False,
+                      help="本次重画不生成分专题子通路图")
+    maps.add_argument("--no-abstract", action="store_true", default=False,
+                      help="本次重画不同步生成 Graphical Abstract")
     maps.add_argument("--format", action="append", default=None, help="图件格式，可重复，默认同 experiment.yaml（pdf、png）")
     maps.add_argument("--output", type=Path, default=None,
                       help="输出目录，默认 <结果根>/<实验>/_redraws/<运行 ID>/pathway_map_<时间>/")
+
+    abstract = modules.add_parser(
+        "abstract",
+        help="生成小规模 Graphical Abstract 概念摘要图（≤12 核心枢纽，支持地铁 metro_atlas / 手绘 / 像素 / nature_editorial）",
+    )
+    abstract.add_argument("--spec", type=Path, default=None,
+                          help="跨项目通用的自定义 YAML 摘要规格文件（提供时不依赖实验整合结果包）")
+    abstract.add_argument("--experiment", default=None, help="从已有整合结果包自动聚合时的实验 ID")
+    abstract.add_argument("--source", default=None, help="整合结果包的运行 ID，默认最近一次含反应档案评估表的运行")
+    abstract.add_argument("--layout", default="", help="可选布局文件路径（仅配合 --experiment）")
+    abstract.add_argument("--tissue", action="append", default=None, help="只生成这些组织，可重复")
+    abstract.add_argument("--contrast", action="append", default=None, help="只生成这些比较，可重复")
+    abstract.add_argument("--style", choices=["metro_atlas", "editorial_ink", "pixel_abstract", "nature_editorial"],
+                          default="metro_atlas",
+                          help="概念摘要渲染风格：metro_atlas（代谢地铁，默认）/ editorial_ink（手绘）/ pixel_abstract（像素）/ nature_editorial")
+    abstract.add_argument("--color-mode", choices=["semantic", "pathway"], default="semantic",
+                          help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝方向色）/ pathway（低饱和莫兰迪通路分区色）")
+    abstract.add_argument("--format", action="append", default=None, help="输出格式（pdf/png/svg），可重复，默认 pdf,png")
+    abstract.add_argument("--output", type=Path, default=None, help="输出目录或不含扩展名的输出路径前缀")
 
     pipeline = modules.add_parser("pipeline", help="标准流程：validate → run → integrate → 课题脚本"
                                                     "（project.yaml 的 pipeline 一节），各步之间传递确切的运行 ID")
@@ -442,8 +478,26 @@ def _run_map(args: argparse.Namespace) -> int:
             bundle = found[-1]
         configured = dict((experiment.config.integration.parameters.get("reaction_dossier") or {})
                           .get("pathway_map") or {})
-        overrides = {"layout": args.layout, "tissues": args.tissue, "contrasts": args.contrast, "formats": args.format}
+        overrides = {
+            "layout": args.layout,
+            "tissues": args.tissue,
+            "contrasts": args.contrast,
+            "formats": args.format,
+            "mode": args.mode,
+            "style": args.style,
+            "color_mode": args.color_mode,
+            "strip_mode": args.strip_mode,
+            "regions": args.region,
+        }
         configured.update({k: v for k, v in overrides.items() if v})
+        if args.no_submaps:
+            configured["submaps"] = {"enabled": False}
+        elif args.submap:
+            cur_sub = dict(configured.get("submaps") or {}) if isinstance(configured.get("submaps"), dict) else {}
+            cur_sub.update({"enabled": True, "panels": _split(args.submap), "min_signal": "all"})
+            configured["submaps"] = cur_sub
+        if args.no_abstract:
+            configured["abstract"] = {"enabled": False}
         configured["enabled"] = True
         out_dir, notes = redraw(bundle, args.output, configured, experiment.root)
     except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
@@ -452,6 +506,64 @@ def _run_map(args: argparse.Namespace) -> int:
     for note in notes:
         print(f"[提示] {note}")
     print(f"输出目录：{out_dir}")
+    return 0
+
+
+def _run_abstract(args: argparse.Namespace) -> int:
+    from omicsweave.visualization.graphical_abstract import load_abstract_spec, render_graphical_abstract
+
+    fmts = list(args.format) if args.format else ["pdf", "png"]
+    if args.spec is not None:
+        try:
+            spec = load_abstract_spec(args.spec)
+            if args.output is None:
+                stem = args.spec.with_name(f"{args.spec.stem}_{args.style}")
+            elif args.output.is_dir() or not args.output.suffix:
+                stem = args.output / f"{args.spec.stem}_{args.style}"
+            else:
+                stem = args.output.with_suffix("")
+            written = render_graphical_abstract(
+                spec, stem, style=args.style, color_mode=args.color_mode, formats=fmts,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            return 1
+        for path in written:
+            print(f"已写出：{path}")
+        return 0
+
+    if not args.experiment:
+        print("错误：请提供 --spec <YAML> 或 --experiment <实验ID>", file=sys.stderr)
+        return 1
+
+    from omicsweave.contract.dataset import ContractError
+    from omicsweave.contract.export import find_run
+    from omicsweave.core.config import ConfigError, load_experiment, load_project
+    from omicsweave.integration.mappings.network_layout import LayoutError
+    from omicsweave.integration.pathway_map import render_abstracts
+
+    try:
+        project = load_project(project_dir())
+        experiment = load_experiment(project, args.experiment)
+        base = project.path("results") / args.experiment
+        if args.source:
+            bundle = find_run(project.path("results"), args.experiment, args.source)
+        else:
+            found = sorted(p.parents[3] for p in base.glob(
+                "run_*/integration/reaction_dossier/tables/reaction_assessment.parquet"))
+            if not found:
+                raise ContractError(f"{base} 下没有含反应档案评估表的整合结果包")
+            bundle = found[-1]
+        out_dir, written = render_abstracts(
+            bundle, args.output,
+            tissues=args.tissue, contrasts=args.contrast,
+            style=args.style, color_mode=args.color_mode, formats=fmts,
+            layout_path=args.layout, root=experiment.root,
+        )
+    except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    print(f"Graphical Abstract（{args.style}）共写出 {len(written)} 个文件，目录：{out_dir}")
     return 0
 
 
@@ -676,7 +788,7 @@ def _run_clean(args: argparse.Namespace) -> int:
 _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migrate, "run": _run_run,
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
              "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline, "map": _run_map,
-             "latest": _run_latest, "clean": _run_clean}
+             "abstract": _run_abstract, "latest": _run_latest, "clean": _run_clean}
 
 
 def project_pipeline_main(

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>grid_dots</title>
+  <desc>平铺点阵，适用于布局参考或低密度背景</desc>
+  <path d="M 8 8 L 10 8 L 10 10 L 8 10 Z M 8 24 L 10 24 L 10 26 L 8 26 Z M 24 8 L 26 8 L 26 10 L 24 10 Z M 24 24 L 26 24 L 26 26 L 24 26 Z" fill="#DAD2BE"/>
+</svg>

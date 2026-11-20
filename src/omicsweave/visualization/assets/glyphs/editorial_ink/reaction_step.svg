@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>reaction_step</title>
+  <desc>单步反应过程节点</desc>
+  <path d="M 2 16 Q 6 15 11 16 M 21 16 L 29 16 M 26 13 L 29 16 L 26 19" fill="none" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 11 11 L 21 11 L 21 21 L 11 22 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 13 19 L 13 14 L 18 13" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

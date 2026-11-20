@@ -208,19 +208,40 @@ class Delivery:
         return rows
 
     def copy_maps(self) -> list[dict]:
-        """把通路总图（图 E）复制到交付目录 ``pathway_map/<组织>/``：每页的 PDF（没有时取 PNG）与同名视图表。"""
+        """把通路总图（图 E）、分专题子通路图与概念摘要图复制到交付目录 ``pathway_map/<组织>/``。"""
         paths = {PurePosixPath(item["path"]) for item in self.artifacts
                  if item["stage"] == "integrate" and not item.get("missing")}
         rows = []
+        prefix = ("integration", "reaction_dossier", "figures", "pathway_map")
         for path in sorted(paths):
-            if path.parts[-6:-2] != ("integration", "reaction_dossier", "figures", "pathway_map") \
-                    or not path.name.startswith("map_"):
+            # 1) 全景总图 map_<比较> 与概念摘要 abstract_<比较>：.../pathway_map/<组织>/<文件>
+            if len(path.parts) >= 6 and path.parts[-6:-2] == prefix:
+                if path.name.startswith("map_"):
+                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tsv"):
+                        continue
+                    tissue = path.parts[-2]
+                    row = {"组织": tissue, "比较": path.stem.removeprefix("map_"),
+                           "内容": "视图表" if path.suffix == ".tsv" else "图件", "文件": path.name,
+                           "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
+                elif path.name.startswith("abstract_"):
+                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png"):
+                        continue
+                    tissue = path.parts[-2]
+                    row = {"组织": tissue, "比较": path.stem.removeprefix("abstract_"),
+                           "内容": "概念摘要", "文件": path.name,
+                           "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
+                else:
+                    continue
+            # 2) 正文分专题子通路图：.../pathway_map/<组织>/submaps/<比较>_<子图ID>.{pdf,png}
+            elif len(path.parts) >= 7 and path.parts[-7:-3] == prefix and path.parts[-2] == "submaps":
+                if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png"):
+                    continue
+                tissue = path.parts[-3]
+                row = {"组织": tissue, "比较": path.stem,
+                       "内容": "子通路图", "文件": f"submaps/{path.name}",
+                       "target": PurePosixPath(MAPS_DIR, tissue, "submaps", path.name)}
+            else:
                 continue
-            if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tsv"):
-                continue
-            row = {"组织": path.parts[-2], "比较": path.stem.removeprefix("map_"),
-                   "内容": "视图表" if path.suffix == ".tsv" else "图件", "文件": path.name,
-                   "target": PurePosixPath(MAPS_DIR, path.parts[-2], path.name)}
             destination = self.directory / row["target"]
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(self.directory / path, destination)

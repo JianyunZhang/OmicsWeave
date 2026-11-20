@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>node_missing</title>
+  <desc>斜线节点，表示未测或缺测，具体状态由图例注明</desc>
+  <path d="M 10 6 L 22 6 L 22 10 L 26 10 L 26 22 L 22 22 L 22 26 L 10 26 L 10 22 L 6 22 L 6 10 L 10 10 Z" fill="#242E37"/>
+  <path d="M 12 8 L 20 8 L 20 12 L 24 12 L 24 20 L 20 20 L 20 24 L 12 24 L 12 20 L 8 20 L 8 12 L 12 12 Z" fill="#F5ECD6"/>
+  <path d="M 4 26 L 8 26 L 8 28 L 4 28 Z M 6 24 L 10 24 L 10 26 L 6 26 Z M 8 22 L 12 22 L 12 24 L 8 24 Z M 10 20 L 14 20 L 14 22 L 10 22 Z M 12 18 L 16 18 L 16 20 L 12 20 Z M 14 16 L 18 16 L 18 18 L 14 18 Z M 16 14 L 20 14 L 20 16 L 16 16 Z M 18 12 L 22 12 L 22 14 L 18 14 Z M 20 10 L 24 10 L 24 12 L 20 12 Z M 22 8 L 26 8 L 26 10 L 22 10 Z M 24 6 L 28 6 L 28 8 L 24 8 Z" fill="#242E37"/>
+</svg>

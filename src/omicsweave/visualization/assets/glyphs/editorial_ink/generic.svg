@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>generic</title>
+  <desc>通用概念枢纽</desc>
+  <path d="M 16 4 C 23 3 28 10 28 16 C 28 23 22 29 16 28 C 9 28 3 23 4 16 C 4 9 10 3 16 4 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 12 16 L 16 12 L 20 16 L 16 20 Z" fill="#A27653"/>
+  <path d="M 8 12 Q 10 8 14 7" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

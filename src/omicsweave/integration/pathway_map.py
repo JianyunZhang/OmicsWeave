@@ -20,21 +20,55 @@ from typing import Any
 import pandas as pd
 
 from omicsweave.contract.export import write_excel_tsv
+from omicsweave.visualization.graphical_abstract import GA_STYLES
+from omicsweave.visualization.palettes import VALID_COLOR_MODES
+from omicsweave.visualization.theme import list_presets
 
 from .dossier import calibration as cal
-from .dossier.map_view import coverage_table, map_view, region_summary
+from .dossier.map_view import (
+    coverage_table,
+    extra_pathway_fusion,
+    map_view,
+    region_summary,
+    signed_module_summary,
+)
 from .mappings.network_layout import Layout, LayoutError, default_layout, load_layout, validate_layout
+from .plotting.pathway_submaps import ALL_SUBMAP_IDS, VALID_MIN_SIGNALS, select_submaps_for_view
 
-DEFAULTS: dict[str, Any] = {"enabled": True, "layout": "", "tissues": [], "contrasts": [],
-                            "highlight": {"min_claim": "L2", "top_rank": 10}, "formats": ["pdf", "png"]}
+DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "layout": "",
+    "tissues": [],
+    "contrasts": [],
+    "highlight": {"min_claim": "L2", "top_rank": 10},
+    "formats": ["pdf", "png"],
+    "mode": "atlas",
+    "style": "metro_atlas",
+    "color_mode": "semantic",
+    "strip_mode": "omics",
+    "regions": [],
+    "submaps": {
+        "enabled": True,
+        "panels": [],
+        "min_signal": "assessed",
+        "include_optional_active": True,
+    },
+    "abstract": {
+        "enabled": True,
+        "style": "",
+        "color_mode": "",
+    },
+}
 MAP_TABLE = "pathway_map.parquet"
 COVERAGE_TABLE = "pathway_map_coverage.parquet"
 FIGURE_DIR = ("figures", "pathway_map")
+SUBMAP_SUBDIR = "submaps"
 CLAIM_LEVELS = ("L1", "L2", "L3")
+MAP_MODES = ("atlas", "publication")
 
 
 def settings(raw: dict[str, Any] | None) -> dict[str, Any]:
-    """参数组 ``pathway_map``：未知键报错，``highlight`` 按项合并。"""
+    """参数组 ``pathway_map``：未知键报错，``highlight`` / ``submaps`` / ``abstract`` 按项合并。"""
     raw = dict(raw or {})
     unknown = sorted(set(raw) - set(DEFAULTS))
     if unknown:
@@ -44,7 +78,42 @@ def settings(raw: dict[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"pathway_map.highlight 只接受 {'、'.join(DEFAULTS['highlight'])}")
     if highlight["min_claim"] not in CLAIM_LEVELS:
         raise ValueError(f"pathway_map.highlight.min_claim 应为 {'、'.join(CLAIM_LEVELS)} 之一")
-    return {**DEFAULTS, **raw, "highlight": highlight}
+
+    raw_sub = raw.get("submaps")
+    if isinstance(raw_sub, bool):
+        submaps = {**DEFAULTS["submaps"], "enabled": raw_sub}
+    else:
+        submaps = {**DEFAULTS["submaps"], **(raw_sub or {})}
+    if set(submaps) - set(DEFAULTS["submaps"]):
+        raise ValueError(f"pathway_map.submaps 只接受 {'、'.join(DEFAULTS['submaps'])}")
+    if submaps["min_signal"] not in VALID_MIN_SIGNALS:
+        raise ValueError(f"pathway_map.submaps.min_signal 应为 {'、'.join(VALID_MIN_SIGNALS)} 之一")
+    for pid in submaps["panels"] or ():
+        if str(pid).strip().lower() != "all" and str(pid).strip() not in ALL_SUBMAP_IDS:
+            raise ValueError(f"pathway_map.submaps.panels 包含未知子图 {pid!r}（可用：{'、'.join(ALL_SUBMAP_IDS)} 或 all）")
+
+    raw_abs = raw.get("abstract")
+    if isinstance(raw_abs, bool):
+        abstract = {**DEFAULTS["abstract"], "enabled": raw_abs}
+    else:
+        abstract = {**DEFAULTS["abstract"], **(raw_abs or {})}
+    if set(abstract) - set(DEFAULTS["abstract"]):
+        raise ValueError(f"pathway_map.abstract 只接受 {'、'.join(DEFAULTS['abstract'])}")
+    if abstract["style"] and abstract["style"] not in GA_STYLES:
+        raise ValueError(f"pathway_map.abstract.style 应为 {'、'.join(GA_STYLES)} 之一，实际为 {abstract['style']!r}")
+    if abstract["color_mode"] and abstract["color_mode"] not in VALID_COLOR_MODES:
+        raise ValueError(f"pathway_map.abstract.color_mode 应为 {'、'.join(VALID_COLOR_MODES)} 之一")
+
+    merged = {**DEFAULTS, **raw, "highlight": highlight, "submaps": submaps, "abstract": abstract}
+    if merged["mode"] not in MAP_MODES:
+        raise ValueError(f"pathway_map.mode 应为 {'、'.join(MAP_MODES)} 之一，实际为 {merged['mode']!r}")
+    if merged["style"] not in list_presets():
+        raise ValueError(f"pathway_map.style 应为 {'、'.join(list_presets())} 之一，实际为 {merged['style']!r}")
+    if merged["color_mode"] not in VALID_COLOR_MODES:
+        raise ValueError(f"pathway_map.color_mode 应为 {'、'.join(VALID_COLOR_MODES)} 之一，实际为 {merged['color_mode']!r}")
+    if merged["strip_mode"] not in ("omics", "axes"):
+        raise ValueError(f"pathway_map.strip_mode 应为 omics、axes 之一，实际为 {merged['strip_mode']!r}")
+    return merged
 
 
 def resolve_layout(value: str, root: Path | None) -> Layout:
@@ -58,19 +127,35 @@ def resolve_layout(value: str, root: Path | None) -> Layout:
 
 def _sample_sizes(rows: pd.DataFrame) -> str:
     parts = []
-    names = {"transcriptomics": "RNA", "proteomics": "蛋白", "metabolomics": "代谢物"}
+    names = {"transcriptomics": "RNA", "proteomics": "Protein", "metabolomics": "Metabolite"}
     for layer, label in names.items():
         part = rows[(rows["layer"] == layer) & rows["n_numerator"].notna()]
         if not part.empty:
             parts.append(f"{label} {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
     flux = rows[(rows["layer"] == "mfa") & rows["n_numerator"].notna() & (rows["tracer"] != "pooled")]
     for tracer, part in flux.groupby("tracer"):
-        parts.append(f"MFA {tracer} {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
-    return "；".join(parts) or "没有样本数信息"
+        parts.append(f"MFA ({tracer}) {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
+    return "; ".join(parts) or "N/A"
+
+
+def _english_run_label(name: str) -> str:
+    text = str(name).strip()
+    if text == "整合":
+        return "Integration"
+    if text.startswith("来源 "):
+        return "Source " + text[len("来源 "):]
+    if text.startswith("来源"):
+        return "Source " + text[len("来源"):].strip()
+    return text
 
 
 def _fusion(dossier_dir: Path) -> pd.DataFrame | None:
     path = dossier_dir.parent / "pathway_convergence" / "tables" / "pathway_fusion.parquet"
+    return pd.read_parquet(path) if path.is_file() else None
+
+
+def _pathway_tests(dossier_dir: Path) -> pd.DataFrame | None:
+    path = dossier_dir / "tables" / "pathway_tests.parquet"
     return pd.read_parquet(path) if path.is_file() else None
 
 
@@ -98,6 +183,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
         raise LayoutError(f"布局文件 {layout.path} 未通过校验：" + "；".join(problems[:8])
                           + (f" 等 {len(problems)} 处" if len(problems) > 8 else ""))
     fusion = _fusion(dossier_dir)
+    pathway_tests = _pathway_tests(dossier_dir)
     coverage = coverage_table(layout, members, assessed["flux_id"].unique())
     pairs = assessed[["tissue", "contrast_id"]].drop_duplicates().sort_values(["tissue", "contrast_id"])
     if conf["tissues"]:
@@ -108,7 +194,12 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
     unplaced = coverage[coverage["placement"] == "unplaced"]
     covered = coverage[coverage["placement"] == "covered_by_steps"]
     views = []
-    run_text = "；".join(f"{name} {run}" for name, run in runs.items())
+    n_submaps_rendered = 0
+    skipped_submaps: list[str] = []
+    n_abstracts_rendered = 0
+    sub_conf = conf["submaps"]
+    abs_conf = conf["abstract"]
+    run_text = "; ".join(f"{_english_run_label(name)} {run}" for name, run in runs.items())
     for row in pairs.itertuples():
         view = map_view(layout, members, axes, assessed, row.tissue, row.contrast_id, source, coverage,
                         top_rank=int(conf["highlight"]["top_rank"]), min_claim=str(conf["highlight"]["min_claim"]))
@@ -117,26 +208,96 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                        & (members["source"] == source)]
         claims = view.loc[view["flux_claim"].isin(CLAIM_LEVELS), "flux_claim"].value_counts()
         caption = [
-            f"来源：{run_text}；样本数（分子组 vs 分母组）：{_sample_sizes(here)}",
+            f"Run: {run_text}  |  Sample sizes (num vs den): {_sample_sizes(here)}",
             (cal.caption(calibration, row.tissue, row.contrast_id) or "Calibration: not available")
-            + "。图上 L1 / L2 / L3：" + "、".join(f"{k} {claims.get(k, 0)}" for k in CLAIM_LEVELS)
-            + "。L1 是待检验的预测，引用前先对照诱饵期望。",
-            f"布局 {layout.path.name}（sha256 {layout.sha256[:12]}）；评估集中未上图的 ID {len(unplaced)} 个"
-            + (f"（{'、'.join(unplaced['flux_id'][:6])}{' 等' if len(unplaced) > 6 else ''}）" if len(unplaced) else "")
-            + f"；成员全部被画出的反应覆盖、不另画方框的聚合节点 {len(covered)} 个。",
+            + f"  |  On-map claims: Confirmed={claims.get('L3', 0)}, Flux={claims.get('L2', 0)}, Enz-pred={claims.get('L1', 0)}"
+            + "  (Enz-pred = enzyme-only; verify against decoy baseline before citing).",
+            f"Layout: {layout.path.name} (sha256 {layout.sha256[:12]})  |  Unplaced assessed IDs: {len(unplaced)}"
+            + (f" ({', '.join(unplaced['flux_id'][:6])}{', ...' if len(unplaced) > 6 else ''})" if len(unplaced) else "")
+            + f"  |  Step-covered aggregates folded onto edges: {len(covered)}.",
         ]
         stem = out_dir.joinpath(*FIGURE_DIR, row.tissue, f"map_{row.contrast_id}")
         stem.parent.mkdir(parents=True, exist_ok=True)
         write_excel_tsv(view, stem.with_suffix(".tsv"))
         regions = region_summary(view, layout, fusion, row.tissue, row.contrast_id)
-        plot_pathway_map(view, layout, regions, f"图 E　{row.tissue} · {row.contrast_id}　分组织代谢通路总图",
-                         caption, stem, formats)
+        extra_fusion = extra_pathway_fusion(fusion, layout, row.tissue, row.contrast_id)
+        signed_mods = signed_module_summary(pathway_tests, row.tissue, row.contrast_id)
+        tissue_title = str(row.tissue).replace("_", " ").upper() if len(str(row.tissue)) <= 3 else str(row.tissue).replace("_", " ").title()
+        plot_pathway_map(view, layout, regions,
+                         f"Figure E  |  {tissue_title} · {row.contrast_id}  —  Tissue Multi-Omics Pathway Atlas",
+                         caption, stem, formats, extra_fusion=extra_fusion, signed_modules=signed_mods,
+                         top_rank=int(conf["highlight"]["top_rank"]),
+                         mode=str(conf["mode"]),
+                         style=str(conf["style"]),
+                         color_mode=str(conf["color_mode"]),
+                         strip_mode=str(conf["strip_mode"]),
+                         focus_regions=list(conf["regions"]) or None)
+
+        # 默认生成正文分专题代谢子通路图（沿用与图 E 相同的风格与色彩语义，无数据时自动跳过）
+        if sub_conf["enabled"]:
+            selected_subs, skipped = select_submaps_for_view(
+                view, layout,
+                panels=list(sub_conf["panels"] or ()),
+                min_signal=str(sub_conf["min_signal"]),
+                include_optional_active=bool(sub_conf["include_optional_active"]),
+            )
+            sub_dir = stem.parent / SUBMAP_SUBDIR
+            if selected_subs:
+                sub_dir.mkdir(parents=True, exist_ok=True)
+            for sub in selected_subs:
+                sub_stem = sub_dir / f"{row.contrast_id}_{sub.id}"
+                sub_title = f"{tissue_title} · {row.contrast_id}  —  {sub.title}"
+                sub_note = f"Sub-pathway panel ({sub.subtitle}) · Cross-pathway links attach at boundary stations; full network in Figure E Atlas."
+                plot_pathway_map(
+                    view, layout, regions,
+                    sub_title, caption[:2], sub_stem, formats,
+                    top_rank=int(conf["highlight"]["top_rank"]),
+                    mode="publication",
+                    style=str(conf["style"]),
+                    color_mode=str(conf["color_mode"]),
+                    strip_mode=str(conf["strip_mode"]),
+                    focus_regions=list(sub.regions),
+                    include_reactions=list(sub.include_reactions) or None,
+                    exclude_reactions=list(sub.exclude_reactions) or None,
+                    panel_note=sub_note,
+                )
+                n_submaps_rendered += 1
+            for sid, reason in skipped:
+                if reason != "optional_inactive":
+                    skipped_submaps.append(f"{row.tissue}/{row.contrast_id}:{sid}({reason})")
+
+        # 默认同步生成小规模 Graphical Abstract（继承图 E 风格；slide_dark 回退到 metro_atlas）
+        if abs_conf["enabled"]:
+            from omicsweave.visualization.graphical_abstract import (
+                build_abstract_from_pathway_view,
+                render_graphical_abstract,
+            )
+
+            ga_style = str(abs_conf["style"]) or (str(conf["style"]) if str(conf["style"]) in GA_STYLES else "metro_atlas")
+            ga_color_mode = str(abs_conf["color_mode"]) or str(conf["color_mode"])
+            ga_spec = build_abstract_from_pathway_view(
+                view, regions,
+                tissue=str(row.tissue),
+                contrast=str(row.contrast_id),
+                provenance=f"Run: {run_text}  |  Style: {ga_style} ({ga_color_mode})  |  Auto-aggregated from Figure E view (<=10 hubs)",
+            )
+            ga_stem = stem.parent / f"abstract_{row.contrast_id}"
+            render_graphical_abstract(ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode, formats=formats)
+            n_abstracts_rendered += 1
+
     (out_dir / "tables").mkdir(parents=True, exist_ok=True)
     table = pd.concat(views, ignore_index=True) if views else pd.DataFrame()
     table.to_parquet(out_dir / "tables" / MAP_TABLE, index=False)
     coverage.to_parquet(out_dir / "tables" / COVERAGE_TABLE, index=False)
-    notes = [f"通路总图（图 E）：{len(views)} 页，在 {'/'.join(FIGURE_DIR)}/；布局 {layout.path.name}"
+    notes = [f"通路总图（图 E）：{len(views)} 页，在 {'/'.join(FIGURE_DIR)}/；风格 {conf['style']}（{conf['color_mode']}）；布局 {layout.path.name}"
              f"（sha256 {layout.sha256[:12]}）"]
+    if n_submaps_rendered:
+        notes.append(f"代谢子通路图：{n_submaps_rendered} 张，在 {'/'.join(FIGURE_DIR)}/<组织>/{SUBMAP_SUBDIR}/")
+    if skipped_submaps:
+        preview = "、".join(skipped_submaps[:6]) + (f" 等 {len(skipped_submaps)} 项" if len(skipped_submaps) > 6 else "")
+        notes.append(f"代谢子通路图（因无评估数据跳过）：{preview}")
+    if n_abstracts_rendered:
+        notes.append(f"概念摘要图（Graphical Abstract）：{n_abstracts_rendered} 张，在 {'/'.join(FIGURE_DIR)}/<组织>/abstract_*.pdf")
     if len(unplaced):
         notes.append(f"通路总图：评估集中 {len(unplaced)} 个 ID 在布局中没有位置：{'、'.join(unplaced['flux_id'])}")
     return notes
@@ -153,5 +314,61 @@ def redraw(bundle: Path, out_dir: Path | None, raw_settings: dict[str, Any] | No
     source = with_flux["source"].mode().iloc[0] if not with_flux.empty else sources[0]
     if out_dir is None:
         out_dir = bundle.parent / "_redraws" / bundle.name / f"pathway_map_{datetime.now():%Y%m%d_%H%M%S}"
-    notes = render_maps(dossier_dir, out_dir, raw_settings, source, {"整合": bundle.name}, members=members, root=root)
+    notes = render_maps(dossier_dir, out_dir, raw_settings, source, {"Integration": bundle.name}, members=members, root=root)
     return out_dir, notes
+
+
+def render_abstracts(
+    bundle: Path,
+    out_dir: Path | None,
+    *,
+    tissues: list[str] | None = None,
+    contrasts: list[str] | None = None,
+    style: str = "metro_atlas",
+    color_mode: str = "semantic",
+    formats: list[str] | None = None,
+    layout_path: str = "",
+    root: Path | None = None,
+) -> tuple[Path, list[Path]]:
+    """从已有整合结果包自动聚合生成小规模 Graphical Abstract（≤ 10 核心枢纽），不改动原结果包。"""
+    from omicsweave.visualization.graphical_abstract import (
+        build_abstract_from_pathway_view,
+        render_graphical_abstract,
+    )
+
+    dossier_dir = bundle / "integration" / "reaction_dossier"
+    tables = dossier_dir / "tables"
+    if not (tables / "reaction_assessment.parquet").is_file():
+        raise FileNotFoundError(f"{bundle} 没有反应档案的评估表（integration/reaction_dossier/tables/reaction_assessment.parquet）")
+    members = pd.read_parquet(tables / "dossier_members.parquet")
+    axes = pd.read_parquet(tables / "axis_assessment.parquet")
+    assessed = pd.read_parquet(tables / "reaction_assessment.parquet")
+    fusion = _fusion(dossier_dir)
+    layout = resolve_layout(layout_path, root)
+    coverage = coverage_table(layout, members, assessed["flux_id"].unique())
+
+    sources = list(dict.fromkeys(members["source"].dropna()))
+    with_flux = members[(members["layer"] == "mfa") & ~members["cell_state"].isin(["not_measured", "not_infused"])]
+    source = with_flux["source"].mode().iloc[0] if not with_flux.empty else sources[0]
+
+    pairs = assessed[["tissue", "contrast_id"]].drop_duplicates().sort_values(["tissue", "contrast_id"])
+    if tissues:
+        pairs = pairs[pairs["tissue"].isin([str(t) for t in tissues])]
+    if contrasts:
+        pairs = pairs[pairs["contrast_id"].isin([str(c) for c in contrasts])]
+
+    target_dir = out_dir or (bundle.parent / "_redraws" / bundle.name / f"graphical_abstract_{style}_{datetime.now():%Y%m%d_%H%M%S}")
+    fmts = list(formats or ["pdf", "png"])
+    written: list[Path] = []
+    for row in pairs.itertuples():
+        view = map_view(layout, members, axes, assessed, row.tissue, row.contrast_id, source, coverage)
+        reg = region_summary(view, layout, fusion, row.tissue, row.contrast_id)
+        spec = build_abstract_from_pathway_view(
+            view, reg,
+            tissue=str(row.tissue),
+            contrast=str(row.contrast_id),
+            provenance=f"Source: {bundle.name}  |  Style: {style}  |  Auto-aggregated from Figure E view (<=10 hubs)",
+        )
+        stem = target_dir / str(row.tissue) / f"graphical_abstract_{row.contrast_id}_{style}"
+        written.extend(render_graphical_abstract(spec, stem, style=style, color_mode=color_mode, formats=fmts))
+    return target_dir, written

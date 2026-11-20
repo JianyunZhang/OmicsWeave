@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>redox</title>
+  <desc>氧化还原对</desc>
+  <path d="M 5 12 C 10 4 21 5 27 12 M 21 12 L 27 12 L 27 6 M 27 20 C 22 28 10 27 5 20 M 11 20 L 5 20 L 5 26" fill="none" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 11 16 Q 17 14 22 17" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

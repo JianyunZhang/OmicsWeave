@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>lipid</title>
+  <desc>脂肪酸或脂质主题</desc>
+  <path d="M 16 3 C 18 8 27 15 27 21 C 28 26 22 30 16 29 C 10 29 4 26 5 20 C 6 15 10 10 16 3 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 9 20 Q 9 25 14 26 M 11 14 L 13 12" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

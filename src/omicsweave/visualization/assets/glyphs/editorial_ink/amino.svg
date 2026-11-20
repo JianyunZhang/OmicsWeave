@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>amino</title>
+  <desc>氨基酸主题</desc>
+  <path d="M 16 4 L 28 16 L 16 28 L 4 17 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 11 21 L 11 11 L 21 21 L 21 11" fill="none" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 6 16 L 12 10" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

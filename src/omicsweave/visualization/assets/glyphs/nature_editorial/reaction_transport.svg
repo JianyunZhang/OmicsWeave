@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>reaction_transport</title>
+  <desc>跨区室运输，箭头方向须由具体反应决定</desc>
+  <path d="M 13 5 L 13 27 M 19 5 L 19 27" fill="none" stroke="#57706D" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 3 16 L 29 16 M 24 11 L 29 16 L 24 21" fill="none" stroke="#273445" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

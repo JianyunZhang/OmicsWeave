@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>reaction_step</title>
+  <desc>单步反应过程节点</desc>
+  <path d="M 2 16 L 30 16 L 30 18 L 2 18 Z M 24 12 L 26 12 L 26 14 L 24 14 Z M 26 14 L 28 14 L 28 16 L 26 16 Z M 26 18 L 28 18 L 28 20 L 26 20 Z M 24 20 L 26 20 L 26 22 L 24 22 Z M 10 10 L 22 10 L 22 24 L 10 24 Z" fill="#242E37"/>
+  <path d="M 12 12 L 20 12 L 20 22 L 12 22 Z" fill="#F5ECD6"/>
+</svg>

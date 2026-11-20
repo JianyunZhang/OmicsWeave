@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>blood</title>
+  <desc>循环或血浆供给</desc>
+  <path d="M 3 17 C 3 10 9 6 17 7 C 24 7 30 11 28 17 C 26 24 22 26 14 25 C 7 25 2 22 3 17 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 8 17 C 11 11 20 12 24 15 C 21 21 12 22 8 17 Z" fill="none" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 9 9 Q 16 6 23 9" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

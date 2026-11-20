@@ -20,6 +20,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 
+from omicsweave.visualization.palettes import NATURE_EDITORIAL
+
 from . import _config as cfg
 
 
@@ -240,15 +242,15 @@ def plot_volcano(df: pd.DataFrame, comp_name: str, tissue: str, out_dir: Path,
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    ax.scatter(non_sig["log2FC"], non_sig["y"], c="#BBBBBB", s=20, alpha=0.5, label="NS")
-    ax.scatter(sig_up["log2FC"], sig_up["y"], c="#E24A33", s=30, alpha=0.7,
+    ax.scatter(non_sig["log2FC"], non_sig["y"], c=NATURE_EDITORIAL.faint, s=20, alpha=0.55, label="NS")
+    ax.scatter(sig_up["log2FC"], sig_up["y"], c=NATURE_EDITORIAL.up, s=30, alpha=0.78,
                label=f"Up ({len(sig_up) + len(edge_up)})")
-    ax.scatter(sig_dn["log2FC"], sig_dn["y"], c="#348ABD", s=30, alpha=0.7,
+    ax.scatter(sig_dn["log2FC"], sig_dn["y"], c=NATURE_EDITORIAL.down, s=30, alpha=0.78,
                label=f"Down ({len(sig_dn) + len(edge_dn)})")
 
     n_edge = len(edge_df)
     if n_edge:
-        for frame, color in ((edge_ns, "#BBBBBB"), (edge_up, "#E24A33"), (edge_dn, "#348ABD")):
+        for frame, color in ((edge_ns, NATURE_EDITORIAL.faint), (edge_up, NATURE_EDITORIAL.up), (edge_dn, NATURE_EDITORIAL.down)):
             if len(frame):
                 marker = np.where(frame["log2FC"] > 0, ">", "<")
                 for shape in (">", "<"):

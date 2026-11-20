@@ -27,7 +27,7 @@ import pandas as pd
 
 from omicsweave.core.idmap.reaction_pathway_mapping import REACTION_REGISTRY
 
-from ..mappings.network_annotation import NetworkReaction, network_reactions
+from ..mappings.network_annotation import NetworkReaction, pathway_reactions
 from ..mappings.network_layout import Layout, unplaced_ids
 from ..mappings.reaction_aliases import reaction_aliases
 from .panels import species_labels
@@ -98,11 +98,69 @@ def _executors(rows: pd.DataFrame) -> pd.DataFrame:
     return chosen[chosen["member_relation"].fillna("") != "shared_subunit"]
 
 
+def _summarize_layer_state(rows: pd.DataFrame, value_fn) -> tuple[float, str]:
+    """将单层组学成员（如某反应的直接酶蛋白或 mRNA）归纳为精确的 ``(value, directional_state)``。"""
+    if rows.empty or rows["cell_state"].eq("no_knowledge").all():
+        return np.nan, "no_knowledge"
+    valid = rows[rows["cell_state"] != "no_knowledge"]
+    measured_states = ("changed", "nominal", "no_evidence", "equivalent")
+    quant = valid[valid["cell_state"].isin(measured_states)]
+    if quant.empty:
+        states = list(dict.fromkeys(valid["cell_state"]))
+        for st in ("qc_blocked", "insufficient_n", "not_identifiable", "not_detected", "not_measured"):
+            if st in states:
+                return np.nan, st
+        return np.nan, str(states[0])
+
+    val = float(value_fn(quant))
+    fc = pd.to_numeric(quant["log2fc"], errors="coerce")
+    sig = quant[quant["cell_state"] == "changed"]
+    if not sig.empty:
+        s_fc = pd.to_numeric(sig["log2fc"], errors="coerce").dropna()
+        pos, neg = bool((s_fc > 0).any()), bool((s_fc < 0).any())
+        if pos and neg:
+            # 仅当没有占绝对主导（≥70% 丰度）的同工酶时判为 mixed
+            share = pd.to_numeric(sig.get("abundance_share"), errors="coerce") if "abundance_share" in sig else None
+            if share is None or not (share.fillna(0) >= 0.7).any():
+                return val, "mixed"
+        if pd.isna(val) or val == 0:
+            val = float(s_fc.median()) if not s_fc.empty else 0.0
+        return val, "changed"
+
+    nom = quant[quant["cell_state"] == "nominal"]
+    if not nom.empty:
+        n_fc = pd.to_numeric(nom["log2fc"], errors="coerce").dropna()
+        if bool((n_fc > 0).any()) and bool((n_fc < 0).any()):
+            return val, "mixed"
+        if pd.isna(val) or val == 0:
+            val = float(n_fc.median()) if not n_fc.empty else 0.0
+        return val, "suggestive"
+
+    if pd.isna(val) and not fc.dropna().empty:
+        val = float(fc.dropna().median())
+    return val, "unchanged"
+
+
+def _reaction_layer_cells(rows: pd.DataFrame) -> dict[str, Any]:
+    """为单条网络反应汇总 4 层组学展示所需的 Protein / mRNA / Metabolite 读数与状态。"""
+    p_val, p_state = _summarize_layer_state(_executors(rows[rows["layer"] == "proteomics"]), _enzyme_value)
+    r_val, r_state = _summarize_layer_state(_executors(rows[rows["layer"] == "transcriptomics"]), _enzyme_value)
+    met_rows = rows[rows["layer"].isin(("metabolomics", "derived")) & rows["role"].isin(("substrate", "product"))]
+    measured = met_rows[met_rows["feature_id"].notna() & met_rows["feature_id"].astype(str).ne("")]
+    met_sub = measured.drop_duplicates("feature_id") if not measured.empty else met_rows.drop_duplicates("member_id")
+    m_val, m_state = _summarize_layer_state(met_sub, _plain_value)
+    return {
+        "P_value": p_val, "P_state": p_state,
+        "R_value": r_val, "R_layer_state": r_state,
+        "Mx_value": m_val, "Mx_state": m_state,
+    }
+
+
 def _layer_cells(rows: pd.DataFrame) -> dict[str, Any]:
-    """聚合节点的 P、R、M 三格。"""
+    """聚合节点的 P、R、M 三格（含脂质大类总量等派生特征）。"""
     prot = summarize(_executors(rows[rows["layer"] == "proteomics"]), _enzyme_value)
     rna = summarize(_executors(rows[rows["layer"] == "transcriptomics"]), _enzyme_value)
-    met_rows = rows[(rows["layer"] == "metabolomics") & rows["role"].isin(("substrate", "product"))]
+    met_rows = rows[rows["layer"].isin(("metabolomics", "derived")) & rows["role"].isin(("substrate", "product"))]
     measured = met_rows[met_rows["feature_id"].notna() & met_rows["feature_id"].astype(str).ne("")]
     met = summarize(measured.drop_duplicates("feature_id") if not measured.empty
                     else met_rows.drop_duplicates("member_id"), _plain_value)
@@ -146,7 +204,7 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
              contrast: str, source: str, coverage: pd.DataFrame | None = None, top_rank: int = 10,
              min_claim: str = "L2", reactions: dict[str, NetworkReaction] | None = None) -> pd.DataFrame:
     """``members``：dossier_members；``axes`` / ``assessed``：S3 的两张评估表；``source``：本实验的来源标签。"""
-    reactions = network_reactions() if reactions is None else reactions
+    reactions = pathway_reactions() if reactions is None else reactions
     order = {"L3": 4, "L2": 3, "L1": 2, "L0": 1, "LX": 0}
     rows = members[(members["tissue"] == tissue) & (members["contrast_id"] == contrast) & (members["source"] == source)]
     here_axes = axes[(axes["tissue"] == tissue) & (axes["contrast_id"] == contrast)]
@@ -184,6 +242,11 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
         f_phys = f_dir * physio if physio else f_dir
         value = abs(f_effect) * f_phys if f_state in POINTING and pd.notna(f_effect) else np.nan
         m_dir = ax["pool"][1] * physio if physio else ax["pool"][1]
+        layer_cells = _reaction_layer_cells(part) if not part.empty else {
+            "P_value": np.nan, "P_state": "not_measured",
+            "R_value": np.nan, "R_layer_state": "not_measured",
+            "Mx_value": np.nan, "Mx_state": "not_measured",
+        }
         records.append({"tissue": tissue, "contrast_id": contrast, "element_type": "reaction", "element_id": flux_id,
                         "region": edge.region, "label": flux_id, "draw_style": style, "reversible": reaction.reversible,
                         "physio_sign": physio, "sign_change": change, "flux_group": _flux_group(flux_rows),
@@ -192,10 +255,11 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
                         "C_direction": ax["capacity"][1], "R_state": ax["regulation"][0],
                         "R_direction": ax["regulation"][1], "M_state": ax["pool"][0], "M_direction": m_dir,
                         **claim_fields(flux_id, physio), "value": value, "certainty": np.nan,
-                        "display_state": f_state, "ring": "", "n_changed": 0, "n_quantified": 0, "text": f_rule})
+                        "display_state": f_state, "ring": "", "n_changed": 0, "n_quantified": 0,
+                        **layer_cells, "text": f_rule})
 
     keys: dict[str, str] = {}
-    met_rows = rows[rows["layer"] == "metabolomics"]
+    met_rows = rows[rows["layer"].isin(("metabolomics", "derived"))]
     for species, node in layout.nodes.items():
         if node.kind != "metabolite":
             continue
@@ -221,7 +285,11 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
         records.append({"tissue": tissue, "contrast_id": contrast, "element_type": "aggregate", "element_id": flux_id,
                         "region": agg.region, "label": agg.label or flux_id,
                         "draw_style": "aggregate" if not part.empty else "not_assessed", **_registry(flux_id),
-                        "C_state": ax["capacity"][0], "C_direction": ax["capacity"][1], **claim_fields(flux_id, 0),
+                        "F_state": ax["flux"][0], "F_direction": ax["flux"][1],
+                        "C_state": ax["capacity"][0], "C_direction": ax["capacity"][1],
+                        "R_state": ax["regulation"][0], "R_direction": ax["regulation"][1],
+                        "M_state": ax["pool"][0], "M_direction": ax["pool"][1],
+                        **claim_fields(flux_id, 0),
                         **cells, "display_state": ax["capacity"][0]})
     view = pd.DataFrame(records)
     for column in MAP_COLUMNS:
@@ -235,21 +303,63 @@ def region_summary(view: pd.DataFrame, layout: Layout, fusion: pd.DataFrame | No
     """侧栏：每个区域的覆盖计数（不是评分）与通路融合结果（按区域声明的通路名匹配，只作探索排序）。"""
     out = []
     reactions = view[view["element_type"] == "reaction"]
+    aggregates = view[view["element_type"] == "aggregate"]
     for rid, region in layout.regions.items():
         part = reactions[reactions["region"] == rid]
-        if part.empty and rid != "other":
+        agg_part = aggregates[aggregates["region"] == rid]
+        if part.empty and agg_part.empty and rid != "other":
             continue
         row = {"region": rid, "label": region.label, "kegg": ", ".join(region.kegg), "n_drawn": len(part),
+               "n_aggregates": len(agg_part),
                "n_flux": int((part["draw_style"] == "flux").sum()),
                "n_identifiable": int((part["draw_style"].eq("flux")
                                       & ~part["F_state"].isin(["not_identifiable", "insufficient_n", "not_measured"])).sum()),
                "n_omics_only": int((part["draw_style"] == "omics_only").sum()),
-               "n_L2": int(part["flux_claim"].isin(["L2", "L3"]).sum()), "n_L1": int((part["flux_claim"] == "L1").sum()),
+               "n_L2": int(part["flux_claim"].isin(["L2", "L3"]).sum()),
+               "n_L1": int(part["flux_claim"].eq("L1").sum() + agg_part["flux_claim"].eq("L1").sum()),
                "fusion": ""}
         if fusion is not None and not fusion.empty and region.terms:
             hit = fusion[(fusion["tissue"] == tissue) & (fusion["comparison"] == contrast)
                          & fusion["pathway_term"].str.lower().isin([t.lower() for t in region.terms])]
-            row["fusion"] = "; ".join(f"{r.pathway_term}: FDR {r.fused_fdr:.2g} ({r.omics_directions or '方向未定'})"
+            row["fusion"] = "; ".join(f"{r.pathway_term}: FDR {r.fused_fdr:.2g} ({r.omics_directions or 'mixed'})"
                                       for r in hit.itertuples())
         out.append(row)
     return pd.DataFrame(out)
+
+
+def extra_pathway_fusion(fusion: pd.DataFrame | None, layout: Layout, tissue: str, contrast: str,
+                         fdr_cutoff: float = 0.25, limit: int = 5) -> pd.DataFrame:
+    """侧栏：未映射到总图区域中的显著多组学通路融合结果（仅作补充线索）。"""
+    columns = ["pathway_term", "fused_fdr", "n_omics", "omics_directions"]
+    if fusion is None or fusion.empty:
+        return pd.DataFrame(columns=columns)
+    mapped = {t.lower() for r in layout.regions.values() for t in r.terms}
+    sub = fusion[(fusion["tissue"] == tissue) & (fusion["comparison"] == contrast)].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=columns)
+    sub["fused_fdr"] = pd.to_numeric(sub["fused_fdr"], errors="coerce")
+    sub = sub[sub["fused_fdr"].le(fdr_cutoff) & ~sub["pathway_term"].astype(str).str.lower().isin(mapped)]
+    if sub.empty:
+        return pd.DataFrame(columns=columns)
+    if "n_omics" not in sub.columns:
+        sub["n_omics"] = 2
+    if "omics_directions" not in sub.columns:
+        sub["omics_directions"] = ""
+    sub = sub.sort_values(["fused_fdr", "n_omics"], ascending=[True, False]).head(limit)
+    return sub[columns].reset_index(drop=True)
+
+
+def signed_module_summary(pathway_tests: pd.DataFrame | None, tissue: str, contrast: str) -> pd.DataFrame:
+    """侧栏：该组织与比较的有向模块旋转检验结果（G16 ``signed_module``）。"""
+    columns = ["name", "layer", "statistic", "pvalue", "padj", "direction", "n_members", "members"]
+    if pathway_tests is None or pathway_tests.empty:
+        return pd.DataFrame(columns=columns)
+    sub = pathway_tests[(pathway_tests["test"] == "signed_module")
+                        & (pathway_tests["tissue"] == tissue)
+                        & (pathway_tests["contrast_id"] == contrast)].copy()
+    if sub.empty:
+        return pd.DataFrame(columns=columns)
+    for col in columns:
+        if col not in sub.columns:
+            sub[col] = np.nan
+    return sub[columns].sort_values(["name", "layer"]).reset_index(drop=True)

@@ -372,10 +372,12 @@ def _volcano_single(
         ax.yaxis.set_major_formatter(FuncFormatter(_plain_number))
         ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _p: ""))
 
+    from omicsweave.visualization.palettes import NATURE_EDITORIAL
+
     groups = [
-        (~sig_mask, "#999999", 20, 0.5, "NS"),
-        (sig_mask & (df["_x"] > 0), "#C44E52", 30, 0.75, "Up"),
-        (sig_mask & (df["_x"] < 0), "#4C72B0", 30, 0.75, "Down"),
+        (~sig_mask, NATURE_EDITORIAL.faint, 20, 0.55, "NS"),
+        (sig_mask & (df["_x"] > 0), NATURE_EDITORIAL.up, 30, 0.80, "Up"),
+        (sig_mask & (df["_x"] < 0), NATURE_EDITORIAL.down, 30, 0.80, "Down"),
     ]
     for mask, color, size, alpha, label in groups:
         inr = mask & ~clipped

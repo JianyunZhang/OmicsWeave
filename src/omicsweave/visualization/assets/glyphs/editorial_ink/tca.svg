@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>tca</title>
+  <desc>三羧酸循环</desc>
+  <path d="M 25 9 C 23 4 16 2 10 6 C 5 9 2 16 5 22 C 9 28 17 30 22 26 Q 27 23 27 17 M 19 9 L 25 9 L 25 3" fill="none" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 12 16 C 12 11 21 10 20 16 C 20 21 12 22 12 16 Z" fill="#E8DCC8" stroke="#443A33" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 7 17 Q 7 24 15 26" fill="none" stroke="#A27653" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

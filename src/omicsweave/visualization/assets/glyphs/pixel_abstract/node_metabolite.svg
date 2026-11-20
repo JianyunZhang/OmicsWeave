@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>node_metabolite</title>
+  <desc>通用代谢物池节点，测量状态由上下文指定</desc>
+  <path d="M 10 6 L 22 6 L 22 10 L 26 10 L 26 22 L 22 22 L 22 26 L 10 26 L 10 22 L 6 22 L 6 10 L 10 10 Z" fill="#242E37"/>
+  <path d="M 12 8 L 20 8 L 20 12 L 24 12 L 24 20 L 20 20 L 20 24 L 12 24 L 12 20 L 8 20 L 8 12 L 12 12 Z" fill="#F5ECD6"/>
+</svg>

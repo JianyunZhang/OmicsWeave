@@ -42,6 +42,7 @@ from omicsweave.core.idmap.metabolite_id_mapping import lookup_metabolite_ids
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE / "data"
 TABLE_FILE = "network_reactions.tsv"
+CURATED_TABLE_FILE = "curated_reactions.tsv"
 SOURCES_FILE = "network_SOURCES.json"
 SEMANTICS_FILE = HERE / "flux_reaction_semantics.yaml"
 
@@ -207,6 +208,12 @@ class NetworkReaction:
     compartments: tuple[str, ...]
     tissue_substrate_names: tuple[str, ...]
     tissue_product_names: tuple[str, ...]
+    direction_evidence: str = ""
+    kegg_pathway: str = ""
+    kegg_reaction: str = ""
+    ec_number: str = ""
+    reactome_id: str = ""
+    reference_note: str = ""
 
 
 @dataclass(frozen=True)
@@ -249,6 +256,46 @@ def network_reactions() -> dict[str, NetworkReaction]:
 
 
 @lru_cache(maxsize=1)
+def curated_reactions() -> dict[str, NetworkReaction]:
+    """``flux_id`` → 策展扩展代谢反应（来自 KEGG / Reactome，不在 MFA 模型表 ``network_reactions.tsv`` 中）。
+
+    与 MFA 网络表严格分层：若后续 MFA 模型补充了同一 ``flux_id``，:func:`pathway_reactions` 会自动以 MFA 模型
+    为准，不产生重复条目，图 E 上由虚线 ``omics_only`` 无缝升级为实线 ``flux``。
+    """
+    path = DATA_DIR / CURATED_TABLE_FILE
+    if not path.exists():
+        return {}
+    out: dict[str, NetworkReaction] = {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            fid = (row.get("flux_id") or "").strip()
+            if not fid or fid in out:
+                continue
+            out[fid] = NetworkReaction(
+                fid, row.get("network") or "curated", row.get("module") or "",
+                _split(row.get("substrates", "")), _split(row.get("products", "")),
+                (row.get("reversible") or "").lower() == "true",
+                row.get("reaction_class") or "enzymatic",
+                _split(row.get("compartments", "")),
+                _split(row.get("tissue_substrate_names", "")),
+                _split(row.get("tissue_product_names", "")),
+                direction_evidence=(row.get("direction_evidence") or "").strip(),
+                kegg_pathway=(row.get("kegg_pathway") or "").strip(),
+                kegg_reaction=(row.get("kegg_reaction") or "").strip(),
+                ec_number=(row.get("ec_number") or "").strip(),
+                reactome_id=(row.get("reactome_id") or "").strip(),
+                reference_note=(row.get("reference_note") or "").strip(),
+            )
+    return out
+
+
+@lru_cache(maxsize=1)
+def pathway_reactions() -> dict[str, NetworkReaction]:
+    """全量通路反应 = 策展扩展反应 + MFA 网络反应（同一 ``flux_id`` 以 MFA 网络反应优先）。"""
+    return {**curated_reactions(), **network_reactions()}
+
+
+@lru_cache(maxsize=1)
 def network_sources() -> dict[str, Any]:
     path = DATA_DIR / SOURCES_FILE
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -261,9 +308,10 @@ def _semantics_config() -> dict[str, Any]:
 
 @lru_cache(maxsize=None)
 def reaction_semantics(flux_id: str) -> ReactionSemantics:
-    """一个反应的类别与方向证据规则（逐反应例外 > 按类别的默认值）。不在网络注释中的反应按 ID 推断。"""
+    """一个反应的类别与方向证据规则（逐反应例外 > 策展扩展表显式声明 > 按类别的默认值）。不在网络注释中的反应按 ID 推断。"""
     config = _semantics_config()
-    reaction = network_reactions().get(flux_id)
+    mfa_reaction = network_reactions().get(flux_id)
+    reaction = mfa_reaction if mfa_reaction is not None else curated_reactions().get(flux_id)
     if reaction is not None:
         cls = reaction.reaction_class
     elif PSEUDO_ID.search(flux_id):
@@ -272,8 +320,11 @@ def reaction_semantics(flux_id: str) -> ReactionSemantics:
         cls = "unknown"
     override = (config.get("overrides") or {}).get(flux_id) or {}
     defaults = config.get("defaults") or {}
-    evidence = override.get("direction_evidence") or defaults.get(cls, "directional")
-    reason = override.get("reason") or (config.get("default_reasons") or {}).get(cls, "")
+    curated_ev = reaction.direction_evidence if (reaction is not None and mfa_reaction is None) else ""
+    evidence = override.get("direction_evidence") or curated_ev or defaults.get(cls, "directional")
+    reason = override.get("reason") or (
+        reaction.reference_note if (reaction is not None and mfa_reaction is None and curated_ev) else ""
+    ) or (config.get("default_reasons") or {}).get(cls, "")
     return ReactionSemantics(flux_id, cls, str(evidence), str(reason), reaction is not None)
 
 
@@ -281,14 +332,41 @@ def reaction_semantics(flux_id: str) -> ReactionSemantics:
 
 # 网络中没有单独测定的脂质池（甘油三酯储存、脂肪组织的 LIPID）和分步 TG 模块中的中间体，对应代谢组派生特征
 # ``class_total:<类别>``（见 omicsweave.metabolomics.derived_features）。
-LIPID_POOL_CLASSES = {"TG_store": "TG", "LIPID": "TG", "TAG": "TG", "DAG": "DG", "MAG": "MG", "PA": "PA", "LPA": "LPA"}
+LIPID_POOL_CLASSES = {"TG_store": "TG", "LIPID": "TG", "TAG": "TG", "DAG": "DG", "MAG": "MG", "PA": "PA", "LPA": "LPA",
+                      "TGPAL": "TG"}
+# 代谢物节点展示时额外对应的脂质类别总量（支持单类别或大类元组，不改变既有 MFA 网络反应的角色语义）
+NODE_LIPID_CLASSES: dict[str, str | tuple[str, ...]] = {
+    **LIPID_POOL_CLASSES,
+    "FA": "FFA",
+    "CE": "CE",
+    "PL": ("PC", "PE", "PI", "PS", "PG"),
+    "SPH": ("Cer", "SM", "HexCer", "SPH"),
+    "ETHER": ("PE-O", "PE-P", "PC-O", "LPC-O", "LPE-P"),
+}
+# 多化合物代谢物池节点（当节点代表一类密切相关的实测小分子产物时，汇总对应成员）
+NODE_METABOLITE_GROUPS: dict[str, tuple[str, ...]] = {
+    "BILE": ("Taurochenodeoxycholic acid", "Glycocholic acid", "Taurocholic acid", "Cholic acid", "Chenodeoxycholic acid"),
+    "POLYAMINE": ("Spermine", "Spermidine", "Putrescine"),
+    "NAD_POOL": ("NAD", "NADH", "NADP", "NADPH"),
+}
+# 仅组学聚合脂质模块对应的脂质大类总量（用于反应档案与总图 M 格）
+AGGREGATE_LIPID_POOLS: dict[str, dict[str, set[str]]] = {
+    "FAO_m": {"substrates": {"FFA"}, "products": set()},
+    "PHOSPHOLIPID": {"substrates": set(), "products": {"PC", "PE", "PI", "PS", "PG", "LPC", "LPE"}},
+    "SPHINGOLIPID": {"substrates": set(), "products": {"Cer", "SM", "HexCer", "SPH"}},
+    "ETHER_LIPID": {"substrates": set(), "products": {"PE-O", "PE-P", "PC-O", "LPC-O", "LPE-P"}},
+    "HMGCR": {"substrates": set(), "products": {"CE"}},
+    "INO_metabolism": {"substrates": set(), "products": {"PI", "LPI"}},
+}
 
 
 def lipid_pool_roles(flux_id: str) -> dict[str, set[str]]:
     """一个反应以哪些脂质类别总量为底物 / 产物（两侧都出现的类别不计）。"""
     reaction = network_reactions().get(flux_id)
     if reaction is None:
-        return {"substrates": set(), "products": set()}
+        agg = AGGREGATE_LIPID_POOLS.get(flux_id)
+        return {"substrates": set(agg["substrates"]), "products": set(agg["products"])} if agg \
+            else {"substrates": set(), "products": set()}
     side = lambda species: {LIPID_POOL_CLASSES[b] for m in species
                             if (b := split_metabolite(m)[0]) in LIPID_POOL_CLASSES}
     substrates, products = side(reaction.substrates), side(reaction.products)

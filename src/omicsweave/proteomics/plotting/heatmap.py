@@ -68,7 +68,7 @@ def plot_single(
         subset_df, cmap="RdBu_r", col_colors=col_colors,
         z_score=0, center=0, figsize=(12, 12),
     )
-    g.savefig(output_path, dpi=150)
+    g.savefig(output_path, dpi=300)
     plt.close()
 
 

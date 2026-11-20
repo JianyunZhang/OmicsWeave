@@ -24,7 +24,7 @@ from typing import Any, Iterable
 
 import yaml
 
-from .network_annotation import DATA_DIR, TABLE_FILE, NetworkReaction, network_reactions
+from .network_annotation import DATA_DIR, TABLE_FILE, NetworkReaction, network_reactions, pathway_reactions
 
 LAYOUT_FILE = DATA_DIR / "network_layout.yaml"
 NODE_KINDS = ("metabolite", "boundary", "store")
@@ -52,6 +52,7 @@ class Edge:
     offset: float = 0.0
     strip: tuple[float, float] | None = None    # 四轴小条左端中点相对反应中心的位置；不写时由绘图按避让自动放置
     secondary: tuple[str, ...] = ()             # 次要底物 / 产物（转氨的谷氨酸与 α-酮戊二酸、合成中的谷氨酰胺等）：不画线，在中心旁写名称
+    curve: float = 0.0                          # 弧线法向弯曲度（画布单位；0 表示直线或仅由 offset 拱弯）
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,8 @@ class Region:
     label_xy: tuple[float, float]
     kegg: tuple[str, ...] = ()
     terms: tuple[str, ...] = ()
+    box: tuple[float, float, float, float] | None = None   # 可选分区柔和底板 [x0, y0, x1, y1]
+    accent: str = ""                                       # 可选分区主题色（十六进制）
 
 
 @dataclass(frozen=True)
@@ -140,8 +143,16 @@ def load_layout(path: str | Path | None = None) -> Layout:
     regions = {}
     for rid, spec in (doc.get("regions") or {}).items():
         spec = spec or {}
+        raw_box = spec.get("box")
+        box = None
+        if raw_box is not None:
+            if not (isinstance(raw_box, (list, tuple)) and len(raw_box) == 4
+                    and all(isinstance(v, (int, float)) for v in raw_box)):
+                raise LayoutError(f"regions.{rid}.box：应为 [x0, y0, x1, y1]，实际为 {raw_box!r}")
+            box = tuple(float(v) for v in raw_box)
         regions[str(rid)] = Region(str(rid), str(spec.get("label", rid)), _point(spec.get("label_xy"), f"regions.{rid}"),
-                                   tuple(spec.get("kegg") or ()), tuple(spec.get("terms") or ()))
+                                   tuple(spec.get("kegg") or ()), tuple(spec.get("terms") or ()),
+                                   box, str(spec.get("accent", "")))
     nodes = {}
     for species, spec in (doc.get("nodes") or {}).items():
         if isinstance(spec, list):
@@ -163,7 +174,8 @@ def load_layout(path: str | Path | None = None) -> Layout:
         via = tuple(_point(p, f"edges.{flux_id}.via") for p in spec.get("via") or [])
         strip = _point(spec["strip"], f"edges.{flux_id}.strip") if spec.get("strip") is not None else None
         edges[str(flux_id)] = Edge(str(flux_id), str(spec.get("region", "")), hub, via, float(spec.get("offset", 0.0)),
-                                   strip, tuple(str(s) for s in spec.get("secondary") or ()))
+                                   strip, tuple(str(s) for s in spec.get("secondary") or ()),
+                                   float(spec.get("curve", 0.0)))
     aggregates = {str(k): Aggregate(str(k), str((v or {}).get("region", "")), _point((v or {}).get("xy"), f"aggregates.{k}"),
                                     str((v or {}).get("label", "")))
                   for k, v in (doc.get("aggregates") or {}).items()}
@@ -182,24 +194,26 @@ def default_layout() -> Layout:
 
 def validate_layout(layout: Layout, reactions: dict[str, NetworkReaction] | None = None,
                     check_sha: bool = True) -> list[str]:
-    """返回问题列表（空表示通过）。"""
-    reactions = network_reactions() if reactions is None else reactions
+    """返回问题列表（空表示通过）。MFA 网络表中的每个反应都须在 edges 或 exclude 中；
+    edges 同时允许使用 ``curated_reactions.tsv`` 中的策展扩展反应（便于后续 MFA 扩展无缝承接）。"""
+    mfa_reactions = network_reactions() if reactions is None else reactions
+    all_reactions = pathway_reactions() if reactions is None else reactions
     problems: list[str] = []
     if check_sha and layout.network_sha256 != network_table_sha256():
         problems.append("network_sha256 与包内 network_reactions.tsv 不一致：网络表改过，需要核对坐标后更新校验值")
-    for flux_id in reactions:
+    for flux_id in mfa_reactions:
         if flux_id not in layout.edges and flux_id not in layout.exclude:
             problems.append(f"网络反应 {flux_id} 既不在 edges 中，也不在 exclude 中")
     for flux_id in layout.edges:
-        if flux_id not in reactions:
-            problems.append(f"edges.{flux_id} 不是网络反应")
+        if flux_id not in all_reactions:
+            problems.append(f"edges.{flux_id} 不是网络反应或策展扩展反应")
             continue
         if flux_id in layout.exclude:
             problems.append(f"{flux_id} 同时在 edges 与 exclude 中")
         edge = layout.edges[flux_id]
         if edge.region not in layout.regions:
             problems.append(f"edges.{flux_id}：区域 {edge.region!r} 没有声明")
-        reaction = reactions[flux_id]
+        reaction = all_reactions[flux_id]
         for species in edge.secondary:
             if species not in reaction.substrates + reaction.products:
                 problems.append(f"edges.{flux_id}：次要物种 {species} 不是该反应的底物或产物")
@@ -207,7 +221,7 @@ def validate_layout(layout: Layout, reactions: dict[str, NetworkReaction] | None
             if species not in layout.hide_species and species not in edge.secondary and species not in layout.nodes:
                 problems.append(f"edges.{flux_id}：物种 {species} 没有坐标")
     for flux_id, agg in layout.aggregates.items():
-        if flux_id in reactions:
+        if flux_id in mfa_reactions or flux_id in layout.edges:
             problems.append(f"aggregates.{flux_id} 是网络反应，应画成边")
         if agg.region not in layout.regions:
             problems.append(f"aggregates.{flux_id}：区域 {agg.region!r} 没有声明")
@@ -217,7 +231,7 @@ def validate_layout(layout: Layout, reactions: dict[str, NetworkReaction] | None
             problems.append(f"exclude.{flux_id}：原因应为 {'、'.join(EXCLUDE_REASONS)} 之一，实际为 {reason!r}")
     used: dict[str, set] = {}
     for flux_id, edge in layout.edges.items():
-        reaction = reactions.get(flux_id)
+        reaction = all_reactions.get(flux_id)
         skip = layout.hide_species | set(edge.secondary)
         if reaction is not None and all(s in layout.nodes for s in reaction.substrates + reaction.products
                                         if s not in skip):

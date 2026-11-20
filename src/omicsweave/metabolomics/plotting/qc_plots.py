@@ -90,7 +90,7 @@ def run_pca(
     pc2_variance = pca.explained_variance_ratio_[1] if component_count > 1 else 0.0
     ax.set_ylabel(f"PC2 ({pc2_variance:.2%})")
 
-    plt.savefig(os.path.join(out_path, "PCA.png"), dpi=150, bbox_inches="tight")
+    plt.savefig(os.path.join(out_path, "PCA.png"), dpi=300, bbox_inches="tight")
     plt.close()
     print(f"    PCA 保存: {out_path}/PCA.png")
     return pca_df
@@ -111,14 +111,15 @@ def plot_preprocessing_qc(
     if "QC_RSD" in qc_metrics.columns:
         rsd = pd.to_numeric(qc_metrics["QC_RSD"], errors="coerce").dropna() * 100.0
         if not rsd.empty:
+            from omicsweave.visualization.palettes import NATURE_EDITORIAL
             fig, ax = plt.subplots(figsize=(8, 5))
-            sns.histplot(rsd, bins=40, ax=ax, color="#4C72B0")
-            ax.axvline(qc_rsd_cutoff * 100.0, color="#D32F2F", linestyle="--", label="RSD cutoff")
+            sns.histplot(rsd, bins=40, ax=ax, color=NATURE_EDITORIAL.down)
+            ax.axvline(qc_rsd_cutoff * 100.0, color=NATURE_EDITORIAL.up, linestyle="--", label="RSD cutoff")
             ax.set_xlabel("QC RSD (%)")
             ax.set_ylabel("Metabolites")
             ax.set_title(f"QC feature RSD - {tissue}")
             ax.legend()
-            fig.savefig(os.path.join(out_path, "QC_RSD_distribution.png"), dpi=150, bbox_inches="tight")
+            fig.savefig(os.path.join(out_path, "QC_RSD_distribution.png"), dpi=300, bbox_inches="tight")
             plt.close(fig)
 
     required = {"total_before", "total_after"}
@@ -133,7 +134,7 @@ def plot_preprocessing_qc(
         axes[1].set_ylabel("Normalized total signal")
         axes[1].tick_params(axis="x", rotation=60)
         fig.tight_layout()
-        fig.savefig(os.path.join(out_path, "sample_total_signal.png"), dpi=150, bbox_inches="tight")
+        fig.savefig(os.path.join(out_path, "sample_total_signal.png"), dpi=300, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -386,7 +387,7 @@ def run_plsda(
     os.makedirs(out_path, exist_ok=True)
     suffix = f"_{comp_name}" if comp_name else ""
     image_name = f"PLS-DA{suffix}.png"
-    plt.savefig(os.path.join(out_path, image_name), dpi=150, bbox_inches="tight")
+    plt.savefig(os.path.join(out_path, image_name), dpi=300, bbox_inches="tight")
     plt.close()
     scores = result.scores.copy()
     scores.insert(0, "Sample", scores.index)

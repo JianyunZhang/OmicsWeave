@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import math
+import re
 import textwrap
 import unicodedata
 from pathlib import Path
@@ -26,31 +27,51 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 
+from omicsweave.visualization.figures import save_stem
+from omicsweave.visualization.palettes import (
+    DEFAULT_NORM,
+    DEFAULT_VMAX,
+    IDENTIFIABILITY_COLORS,
+    NATURE_EDITORIAL,
+)
+from omicsweave.visualization.primitives import (
+    draw_layer_icon,
+    draw_status_cell,
+    draw_tier_badge,
+    estimate_text_width,
+    tier_badge_width,
+)
 from omicsweave.visualization.theme import themed
 
 from ..dossier.panels import Panel
 
-INK, INK2, MUTED, HAIRLINE, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#fcfcfb"
-NUMERATOR, DENOMINATOR = "#eb6834", "#2a78d6"            # 分类色第 2、1 位
-DIVERGING = LinearSegmentedColormap.from_list(
-    "dossier_diverging", ["#104281", "#2a78d6", "#9ec5f4", "#f0efec", "#f5b5b4", "#e34948", "#8c1f1f"])
-VMAX = 2.0
-NORM = Normalize(-VMAX, VMAX, clip=True)
-GLYPHS = {"equivalent": "=", "not_identifiable": "x", "insufficient_n": "!", "not_measured": "/",
-          "not_infused": "/", "not_detected": "?", "no_knowledge": "–", "qc_blocked": "QC"}
-GLYPH_LEGEND = [("=", "equivalent (90% CI within ±0.58)"), ("x", "not identifiable"), ("!", "insufficient n"),
-                ("/", "not measured / not infused"), ("?", "mapped, not detected"), ("–", "no member in knowledge"),
-                ("QC", "QC blocked")]
+INK = NATURE_EDITORIAL.ink
+INK2 = NATURE_EDITORIAL.ink2
+MUTED = NATURE_EDITORIAL.muted
+HAIRLINE = NATURE_EDITORIAL.hairline
+SURFACE = NATURE_EDITORIAL.surface
+NUMERATOR = NATURE_EDITORIAL.numerator
+DENOMINATOR = NATURE_EDITORIAL.denominator
+DIVERGING = NATURE_EDITORIAL.diverging_cmap()
+VMAX = DEFAULT_VMAX
+NORM = DEFAULT_NORM
+_SPECIAL_DATA_STATES = frozenset({
+    "not_identifiable", "insufficient_n", "not_measured", "not_infused",
+    "not_detected", "no_knowledge", "qc_blocked",
+})
+# 兼容保留字典导出名，视觉渲染统一使用 primitives 纯矢量状态图标
+GLYPHS = {"equivalent": "—", "not_identifiable": "⊘", "insufficient_n": "⚠", "not_measured": "/",
+          "not_infused": "/", "not_detected": "◌", "no_knowledge": "/", "qc_blocked": "⚠"}
 BLOCK_TITLES = {"flux": "FLUX by tracer", "enzyme": "ENZYME", "regulator": "REGULATOR", "pool": "POOL",
                 "assessment": "ASSESSMENT"}
-# 评估块：形状表示方向与强度（实心 = changed / established，空心 = suggestive），颜色与色阶的升降一致
-AXIS_GLYPHS = {"unchanged": "=", "mixed": "≠", "undetermined": "·", "not_identifiable": "x", "insufficient_n": "!",
-               "not_detected": "?", "not_measured": "/", "qc_blocked": "QC", "no_knowledge": "–"}
-AXIS_LEGEND = [("filled ▲▼", "changed (flux: established)"), ("hollow", "suggestive"), ("=", "unchanged"),
-               ("≠", "mixed / tracers conflict"), ("·", "undetermined"), ("L3–L0, LX", "claim level (n concordant axes)")]
-IDENTIFIABILITY = {"well_constrained": "#1c5cab", "moderate": "#5598e7", "poorly_constrained": "#b7d3f6",
-                   "bound_pinned": "#e1e0d9"}
+AXIS_GLYPHS = {"unchanged": "—", "mixed": "≠", "undetermined": "—", "not_identifiable": "⊘", "insufficient_n": "⚠",
+               "not_detected": "◌", "not_measured": "/", "qc_blocked": "⚠", "no_knowledge": "/"}
+IDENTIFIABILITY = dict(IDENTIFIABILITY_COLORS)
+_HEADER_LAYER_ICONS = {"P": "protein", "R": "mrna", "M": "metabolite"}
+_ASSESSMENT_COL_ICONS = {"F": "flux", "C": "protein", "R": "regulation", "M": "metabolite"}
+_CONCORDANT_RE = re.compile(r"\((\d+)\)")
 
 
 def _size(certainty: float) -> float:
@@ -60,34 +81,24 @@ def _size(certainty: float) -> float:
 
 
 def _save(fig: plt.Figure, stem: Path, formats: Iterable[str]) -> list[Path]:
-    stem.parent.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for fmt in formats:
-        path = stem.with_suffix(f".{fmt}")
-        try:
-            fig.savefig(path, bbox_inches="tight", facecolor=SURFACE)
-        except (AttributeError, KeyError, ValueError):
-            if fmt != "pdf":
-                raise
-            # 部分 fontTools 版本对中文字体（微软雅黑、黑体）做 Type 42 子集化时失败：改用 Type 3 嵌入（文字不可编辑）
-            with plt.rc_context({"pdf.fonttype": 3}):
-                fig.savefig(path, bbox_inches="tight", facecolor=SURFACE)
-        paths.append(path)
-    plt.close(fig)
-    return paths
+    return save_stem(fig, stem, formats=tuple(formats), dpi=300, facecolor=SURFACE, close=True)
 
 
-def _draw_cell(ax: plt.Axes, x: float, y: float, cell: pd.Series) -> None:
-    """一个格子：点在上，log2FC 写在点的下方；没有测到的状态只画符号。"""
-    state = cell["display_state"]
-    if state in GLYPHS and state != "equivalent":
-        ax.text(x, y, GLYPHS[state], ha="center", va="center", fontsize=7.5, color=MUTED)
+def _draw_cell(ax: plt.Axes, x: float, y: float, cell: pd.Series, *, y_scale: float = 1.25) -> None:
+    """一个格子：点在上，log2FC 写在点的下方；特殊/缺失状态使用统一纯矢量图标。"""
+    state = str(cell["display_state"] or "")
+    if state in _SPECIAL_DATA_STATES:
+        s = 0.66
+        draw_status_cell(
+            ax, x - s / 2, y - s * y_scale / 2, s, state, 0,
+            palette=NATURE_EDITORIAL, font_scale=1.18, zorder=3.0, draw_box=False, y_up=True, y_scale=y_scale,
+        )
         return
     value, cy = cell["value"], y + 0.13
     if state == "equivalent":
         ax.scatter([x], [cy], s=_size(cell["certainty"]), color="#f0efec", edgecolors=HAIRLINE, linewidths=0.6,
                    zorder=2)
-        ax.text(x, cy, "=", ha="center", va="center", fontsize=7, color=INK2, zorder=3)
+        ax.plot([x - 0.14, x + 0.14], [cy, cy], color=INK2, lw=1.0, solid_capstyle="round", zorder=3)
     else:
         face = DIVERGING(NORM(value)) if pd.notna(value) else "none"
         ring = cell["ring"]
@@ -100,27 +111,43 @@ def _draw_cell(ax: plt.Axes, x: float, y: float, cell: pd.Series) -> None:
                 fontsize=5, color=INK2, zorder=3)
 
 
-def _draw_assessment(ax: plt.Axes, x: float, y: float, cell: pd.Series) -> None:
-    """评估块的一格：四条轴为方向符号，结论等级为文字。"""
-    state, direction = cell["display_state"], int(cell["value"]) if pd.notna(cell["value"]) else 0
+def _draw_assessment(ax: plt.Axes, x: float, y: float, cell: pd.Series, *, y_scale: float = 1.25) -> None:
+    """评估块的一格：四条轴统一纯矢量图标，结论等级使用自解释三点徽章（Confirmed / Flux / Enz-pred）。"""
+    state = str(cell["display_state"] or "")
+    direction = int(cell["value"]) if pd.notna(cell["value"]) else 0
     if cell["column"] == "level":
-        strong = state in ("L1", "L2", "L3")
-        ax.text(x, y, str(cell["text"]), ha="center", va="center", fontsize=7.5 if strong else 7,
-                color=INK if strong or state == "LX" else MUTED, fontweight="bold" if strong else "normal")
+        if state in ("L1", "L2", "L3"):
+            b_sc, b_fs = 0.40, 5.4
+            bw = tier_badge_width(state, scale=b_sc, unit_in=0.50, fontsize=b_fs)
+            m = _CONCORDANT_RE.search(str(cell.get("text") or ""))
+            suffix = f" ({m.group(1)})" if m else ""
+            suf_w = estimate_text_width(suffix, 5.2, 0.50) if suffix else 0.0
+            bx = x - (bw + suf_w) / 2.0
+            draw_tier_badge(
+                ax, bx, y, state, zorder=3.2, scale=b_sc, preset="nature_editorial",
+                unit_in=0.50, fontsize=b_fs, y_scale=y_scale,
+            )
+            if suffix:
+                ax.text(bx + bw + 0.06, y, suffix, ha="left", va="center", fontsize=5.2, color=MUTED, zorder=3.2)
+        elif state == "LX":
+            ax.text(x, y, "Conflict", ha="center", va="center", fontsize=6.0, fontweight="bold", color=INK2, zorder=3.1)
+        else:
+            ax.plot([x - 0.16, x + 0.16], [y, y], color=MUTED, lw=0.95, solid_capstyle="round", zorder=3.1)
         return
-    if state in ("changed", "suggestive") and direction:
-        # 用标记而不是字形画三角：实心 = changed，空心 = suggestive，大小一致（字体回退会让空心字形变小）
-        color = "#e34948" if direction > 0 else "#2a78d6"
-        ax.scatter([x], [y], s=55, marker="^" if direction > 0 else "v", linewidths=1.2, zorder=3,
-                   facecolors=color if state == "changed" else "none", edgecolors=color)
-        return
-    ax.text(x, y, AXIS_GLYPHS.get(state, "·"), ha="center", va="center", fontsize=8,
-            color=INK2 if state in ("unchanged", "mixed") else MUTED)
+    s = 0.66
+    draw_status_cell(
+        ax, x - s / 2, y - s * y_scale / 2, s, state, direction,
+        palette=NATURE_EDITORIAL, font_scale=1.22, zorder=3.0, draw_box=False, y_up=True, y_scale=y_scale,
+    )
 
 
 def _short_label(block: str, column: str, tracer: str) -> str:
-    """列的短名：通量列为示踪剂，其余为层的代码（P、R、M）；来源写在上方的来源行。"""
-    return str(tracer) if block == "flux" else str(column).split(":")[0]
+    """列的短名：通量列为示踪剂，证据等级列为 Evidence，其余为层/轴代码。"""
+    if block == "flux":
+        return str(tracer)
+    if block == "assessment" and column == "level":
+        return "Evidence"
+    return str(column).split(":")[0]
 
 
 def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, stem: Path,
@@ -142,7 +169,7 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
         for source, group in part.groupby("_s", sort=True):
             first = x
             for r in group.itertuples():
-                step = 1.8 if (block, r.column) == ("assessment", "level") else 1.0
+                step = 2.8 if (block, r.column) == ("assessment", "level") else 1.0
                 positions[(block, r.column)] = x + (step - 1.0) / 2
                 labels[(block, r.column)] = _short_label(block, r.column, r.tracer)
                 x += step
@@ -154,12 +181,19 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
         x += 0.8
     last = x - 1.8                                   # 最后一列的位置；分段名写在网格右侧之外
     right = last + 3.2
-    width = 2.6 + 0.5 * (right + 0.7)
-    row_h = 0.40
-    height = 1.9 + row_h * len(rows) + 1.9
-    with themed():
+    x_unit_in = 0.50
+    row_h = 0.42
+    y_scale = x_unit_in / row_h
+    top_in = 1.95
+    bot_in = 2.25
+    width = max(8.2, 2.6 + x_unit_in * (right + 0.7))
+    x_span = right + 0.7
+    eff_x_in = (width - 2.6) / x_span
+    y_scale = eff_x_in / row_h
+    height = top_in + row_h * len(rows) + bot_in
+    with themed(preset="nature_editorial"):
         fig = plt.figure(figsize=(width, height), facecolor=SURFACE)
-        ax = fig.add_axes((2.4 / width, 1.9 / height, (width - 2.6) / width, (height - 3.8) / height))
+        ax = fig.add_axes((2.4 / width, bot_in / height, (width - 2.6) / width, (height - top_in - bot_in) / height))
         ax.set_facecolor(SURFACE)
         ax.set_xlim(-0.7, right)
         ax.set_ylim(-len(rows) + 0.4, 0.8)
@@ -178,15 +212,29 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
                 ax.text(last + 0.8, y + 0.45, row["segment"], ha="left", va="top", fontsize=6.5, color=MUTED)
                 previous_segment = row["segment"]
         for key, cx in positions.items():
+            blk, _col = key
             name = labels[key]
-            ax.text(cx, 0.65, name, ha="center", va="bottom", rotation=90 if len(name) > 2 else 0, fontsize=6.5,
-                    color=INK2)
+            icon_kind = (
+                _ASSESSMENT_COL_ICONS.get(name) if blk == "assessment"
+                else (_HEADER_LAYER_ICONS.get(name) if blk != "flux" else None)
+            )
+            if icon_kind:
+                draw_layer_icon(
+                    ax, icon_kind, cx, 0.96, size=0.38, color=INK2, lw=0.72,
+                    zorder=3.0, y_scale=y_scale, clip_on=False,
+                )
+                ax.text(cx, 1.38, name, ha="center", va="bottom", fontsize=6.2, fontweight="bold", color=INK2, clip_on=False)
+            elif name == "Evidence":
+                ax.text(cx, 0.78, name, ha="center", va="bottom", fontsize=6.5, fontweight="bold", color=INK, clip_on=False)
+            else:
+                ax.text(cx, 0.68, name, ha="center", va="bottom", rotation=90 if len(name) > 2 else 0, fontsize=6.5,
+                        color=INK2, clip_on=False)
         for start, end, source in source_spans:      # 来源行：来源名居中，下划细线
-            ax.plot([start - 0.35, end + 0.35], [2.05, 2.05], color=MUTED, lw=0.6, clip_on=False)
-            ax.text((start + end) / 2, 2.12, source, ha="center", va="bottom", fontsize=7, color=INK,
+            ax.plot([start - 0.35, end + 0.35], [2.15, 2.15], color=MUTED, lw=0.6, clip_on=False)
+            ax.text((start + end) / 2, 2.22, source, ha="center", va="bottom", fontsize=7, color=INK,
                     clip_on=False)
         for block, (start, end) in block_spans.items():
-            ax.text((start + end) / 2, 2.75, BLOCK_TITLES[block], ha="center", va="bottom", fontsize=7.5, color=INK,
+            ax.text((start + end) / 2, 2.85, BLOCK_TITLES[block], ha="center", va="bottom", fontsize=7.5, color=INK,
                     fontweight="bold", clip_on=False)
         for _, cell in view.iterrows():
             cx, cy = positions[(cell["block"], cell["column"])], row_y[cell["row"]]
@@ -194,42 +242,99 @@ def plot_matrix(view: pd.DataFrame, panel: Panel, tissue: str, contrast: str, st
                 ax.add_patch(plt.Rectangle((cx - 0.45, cy - 0.45), 0.9, 0.9, fill=False, lw=0.6, ls=(0, (2, 1.5)),
                                            ec=MUTED, zorder=1))
             if cell["block"] == "assessment":
-                _draw_assessment(ax, cx, cy, cell)
+                _draw_assessment(ax, cx, cy, cell, y_scale=y_scale)
             else:
-                _draw_cell(ax, cx, cy, cell)
-        fig.text(0.01, 1 - 0.35 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}", fontsize=10, color=INK,
+                _draw_cell(ax, cx, cy, cell, y_scale=y_scale)
+        fig.text(0.015, 1 - 0.28 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}", fontsize=10, color=INK,
                  fontweight="bold", va="top")
-        _matrix_legend(fig, width, height, runs or {})
-        if caption:                                  # 校准结果（E8）写入图注
-            fig.text(0.04, 0.04 / height, caption, fontsize=6, color=INK2)
+        _matrix_legend(fig, width, height, runs or {}, caption=caption)
         return _save(fig, stem, formats)
 
 
-def _matrix_legend(fig: plt.Figure, width: float, height: float, runs: dict[str, str]) -> None:
-    cax = fig.add_axes((0.04, 0.9 / height, 1.6 / width, 0.12 / height))
+def _matrix_legend(fig: plt.Figure, width: float, height: float, runs: dict[str, str], caption: str = "") -> None:
+    """图 A 统一纯矢量视觉图例（与图 E / 子图 100% 同一套色块、状态图标与三点徽章）。"""
+    # 顶部横排：Colorbar + 点大小/描边图例
+    cax = fig.add_axes((0.35 / width, 1.62 / height, 1.55 / width, 0.13 / height))
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=NORM, cmap=DIVERGING), cax=cax, orientation="horizontal")
     bar.set_ticks([-2, -1, 0, 1, 2])
-    bar.ax.tick_params(labelsize=6, colors=INK2, length=2)
+    bar.ax.tick_params(labelsize=5.8, colors=INK2, length=2)
     bar.outline.set_edgecolor(HAIRLINE)
-    cax.set_title("log2FC (regulators: × activity sign)", fontsize=6.5, color=INK2, pad=3)
+    cax.set_title("log2FC (regulators: × activity sign)", fontsize=6.2, color=INK2, pad=3)
+
     handles = [plt.scatter([], [], s=_size(c), color="#d9d8d3", edgecolors=MUTED, linewidths=0.4)
                for c in (0.6, 0.8, 1.0)]
-    handles += [plt.scatter([], [], s=90, color="#d9d8d3", edgecolors=INK, linewidths=w) for w in (0.8, 1.6)]
-    handles += [plt.scatter([], [], s=90, color="none", edgecolors=MUTED, linewidths=0.6)]
-    labels = ["P(sign) 0.6", "0.8", "1.0", "FDR < 0.05", "FDR and effect threshold",
-              "measured, no signed regulator"]
-    fig.legend(handles, labels, loc="lower left", bbox_to_anchor=(2.1 / width, 0.55 / height), ncol=6, fontsize=6,
-               frameon=False, handletextpad=0.3, columnspacing=1.0)
-    glyphs = "   ".join(f"{g} {label}" for g, label in GLYPH_LEGEND)
-    fig.text(0.04, 0.38 / height, glyphs + "   k/n changed / quantified members   dashed box: expected tracer",
-             fontsize=6, color=INK2)
-    fig.text(0.04, 0.27 / height, "ASSESSMENT  F flux · C enzyme capacity · R regulation · M substrates/products:   "
-             + "   ".join(f"{g} {label}" for g, label in AXIS_LEGEND), fontsize=6, color=INK2)
+    handles += [plt.scatter([], [], s=85, color="#d9d8d3", edgecolors=INK, linewidths=w) for w in (0.8, 1.6)]
+    handles += [plt.scatter([], [], s=85, color="none", edgecolors=MUTED, linewidths=0.6)]
+    labels = ["P(sign) 0.6", "0.8", "1.0", "FDR < 0.05", "FDR & effect", "unsigned"]
+    fig.legend(handles, labels, loc="lower left", bbox_to_anchor=(2.10 / width, 1.48 / height), ncol=6, fontsize=5.8,
+               frameon=False, handletextpad=0.25, columnspacing=0.9)
+
+    # 下方等比英寸坐标图例画布（1 unit = 1 inch），直接渲染真实矢量图标与三点徽章
+    lw_in = width - 0.60
+    lh_in = 1.38
+    lax = fig.add_axes((0.30 / width, 0.06 / height, lw_in / width, lh_in / height))
+    lax.set_xlim(0.0, lw_in)
+    lax.set_ylim(0.0, lh_in)
+    lax.axis("off")
+
+    sw = 0.165
+    # Row 1 (y = 1.15): 方向与状态矢量图标
+    y1 = 1.14
+    x = 0.02
+    for st_pair, desc in (
+        ((("changed", 1), ("changed", -1)), "Sig. (FDR<0.05)"),
+        ((("suggestive", 1), ("suggestive", -1)), "Suggestive (p<0.05)"),
+        ((("mixed", 0),), "Mixed"),
+        ((("unchanged", 0),), "Unchanged"),
+        ((("not_measured", 0),), "Not measured"),
+        ((("not_identifiable", 0),), "Unident. flux"),
+        ((("not_detected", 0),), "Not detected"),
+        ((("qc_blocked", 0),), "QC / Low-n"),
+    ):
+        item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.20
+        if x > 0.05 and x + item_w > lw_in:
+            y1 -= 0.24
+            x = 0.02
+        for st, dr in st_pair:
+            draw_status_cell(
+                lax, x, y1 - sw / 2, sw, st, dr,
+                palette=NATURE_EDITORIAL, font_scale=0.95, zorder=2.5, draw_box=True, y_up=True, y_scale=1.0,
+            )
+            x += sw + 0.035
+        lax.text(x + 0.03, y1, desc, fontsize=5.8, color=INK2, va="center", ha="left")
+        x += 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.20
+
+    # Row 2 (y = y1 - 0.28): 自解释三点证据徽章 + 4 层图标说明
+    y2 = y1 - 0.28
+    x = 0.02
+    for lvl, desc in (
+        ("L3", "Multi-tracer"),
+        ("L2", "MFA supported"),
+        ("L1", "Enzyme only"),
+    ):
+        bw = draw_tier_badge(
+            lax, x, y2, lvl, zorder=2.5, scale=0.175, preset="nature_editorial",
+            unit_in=1.0, fontsize=5.4, y_scale=1.0,
+        )
+        lax.text(x + bw + 0.07, y2, desc, fontsize=5.7, color=INK2, va="center", ha="left")
+        x += bw + 0.07 + estimate_text_width(desc, 5.7, 1.0) + 0.24
+    # 附带 4 层微图标含义
+    for ikind, ilbl in (("flux", "Flux"), ("protein", "Prot"), ("mrna", "mRNA"), ("metabolite", "Metab")):
+        iw = 0.16 + estimate_text_width(ilbl, 5.6, 1.0) + 0.16
+        if x + iw > lw_in:
+            break
+        draw_layer_icon(lax, ikind, x + 0.07, y2, size=0.15, color=INK, lw=0.72, zorder=2.5)
+        lax.text(x + 0.17, y2, ilbl, fontsize=5.6, color=INK2, va="center", ha="left")
+        x += iw
+
+    # Row 3 & 4: 来源、说明与校准注记
+    y3 = max(0.32, y2 - 0.26)
+    note_parts = ["k/n: changed/quantified members", "dashed box: expected tracer", "number under dot: log2FC"]
     if runs:
-        fig.text(0.04, 0.15 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items())
-                 + "   P protein · R RNA · M metabolite (pool: metabolite or product/substrate ratio)"
-                 + "   number under each point: log2FC (cell summary for multi-member cells)",
-                 fontsize=6, color=MUTED)
+        note_parts.insert(0, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()))
+    lax.text(0.02, y3, "  ·  ".join(note_parts), fontsize=5.5, color=MUTED, va="center", ha="left")
+    if caption:
+        lax.text(0.02, max(0.08, y3 - 0.20), caption, fontsize=5.7, color=INK2, va="center", ha="left")
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +448,14 @@ def _panel_title(row: pd.Series) -> str:
     return "\n".join(lines)
 
 
-def _draw_member(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[str, str]) -> None:
+def _draw_member(
+    ax: plt.Axes,
+    row: pd.Series,
+    data: pd.DataFrame,
+    sides: dict[str, str],
+    *,
+    panel_aspect: float = 1.5,
+) -> None:
     ax.set_title(_panel_title(row), fontsize=6, color=INK, loc="left", pad=3)
     ax.tick_params(labelsize=5.5, colors=INK2, length=2)
     for spine in ("top", "right"):
@@ -351,9 +463,16 @@ def _draw_member(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[s
     for spine in ("left", "bottom"):
         ax.spines[spine].set_color(HAIRLINE)
     if data.empty or data["value"].notna().sum() == 0:
-        reason = str(row.get("state_reason") or row["cell_state"])
-        text = textwrap.fill(f"{GLYPHS.get(row['cell_state'], '')} {reason}".strip(), 14, break_long_words=True)
-        ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=5.5, color=MUTED, transform=ax.transAxes)
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.0)
+        s = 0.22
+        draw_status_cell(
+            ax, 0.5 - s / 2, 0.68 - s * panel_aspect / 2, s, str(row["cell_state"] or "not_measured"), 0,
+            palette=NATURE_EDITORIAL, font_scale=1.15, zorder=3.0, draw_box=True, y_up=True, y_scale=panel_aspect,
+        )
+        reason = str(row.get("state_reason") or row["cell_state"]).replace("_", " ")
+        text = textwrap.fill(reason.strip(), 16, break_long_words=True)
+        ax.text(0.5, 0.28, text, ha="center", va="center", fontsize=5.3, color=MUTED)
         ax.set_xticks([])
         ax.set_yticks([])
         return
@@ -434,7 +553,10 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
                     ax.set_facecolor(SURFACE)
                     sides_here = {sample: side for (src, layer, sample), side in side_map.items()
                                   if src == row["source"] and layer == row["layer"]}
-                    _draw_member(ax, row, _member_samples(row, samples), sides_here)
+                    _draw_member(
+                        ax, row, _member_samples(row, samples), sides_here,
+                        panel_aspect=1.2 / (panel_h - 0.95),
+                    )
                 y -= math.ceil(len(items) / ncols) * panel_h + extra(items)
         direction = rows["direction_evidence"].dropna().iloc[0] if rows["direction_evidence"].notna().any() else ""
         fig.text(0.01, 1 - 0.25 / height, f"{reaction}  ·  {tissue}  ·  {contrast}", fontsize=10, color=INK,
@@ -459,8 +581,8 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
 # ---------------------------------------------------------------------------
 
 SPLIT_LAYER_NAMES = {"mfa": "flux", "proteomics": "enzyme P", "transcriptomics": "enzyme R", "metabolomics": "metabolite"}
-SPLIT_STATES = {"not_identifiable": "x", "insufficient_n": "!", "not_measured": "/", "not_detected": "?",
-                "same_members": "="}
+SPLIT_STATES = {"not_identifiable": "⊘", "insufficient_n": "⚠", "not_measured": "/", "not_detected": "◌",
+                "same_members": "—"}
 
 
 def _split_title(row: pd.Series) -> str:
@@ -470,12 +592,19 @@ def _split_title(row: pd.Series) -> str:
         if pd.notna(row.get("padj")):
             stats += f"  q {row['padj']:.2g}"
     else:
-        stats = row["state"]
+        stats = str(row["state"]).replace("_", " ")
     members = f"a: {row['members_a'] or '—'} | b: {row['members_b'] or '—'}"
     return f"{head}\n{stats}\n{textwrap.shorten(members, 46, placeholder='…')}"
 
 
-def _draw_split(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[str, str]) -> None:
+def _draw_split(
+    ax: plt.Axes,
+    row: pd.Series,
+    data: pd.DataFrame,
+    sides: dict[str, str],
+    *,
+    panel_aspect: float = 1.37,
+) -> None:
     ax.set_title(_split_title(row), fontsize=5.8, color=INK, loc="left", pad=3)
     ax.tick_params(labelsize=5.5, colors=INK2, length=2)
     for spine in ("top", "right"):
@@ -483,9 +612,18 @@ def _draw_split(ax: plt.Axes, row: pd.Series, data: pd.DataFrame, sides: dict[st
     for spine in ("left", "bottom"):
         ax.spines[spine].set_color(HAIRLINE)
     if data.empty or data["value"].notna().sum() == 0:
-        text = textwrap.fill(f"{SPLIT_STATES.get(row['state'], '')} {row.get('detail') or row['state']}".strip(), 24,
-                             break_long_words=False)
-        ax.text(0.5, 0.5, text, ha="center", va="center", fontsize=5.5, color=MUTED, transform=ax.transAxes)
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.0)
+        st = str(row["state"] or "not_measured")
+        icon_st = "unchanged" if st == "same_members" else st
+        s = 0.21
+        draw_status_cell(
+            ax, 0.5 - s / 2, 0.68 - s * panel_aspect / 2, s, icon_st, 0,
+            palette=NATURE_EDITORIAL, font_scale=1.15, zorder=3.0, draw_box=True, y_up=True, y_scale=panel_aspect,
+        )
+        detail = str(row.get("detail") or st).replace("_", " ")
+        text = textwrap.fill(detail.strip(), 22, break_long_words=False)
+        ax.text(0.5, 0.27, text, ha="center", va="center", fontsize=5.3, color=MUTED)
         ax.set_xticks([])
         ax.set_yticks([])
         return
@@ -519,8 +657,10 @@ def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.Da
     side_map = {(s.source, s.layer, s.sample_id): s.side
                 for s in sides[sides["contrast_id"] == contrast].itertuples()} if not sides.empty else {}
     panel_w, panel_h, left = 1.85, 2.0, 1.45
-    width, height = left + panel_w * len(columns) + 0.3, 1.0 + panel_h * len(keys) + 0.5
-    with themed():
+    panel_aspect = (panel_w - 0.55) / (panel_h - 1.05)
+    width = max(6.8, left + panel_w * len(columns) + 0.3)
+    height = 1.0 + panel_h * len(keys) + 0.72
+    with themed(preset="nature_editorial"):
         fig = plt.figure(figsize=(width, height), facecolor=SURFACE)
         for i, (node, exit_a, exit_b, source) in enumerate(keys):
             top = height - 1.0 - i * panel_h
@@ -536,13 +676,17 @@ def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.Da
                     placeholder = pd.Series({"layer": layer, "tracer": tracer, "state": "not_measured",
                                              "members_a": "", "members_b": "",
                                              "detail": f"not in source {source}"})
-                    _draw_split(ax, placeholder, per_animal.iloc[0:0], {})
+                    _draw_split(ax, placeholder, per_animal.iloc[0:0], {}, panel_aspect=panel_aspect)
                     continue
                 data = per_animal[(per_animal["node"] == node) & (per_animal["exit_a"] == exit_a)
                                   & (per_animal["exit_b"] == exit_b) & (per_animal["source"] == source)
                                   & (per_animal["layer"] == layer) & (per_animal["tracer"] == tracer)]
                 here = {sample: side for (src, lay, sample), side in side_map.items() if src == source and lay == layer}
-                _draw_split(ax, hit.iloc[0], data if hit.iloc[0]["state"] == "computed" else data.iloc[0:0], here)
+                _draw_split(
+                    ax, hit.iloc[0],
+                    data if hit.iloc[0]["state"] == "computed" else data.iloc[0:0],
+                    here, panel_aspect=panel_aspect,
+                )
         fig.text(0.01, 1 - 0.25 / height, f"{panel.title}  ·  {tissue}  ·  {contrast}  ·  node split",
                  fontsize=10, color=INK, fontweight="bold", va="top")
         fig.text(0.01, 1 - 0.55 / height, "per animal: log2 of exit a over exit b (enzymes and metabolites summed on the "
@@ -551,10 +695,24 @@ def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.Da
         handles = [Line2D([], [], marker="o", ls="", color=c, markersize=4) for c in (NUMERATOR, DENOMINATOR, MUTED)]
         fig.legend(handles, [f"{contrast}: numerator", "denominator", "other groups"], loc="upper right",
                    bbox_to_anchor=(0.99, 1 - 0.2 / height), ncol=3, fontsize=6, frameon=False)
-        legend = "   ".join(f"{g} {s.replace('_', ' ')}" for s, g in SPLIT_STATES.items())
-        fig.text(0.01, 0.3 / height, legend + "   labelled-isotope split awaits G10", fontsize=5.5, color=MUTED)
+        # 底部统一纯矢量状态图例
+        lax = fig.add_axes((0.12 / width, 0.28 / height, (width - 0.24) / width, 0.34 / height))
+        lax.set_xlim(0.0, width - 0.24)
+        lax.set_ylim(0.0, 0.34)
+        lax.axis("off")
+        lx, sw = 0.02, 0.145
+        for st, desc in (
+            ("not_identifiable", "Unidentifiable"),
+            ("insufficient_n", "Low-n"),
+            ("not_measured", "Not measured"),
+            ("not_detected", "Not detected"),
+            ("unchanged", "Same members"),
+        ):
+            draw_status_cell(lax, lx, 0.17 - sw / 2, sw, st, 0, palette=NATURE_EDITORIAL, font_scale=0.9, zorder=2.5, draw_box=True, y_up=True)
+            lax.text(lx + sw + 0.04, 0.17, desc, fontsize=5.5, color=MUTED, va="center", ha="left")
+            lx += sw + 0.06 + estimate_text_width(desc, 5.5, 1.0) + 0.18
         if runs:
-            fig.text(0.01, 0.12 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()),
+            fig.text(0.01, 0.10 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()),
                      fontsize=5.5, color=MUTED)
         return _save(fig, stem, formats)
 
@@ -573,11 +731,18 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
                 & rows["tracer"].ne("pooled") & rows["flux_id"].isin(panel.reactions)]
     order = list(dict.fromkeys([*tracers, *sorted(set(part["tracer"]))]))
     reactions = panel.reactions
-    width, height = 2.2 + 0.75 * max(len(order), 1), 1.6 + 0.32 * len(reactions)
-    with themed():
+    n_cols = max(len(order), 1)
+    width = max(5.6, 2.2 + 0.78 * n_cols)
+    height = 1.85 + 0.34 * len(reactions)
+    ax_w_in = width - 1.9
+    ax_h_in = height - 1.65
+    x_u = ax_w_in / n_cols
+    y_u = ax_h_in / max(len(reactions), 1)
+    y_scale = x_u / y_u
+    with themed(preset="nature_editorial"):
         fig = plt.figure(figsize=(width, height), facecolor=SURFACE)
-        ax = fig.add_axes((1.6 / width, 1.0 / height, (width - 1.9) / width, (height - 1.5) / height))
-        ax.set_xlim(-0.5, max(len(order), 1) - 0.5)          # 没有示踪剂时保留一列宽的空图
+        ax = fig.add_axes((1.6 / width, 1.15 / height, ax_w_in / width, ax_h_in / height))
+        ax.set_xlim(-0.5, n_cols - 0.5)          # 没有示踪剂时保留一列宽的空图
         ax.set_ylim(len(reactions) - 0.5, -0.5)
         ax.set_xticks(range(len(order)))
         ax.set_xticklabels(order, fontsize=7, color=INK2)
@@ -593,31 +758,56 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
                 key = (reaction, tracer)
                 cell = cells.loc[key] if not cells.empty and key in cells.index else None
                 if cell is None or cell["cell_state"] in ("not_infused", "not_measured"):
-                    ax.text(j, i, "/", ha="center", va="center", fontsize=8, color=MUTED)
+                    s = min(0.32, 0.58 / max(y_scale, 1.0))
+                    draw_status_cell(
+                        ax, j - s / 2, i - s * y_scale / 2, s, "not_measured", 0,
+                        palette=NATURE_EDITORIAL, font_scale=1.0, zorder=2.2, draw_box=False, y_up=False, y_scale=y_scale,
+                    )
                     continue
                 level = cell["identifiability"] if isinstance(cell["identifiability"], str) else ""
                 ax.add_patch(plt.Rectangle((j - 0.45, i - 0.4), 0.9, 0.8, color=IDENTIFIABILITY.get(level, HAIRLINE),
                                            lw=0))
                 n = (cell.get("n_numerator"), cell.get("n_denominator"))
                 text = f"{int(n[0])} vs {int(n[1])}" if all(pd.notna(v) for v in n) else ""
-                if cell["cell_state"] == "insufficient_n":
-                    text = "! " + text
-                elif level == "bound_pinned":
-                    text = "x " + text
                 ink = SURFACE if level in ("well_constrained", "moderate") else INK2
-                ax.text(j, i, text, ha="center", va="center", fontsize=6, color=ink)
+                flag_state = (
+                    "insufficient_n" if cell["cell_state"] == "insufficient_n"
+                    else ("bound_pinned" if level == "bound_pinned" else "")
+                )
+                if flag_state:
+                    s = min(0.24, 0.54 / max(y_scale, 1.0))
+                    draw_status_cell(
+                        ax, j - 0.37, i - s * y_scale / 2, s, flag_state, 0,
+                        palette=NATURE_EDITORIAL, font_scale=0.95, zorder=3.0, draw_box=False, y_up=False, y_scale=y_scale,
+                    )
+                    ax.text(j + 0.08, i, text, ha="center", va="center", fontsize=5.8, color=ink, zorder=3.0)
+                else:
+                    ax.text(j, i, text, ha="center", va="center", fontsize=6, color=ink, zorder=3.0)
         for i, reaction in enumerate(reactions):       # 面板声明中预期能约束该反应的示踪剂
             for tracer in panel.expected_tracers.get(reaction, []):
                 if tracer in order:
                     j = order.index(tracer)
                     ax.add_patch(plt.Rectangle((j - 0.48, i - 0.44), 0.96, 0.88, fill=False, lw=0.9,
                                                ls=(0, (2, 1.5)), ec=INK2, zorder=3))
-        fig.text(0.01, 1 - 0.2 / height, f"Tracer coverage  ·  {panel.title}  ·  {tissue}  ·  {contrast}", fontsize=9,
+        fig.text(0.015, 1 - 0.18 / height, f"Tracer coverage  ·  {panel.title}  ·  {tissue}  ·  {contrast}", fontsize=9,
                  color=INK, fontweight="bold", va="top")
         handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in IDENTIFIABILITY.values()]
         fig.legend(handles, [k.replace("_", " ") for k in IDENTIFIABILITY], loc="lower left",
-                   bbox_to_anchor=(0.01, 0.0), ncol=4, fontsize=6, frameon=False)
-        fig.text(0.01, 0.62 / height, "a vs b = animals in numerator vs denominator   / not infused or not measured"
-                 "   x bound-pinned   ! fewer than 2 animals in a group   dashed box: expected tracer",
-                 fontsize=6, color=MUTED)
+                   bbox_to_anchor=(0.015, 0.06 / height), ncol=4, fontsize=5.8, frameon=False)
+        # 纯矢量图标图例条（替代 x / ! / / 文本）
+        lax = fig.add_axes((0.12 / width, 0.52 / height, (width - 0.24) / width, 0.36 / height))
+        lax.set_xlim(0.0, width - 0.24)
+        lax.set_ylim(0.0, 0.36)
+        lax.axis("off")
+        lx, sw = 0.02, 0.15
+        for st, desc in (
+            ("not_measured", "Not infused / measured"),
+            ("bound_pinned", "Bound-pinned"),
+            ("insufficient_n", "Low-n (<2)"),
+        ):
+            draw_status_cell(lax, lx, 0.18 - sw / 2, sw, st, 0, palette=NATURE_EDITORIAL, font_scale=0.92, zorder=2.5, draw_box=True, y_up=True)
+            lax.text(lx + sw + 0.04, 0.18, desc, fontsize=5.6, color=MUTED, va="center", ha="left")
+            lx += sw + 0.06 + estimate_text_width(desc, 5.6, 1.0) + 0.16
+        lax.add_patch(Rectangle((lx, 0.18 - sw * 0.42), sw, sw * 0.84, fill=False, lw=0.85, ls=(0, (2, 1.5)), ec=INK2))
+        lax.text(lx + sw + 0.05, 0.18, "Expected tracer  ·  a vs b = num vs den", fontsize=5.6, color=MUTED, va="center", ha="left")
         return _save(fig, stem, formats)

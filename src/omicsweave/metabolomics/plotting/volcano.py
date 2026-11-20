@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
+from omicsweave.visualization.palettes import NATURE_EDITORIAL
+
 from . import _config  # noqa: F401
 
 
@@ -41,9 +43,9 @@ def plot_volcano(
         print(f"    跳过火山图 {comp_name}: 缺少列 {p_col} 或 {fc_col}")
         return
 
-    c_up = (colors or {}).get("volcano_up", "#D32F2F")
-    c_down = (colors or {}).get("volcano_down", "#1565C0")
-    c_ns = (colors or {}).get("volcano_ns", "#BDBDBD")
+    c_up = (colors or {}).get("volcano_up", NATURE_EDITORIAL.up)
+    c_down = (colors or {}).get("volcano_down", NATURE_EDITORIAL.down)
+    c_ns = (colors or {}).get("volcano_ns", NATURE_EDITORIAL.faint)
 
     x = df[fc_col]
     significance_metric = fdr_col if fdr_col in df.columns else p_col
@@ -91,6 +93,6 @@ def plot_volcano(
 
     out_path = os.path.join(output_dir, tissue)
     os.makedirs(out_path, exist_ok=True)
-    plt.savefig(os.path.join(out_path, f"Volcano_{comp_name}.png"), dpi=150, bbox_inches="tight")
+    plt.savefig(os.path.join(out_path, f"Volcano_{comp_name}.png"), dpi=300, bbox_inches="tight")
     plt.close()
     print(f"    火山图保存: {out_path}/Volcano_{comp_name}.png")

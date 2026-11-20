@@ -56,7 +56,7 @@ def plot_single(
     plt.ylabel(f"PC2 ({var[1]:.2%})")
     plt.legend(title="Group")
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
+    plt.savefig(output_path, dpi=300)
     plt.close()
 
 

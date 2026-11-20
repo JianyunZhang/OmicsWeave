@@ -84,6 +84,7 @@ where = ["src"]
 "omicsweave.integration.mappings" = ["*.yaml", "data/*.tsv", "data/*.json", "data/*.yaml"]
 "omicsweave.core.idmap" = ["data/*.tsv.gz", "data/*.json"]
 "omicsweave.integration" = ["examples/*.yaml", "examples/*.csv"]
+"omicsweave.visualization" = ["assets/glyphs/manifest.json", "assets/glyphs/*/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

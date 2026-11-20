@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <title>evidence_l1</title>
+  <desc>L1，酶容量层支持的预测候选</desc>
+  <path d="M 2 8 L 30 8 L 30 24 L 2 24 Z M 4 22 L 28 22 L 28 10 L 4 10 Z" fill="#242E37"/>
+  <path d="M 6 12 L 12 12 L 12 20 L 6 20 Z M 14 12 L 20 12 L 20 20 L 14 20 Z M 16 18 L 18 18 L 18 14 L 16 14 Z M 22 12 L 28 12 L 28 20 L 22 20 Z M 24 18 L 26 18 L 26 14 L 24 14 Z" fill="#242E37"/>
+</svg>

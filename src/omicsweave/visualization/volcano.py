@@ -32,10 +32,11 @@ from omicsweave.contract.tables import read_differential
 from omicsweave.core.model import Contrast
 
 from .figures import FIGURE_FORMATS, figure_stem, save_figure
+from .palettes import DIRECTIONAL
 from .theme import themed
 
 KIND = "volcano"
-COLORS = {"up": "#D32F2F", "down": "#1565C0", "ns": "#BDBDBD"}
+COLORS = {"up": DIRECTIONAL["up"], "down": DIRECTIONAL["down"], "ns": DIRECTIONAL["ns"]}
 _LEGEND = {"up": "Up", "down": "Down", "ns": "Not selected"}
 _Y_LABELS = {"padj": "−log$_{10}$(adjusted p)", "pvalue": "−log$_{10}$(p)"}
 _Y_NAMES = {"padj": "adjusted p", "pvalue": "p", "effect_size": "effect size"}

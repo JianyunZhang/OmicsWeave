@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>grid_square</title>
+  <desc>平铺方格，适用于布局参考或低密度背景</desc>
+  <path d="M 1 0 L 1 32 M 17 0 L 17 32 M 0 1 L 32 1 M 0 17 L 32 17" fill="none" stroke="#DAE1E6" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
