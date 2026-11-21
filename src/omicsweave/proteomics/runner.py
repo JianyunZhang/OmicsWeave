@@ -56,6 +56,7 @@ from omicsweave.core.config import Experiment, Project
 from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.core.tissues import format_alias_note, select_tissue_file_rows
 from omicsweave.core.validate import biological_samples
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
@@ -163,15 +164,28 @@ _LOADERS: dict[str, Callable[..., tuple[pd.DataFrame | None, dict[str, str]]]] =
 }
 
 
-def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
-              record: OmicsRun) -> list[tuple[str, pd.DataFrame, dict[str, str]]]:
-    """按组织返回 (组织, 蛋白 × sample_id 的原始强度, 蛋白 → UniProt)。列顺序与旧流程的矩阵相同。"""
+def _matrices(project: Project, experiment: Experiment, spec, rows: pd.DataFrame, aggregation: str,
+              record: OmicsRun) -> tuple[list[tuple[str, pd.DataFrame, dict[str, str]]], dict[str, str]]:
+    """按组织返回 ``([(组织, 蛋白 × sample_id 的原始强度, 蛋白 → UniProt)], 生效的别名)``。列顺序与旧流程的矩阵相同。"""
     tissue_files = getattr(spec, "tissue_files", None) or {}
-    jobs = ([(str(t), project.resolve(p)) for t, p in tissue_files.items()] if tissue_files
-            else [(None, project.resolve(f)) for f in spec.files])
+    applied_aliases = experiment.applied_sample_aliases(Omics.PROTEOMICS)
+    if tissue_files:
+        resolved_jobs = [
+            (str(t), experiment.config.canonical_tissue(str(t), Omics.PROTEOMICS), project.resolve(p))
+            for t, p in tissue_files.items()
+        ]
+        canonical_counts: dict[str, int] = {}
+        for raw_key, canon_key, _ in resolved_jobs:
+            canonical_counts[canon_key] = canonical_counts.get(canon_key, 0) + 1
+            if raw_key != canon_key:
+                applied_aliases.setdefault(raw_key, canon_key)
+    else:
+        resolved_jobs = [(None, None, project.resolve(f)) for f in spec.files]
+        canonical_counts = {}
     source = _SOURCE_NAMES[spec.format]
     blocks: dict[str, tuple[pd.DataFrame, dict[str, str]]] = {}
-    for tissue, path in jobs:
+    block_sources: dict[str, list[str]] = {}
+    for raw_key, canon_key, path in resolved_jobs:
         if not path.is_file():
             raise RunError(f"找不到{source} {path}")
         record.inputs.append(path)
@@ -179,7 +193,17 @@ def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
         if matrix is None or matrix.empty:
             record.notes.append(f"{path.name} 中没有通过过滤的蛋白定量，已跳过")
             continue
-        candidates = rows if tissue is None else rows[rows["tissue"] == tissue]
+        if canon_key is None:
+            candidates = rows
+        else:
+            candidates = select_tissue_file_rows(
+                rows, raw_key, canon_key,
+                multi_key_canonical=canonical_counts[canon_key] > 1,
+                raw_tissues=experiment.raw_tissues,
+            )
+        if candidates["column"].duplicated().any():
+            dups = candidates.loc[candidates["column"].duplicated(), "column"].tolist()
+            raise RunError(f"{path.name} 中有多个蛋白组样本对应同一数据列：{_preview(dups)}")
         declared = dict(zip(candidates["column"], candidates["sample_id"]))
         undeclared = [c for c in matrix.columns if c not in declared]
         if undeclared:
@@ -188,15 +212,31 @@ def _matrices(project: Project, spec, rows: pd.DataFrame, aggregation: str,
         present = [c for c in matrix.columns if c in declared]
         by_tissue = candidates.set_index("column")["tissue"]
         for block_tissue in dict.fromkeys(by_tissue[present]):
-            if block_tissue in blocks:
-                raise RunError(f"蛋白组 {block_tissue} 的样本分布在多份报告中")
             columns = [c for c in present if by_tissue[c] == block_tissue]
-            blocks[block_tissue] = (matrix[columns].rename(columns=declared), to_uniprot)
+            renamed = matrix[columns].rename(columns=declared)
+            if block_tissue in blocks:
+                prev_matrix, prev_uniprot = blocks[block_tissue]
+                overlap = [c for c in renamed.columns if c in prev_matrix.columns]
+                if overlap:
+                    raise RunError(f"蛋白组 {block_tissue} 的样本 {_preview(overlap)} 在多份输入中重复出现")
+                merged = pd.concat([prev_matrix, renamed], axis=1)
+                merged_uniprot = {**to_uniprot, **prev_uniprot}
+                blocks[block_tissue] = (merged, merged_uniprot)
+                block_sources[block_tissue].append(path.name)
+            else:
+                blocks[block_tissue] = (renamed, dict(to_uniprot))
+                block_sources[block_tissue] = [path.name]
+    for block_tissue, sources in block_sources.items():
+        if len(sources) > 1:
+            record.notes.append(
+                f"蛋白组 {block_tissue}：已合并来自 {len(sources)} 份输入文件的样本"
+                f"（{'、'.join(sources)}，共 {blocks[block_tissue][0].shape[1]} 个样本）"
+            )
     found = {s for m, _ in blocks.values() for s in m.columns}
     missing = [s for s in rows["sample_id"] if s not in found]
     if missing:
         record.notes.append(f"{source}中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
-    return [(t, m, u) for t, (m, u) in blocks.items()]
+    return [(t, m, u) for t, (m, u) in blocks.items()], applied_aliases
 
 
 def _covariate_table(experiment: Experiment, rows: pd.DataFrame, covariates: list[str]) -> pd.DataFrame:
@@ -232,7 +272,9 @@ def run(ctx: RunContext) -> OmicsRun:
     covariates = [c for c in dict.fromkeys([*experiment.config.design.covariates, *settings["design_covariates"]])
                   if c in rows.columns]
     covariate_table = _covariate_table(experiment, rows, covariates)
-    blocks = _matrices(ctx.project, spec, rows, str(settings["protein_aggregation"]), record)
+    blocks, applied_aliases = _matrices(ctx.project, experiment, spec, rows, str(settings["protein_aggregation"]), record)
+    if applied_aliases:
+        record.notes.append(format_alias_note(Omics.PROTEOMICS.value, applied_aliases))
     if not blocks:
         raise RunError(f"{_SOURCE_NAMES[spec.format]}中没有找到 samples.tsv 声明的样本")
 
@@ -294,6 +336,8 @@ def run(ctx: RunContext) -> OmicsRun:
                                                thresholds=Thresholds(p=pval_cutoff, log2fc=log2fc_cutoff))
     record.parameters = {**record.parameters, "tissues": [t for t, _, _ in blocks], "covariates": covariates,
                          "contrasts": list(dict.fromkeys(contrasts_run)), "analysis": settings}
+    if applied_aliases:
+        record.parameters["tissue_aliases_applied"] = applied_aliases
     return record
 
 

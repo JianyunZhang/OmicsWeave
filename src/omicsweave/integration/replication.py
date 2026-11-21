@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +30,11 @@ from omicsweave.contract.dataset import ContractError
 from omicsweave.contract.manifest import RunManifest, file_record, new_run_id, write_manifest
 from omicsweave.contract.query import open_run
 from omicsweave.contract.tables import effect_standard_errors
-from omicsweave.core.config import Project, load_project
-from omicsweave.core.model import ReplicationSet, ReplicationSource
+from omicsweave.core.config import ConfigError, Project, load_experiment, load_project
+from omicsweave.core.model import ExperimentConfig, ReplicationSet, ReplicationSource
 from omicsweave.core.statistics.linear_model import bh
 from omicsweave.core.statistics.meta_analysis import random_effects_meta
+from omicsweave.core.tissues import merge_tissue_aliases, resolve_tissue
 
 PROJECT_RUNS = "_project"
 SEED = 20261115
@@ -55,6 +57,21 @@ class SourceTable:
     rows: pd.DataFrame        # kind, layer, tissue, key, symbol, feature_id, effect, se, pvalue
 
 
+def _source_experiment_config(root: Path, experiment: str, bundle_dir: Path) -> ExperimentConfig | None:
+    """尽力读取来源实验的配置以取得实验级/组学级 tissue_aliases；合成结果包无配置时返回 None。"""
+    try:
+        return load_experiment(load_project(root), experiment).config
+    except (ConfigError, FileNotFoundError, ValueError):
+        pass
+    exp_json = bundle_dir / "metadata" / "experiment.json"
+    if exp_json.is_file():
+        try:
+            return ExperimentConfig.model_validate(json.loads(exp_json.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    return None
+
+
 def load_source(project: Project, index: int, source: ReplicationSource) -> SourceTable:
     root = project.resolve(source.project) if source.project else project.root
     try:
@@ -62,6 +79,7 @@ def load_source(project: Project, index: int, source: ReplicationSource) -> Sour
                           requires="omics/*/tables/differential.parquet")
     except ContractError as exc:
         raise ReplicationError(f"来源 {index}（{source.experiment}）：{exc}") from exc
+    exp_config = _source_experiment_config(root, source.experiment, bundle.path)
     inputs = sorted(bundle.path.glob("omics/*/tables/*differential.parquet"))
     parts = []
     for path in inputs:
@@ -99,7 +117,14 @@ def load_source(project: Project, index: int, source: ReplicationSource) -> Sour
     if not parts:
         raise ReplicationError(f"来源 {index}（{source.experiment} 的运行 {bundle.run_id}）中没有比较 {source.contrast} 的结果")
     rows = pd.concat(parts, ignore_index=True)
-    rows["tissue"] = rows["tissue"].map(lambda t: source.tissue_map.get(t, t))
+    alias_cache: dict[str, dict[str, str]] = {}
+    for layer in rows["layer"].unique():
+        base = exp_config.tissue_aliases_for(layer) if exp_config is not None else {}
+        try:
+            alias_cache[layer] = merge_tissue_aliases(base, source.tissue_map, label=f"来源 {index} 的 tissue_map")
+        except ValueError as exc:
+            raise ReplicationError(str(exc)) from exc
+    rows["tissue"] = [resolve_tissue(t, alias_cache[layer]) for layer, t in zip(rows["layer"], rows["tissue"])]
     rows = rows.dropna(subset=["effect"]).drop_duplicates(["kind", "layer", "tissue", "key"])
     return SourceTable(index, source, bundle.run_id, inputs, rows)
 

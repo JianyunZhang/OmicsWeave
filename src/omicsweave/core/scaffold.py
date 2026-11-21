@@ -116,6 +116,7 @@ design:
   reversal_pairs:                   # 整合模式 reversal 逐特征判定处理是否逆转了疾病效应
     - {{disease: HFD_vs_LFD, treatment: Drug_vs_Saline_in_HFD}}
   stratify_by: [tissue]             # 各组织分别分析
+  # tissue_aliases: {{}}              # 实验级组织别名 → 规范名，如 {{white_adipose: sq_adipose, cerebral_cortex: brain, renal_cortex: kidney}}
   covariates: []                    # 例如 [batch]
   models: []                        # 公式模型，如 [{{id: diet_pooled, formula: "~ diet + treatment", report: [diet]}}]
   adaptive_shrinkage: false         # true 时给差异结果加 lfsr（自适应收缩的局部假符号率）

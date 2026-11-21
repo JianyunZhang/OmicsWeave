@@ -42,6 +42,7 @@ from omicsweave.core.reliability import (
     BLOCKED, DEFAULT_IMBALANCE, QC_DIR, RELIABILITY_FILE, build_reliability, summary_note,
 )
 from omicsweave.core.run import RunContext, RunError
+from omicsweave.core.tissues import remap_table_tissues
 
 from ..integrate import IntegrationRun, mode_dir
 from .flux_anchored import DERIVED_TABLE
@@ -169,6 +170,17 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     tables = {omics: read_differential(path) for omics, path in paths.items()}
     derived_path = source / "omics" / Omics.METABOLOMICS.value / "tables" / DERIVED_TABLE
     derived = read_differential(derived_path) if derived_path.is_file() else None
+    try:
+        for omics in list(tables):
+            aliases = ctx.experiment.config.tissue_aliases_for(omics)
+            tables[omics], _ = remap_table_tissues(tables[omics], aliases, context=f"源结果包 {source.name} 的 {omics}")
+        if derived is not None:
+            derived, _ = remap_table_tissues(
+                derived, ctx.experiment.config.tissue_aliases_for(Omics.METABOLOMICS),
+                context=f"源结果包 {source.name} 的 metabolomics 派生特征",
+            )
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
 
     reliability, quality_inputs = build_reliability(ctx.experiment, source, tables, float(params["qc_imbalance"]))
     blocked_keys = {(o, t, c) for o, t, c in reliability.loc[reliability["status"].isin(BLOCKED),

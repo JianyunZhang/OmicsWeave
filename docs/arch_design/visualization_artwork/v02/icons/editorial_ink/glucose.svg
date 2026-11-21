@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Glucose</title>
+  <desc>Schematic icon for Glucose.</desc>
+  <path d="M 16 3 L 27 9 L 27 23 L 16 29 L 5 23 L 5 9 Z" transform="translate(.55 .75)" fill="#715844" opacity=".30"/>
+  <path d="M 16 3 L 27 9 L 27 23 L 16 29 L 5 23 L 5 9 Z" fill="#EAC477" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 16 3 L 27 9 L 27 23 L 16 29 L 5 23 L 5 9 Z" transform="translate(-.35 -.40)" fill="none" stroke="#715844" stroke-width=".38" opacity=".72"/>
+  <path d="M 11 11 L 16 8 L 21 11 M 12 20 L 16 22 L 20 20" fill="none" stroke="#34312E" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

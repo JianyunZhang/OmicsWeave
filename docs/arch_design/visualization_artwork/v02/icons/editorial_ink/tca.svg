@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>TCA cycle</title>
+  <desc>Schematic icon for TCA cycle.</desc>
+  <path d="M 24 9 C 16 2 7 6 5 13 C 2 21 9 27 16 27 C 22 27 27 22 27 16 M 24 4 L 24 9 L 19 9" fill="none" stroke="#34312E" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 16 11 L 21 14 L 21 20 L 16 23 L 11 20 L 11 14 Z" transform="translate(.55 .75)" fill="#345D68" opacity=".30"/>
+  <path d="M 16 11 L 21 14 L 21 20 L 16 23 L 11 20 L 11 14 Z" fill="#8BC9A8" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 16 11 L 21 14 L 21 20 L 16 23 L 11 20 L 11 14 Z" transform="translate(-.35 -.40)" fill="none" stroke="#345D68" stroke-width=".38" opacity=".72"/>
+</svg>

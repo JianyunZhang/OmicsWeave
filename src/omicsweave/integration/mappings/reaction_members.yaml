@@ -119,3 +119,100 @@ PYK_c:
       mode: allosteric
       sources: [PMID:26277545]
       note: 文中为 PKM2 的别构抑制物（不抑制 PKM1）；对 PKL 的作用未在该文核对
+# --- Expanded R-axis key regulatory nodes (verified against PubMed 2026-11-20) ---
+#   PMID:6451625   Pilkis SJ, et al. Fructose 2,6-bisphosphate activation of phosphofructokinase. J Biol Chem 1981
+#   PMID:18465796  Zancan P, et al. Fructose-2,6-bisphosphate, citrate, ATP, AMP regulation of PFK-1. IUBMB Life 2008
+#   PMID:2598924   Carling D, Clarke PR, Zammit VA, Hardie DG. AMPK copurification of ACC & HMGCR kinase. Eur J Biochem 1989
+#   PMID:2889619   Carling D, Zammit VA, Hardie DG. Common bicyclic kinase cascade inactivates ACC & HMGCR. FEBS Lett 1987
+#   PMID:16545081  Brownsey RW, et al. Regulation of acetyl-CoA carboxylase (citrate & acyl-CoA). Biochem Soc Trans 2006
+#   PMID:659409    McGarry JD, Leatherman GF, Foster DW. CPT I inhibition by malonyl-CoA. J Biol Chem 1978
+#   PMID:9063439   McGarry JD, Brown NF. The mitochondrial carnitine palmitoyltransferase system. Eur J Biochem 1997
+#   PMID:16679289  Lass A, et al. ATGL lipolysis is activated by CGI-58 (ABHD5). Cell Metab 2006
+#   PMID:20197052  Yang X, et al. G0S2 inhibits adipose triglyceride lipase (ATGL). Cell Metab 2010
+#   PMID:14641008  Holm C. Molecular mechanisms regulating hormone-sensitive lipase (PKA & AMPK). Biochem Soc Trans 2003
+#   PMID:10940339  Holm C, et al. Molecular mechanisms regulating hormone-sensitive lipase. Annu Rev Nutr 2000
+
+PFK_c:
+  direct_enzymes: [Pfkp, Pfkm, Pfkl]
+  regulators:
+    Pfkfb1: &pfk_signaling
+      effect: unknown
+      mode: signaling
+      note: Bifunctional PFKFB enzymes modulate F2,6BP concentration rather than directly modifying PFK-1
+    Pfkfb2: *pfk_signaling
+    Pfkfb3: *pfk_signaling
+    Pfkfb4: *pfk_signaling
+    Akt1: *pfk_signaling
+  transcription_factors: [Tp53, Hif1a, Myc]
+  downstream_enzymes: [Aldoa, Aldob, Aldoc]
+  effectors:
+    Fructose-2,6-bisphosphate:
+      effect: activates
+      mode: allosteric
+      sources: [PMID:6451625, PMID:18465796]
+    AMP:
+      effect: activates
+      mode: allosteric
+      sources: [PMID:18465796]
+    ATP:
+      effect: inhibits
+      mode: allosteric
+      sources: [PMID:18465796]
+    Citrate:
+      effect: inhibits
+      mode: allosteric
+      sources: [PMID:18465796]
+
+ACC_c:
+  direct_enzymes: [Acaca, Acacb]
+  carriers: [Slc25a1]
+  upstream_enzymes: [Acly]
+  downstream_enzymes: [Fasn]
+  pathway_neighbors: [Mlycd]
+  regulators:
+    Prkaa1: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
+    Prkaa2: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
+    Prkag1: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
+  transcription_factors: [Srebf1, Mlxipl, Mlx]
+  effectors:
+    Citrate: {effect: activates, mode: allosteric, sources: [PMID:16545081]}
+    Palmitoyl-CoA: {effect: inhibits, mode: allosteric, sources: [PMID:16545081]}
+
+CPT1_c:
+  direct_enzymes: [Cpt1a, Cpt1b, Cpt1c]
+  effectors:
+    Malonyl-CoA: {effect: inhibits, mode: allosteric, sources: [PMID:659409, PMID:9063439]}
+
+ATGL_c:
+  direct_enzymes: [Pnpla2]
+  regulators:
+    Abhd5: {effect: activates, mode: protein_interaction, sources: [PMID:16679289]}
+    G0s2: {effect: inhibits, mode: protein_interaction, sources: [PMID:20197052]}
+
+HSL_c:
+  direct_enzymes: [Lipe]
+  regulators:
+    Prkaca: {effect: activates, mode: phosphorylation, sources: [PMID:14641008, PMID:10940339]}
+    Prkaa1: {effect: inhibits, mode: phosphorylation, sources: [PMID:14641008]}
+    Prkaa2: {effect: inhibits, mode: phosphorylation, sources: [PMID:14641008]}
+
+HMGCR:
+  direct_enzymes: [Hmgcs1, Hmgcr, Mvk, Pmvk, Mvd, Fdps, Fdft1, Sqle, Lss, Cyp51, Dhcr7, Dhcr24, Soat1, Soat2]
+  regulators:
+    Prkaa1: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
+    Prkaa2: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
+#   PMID:8663466   Powers-Lee SG, et al. Required allosteric effector site for N-acetylglutamate on CPS I. J Biol Chem 1996
+#   PMID:2742825   Rodriguez-Aparicio LB, et al. Physical location of the N-acetyl-L-glutamate site on CPS I. J Biol Chem 1989
+
+CPS1_c:
+  direct_enzymes: [Cps1]
+  regulators:
+    Nags:
+      effect: unknown
+      mode: signaling
+      note: N-acetylglutamate synthase produces N-acetylglutamate, the obligate allosteric activator of CPS1
+  effectors:
+    N-acetylglutamate:
+      effect: activates
+      mode: allosteric
+      sources: [PMID:8663466, PMID:2742825]

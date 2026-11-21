@@ -25,6 +25,7 @@ from omicsweave.contract.tables import read_differential
 from omicsweave.core.config import ConfigError, Experiment, Project, load_experiment, load_project
 from omicsweave.core.model import Omics
 from omicsweave.core.run import RunError
+from omicsweave.core.tissues import merge_tissue_aliases, remap_table_tissues, resolve_tissue, validate_tissue_aliases
 
 DERIVED_TABLE = "derived_differential.parquet"
 SOURCE_KEYS = {"label", "project", "experiment", "run", "layers", "tissue_map", "contrast_map"}
@@ -48,16 +49,41 @@ class DossierSource:
     def run_id(self) -> str:
         return self.run_dir.name
 
+    def layer_tissue_map(self, layer: str) -> dict[str, str]:
+        """该来源在某一层上生效的组织映射表：先套用该实验自身的 ``tissue_aliases``，再叠加 ``tissue_map``。
+
+        本实验的 ``tissue_map`` 只覆盖 MFA 层（与 ``flux_anchored`` 相同）；其他来源的 ``tissue_map`` 覆盖全部层。
+        """
+        omics_layer = Omics.METABOLOMICS.value if layer == "derived" else layer
+        base = self.experiment.config.tissue_aliases_for(omics_layer)
+        if self.is_primary and omics_layer != Omics.MFA.value:
+            return base
+        if not self.tissue_map:
+            return base
+        try:
+            return merge_tissue_aliases(base, self.tissue_map, label=f"来源 {self.label} ({omics_layer}) tissue_map")
+        except ValueError as exc:
+            raise RunError(str(exc)) from exc
+
     def common_tissue(self, layer: str, tissue: str) -> str:
-        if self.is_primary and layer != Omics.MFA.value:
-            return tissue
-        return self.tissue_map.get(tissue, tissue)
+        return resolve_tissue(tissue, self.layer_tissue_map(layer))
 
     def raw_tissue(self, layer: str, tissue: str) -> str:
-        """共同组织名 → 来源自己的组织名（读数据集用）。"""
-        if self.is_primary and layer != Omics.MFA.value:
+        """共同组织名 → 来源结果包磁盘上的组织名（读数据集用）。"""
+        omics_layer = Omics.METABOLOMICS.value if layer == "derived" else layer
+        kind = "derived" if layer == "derived" else "data"
+        if (self.run_dir / "omics" / omics_layer / kind / tissue).is_dir():
             return tissue
-        return next((raw for raw, common in self.tissue_map.items() if common == tissue), tissue)
+        table = self.derived if layer == "derived" else self.tables.get(omics_layer)
+        if table is not None and not table.empty and "tissue" in table.columns:
+            raws = list(dict.fromkeys(table["tissue"].astype(str)))
+            if tissue in raws:
+                return tissue
+            for raw in raws:
+                if self.common_tissue(omics_layer, raw) == tissue:
+                    return raw
+        mapping = self.layer_tissue_map(omics_layer)
+        return next((raw for raw, common in mapping.items() if common == tissue), tissue)
 
     def raw_contrast(self, contrast: str) -> str:
         return next((raw for raw, common in self.contrast_map.items() if common == contrast), contrast)
@@ -68,11 +94,28 @@ class DossierSource:
             return table
         out = table[table["contrast_id"].astype(str).isin(self.contrast_map)].copy()
         out["contrast_id"] = out["contrast_id"].astype(str).map(self.contrast_map)
-        out["tissue"] = out["tissue"].astype(str).map(lambda t: self.common_tissue(layer, t))
+        try:
+            out, _ = remap_table_tissues(out, self.layer_tissue_map(layer), context=f"来源 {self.label} 的 {layer}")
+        except ValueError as exc:
+            raise RunError(str(exc)) from exc
         return out
 
     def mapped_tables(self) -> dict[str, pd.DataFrame]:
         return {omics: self.mapped(table, omics) for omics, table in self.tables.items()}
+
+    def reliability_tables(self) -> dict[str, pd.DataFrame]:
+        """按来源实验自身的 ``tissue_aliases`` 归一后的差异表，使组织名与来源 ``samples.tsv`` 对齐。"""
+        out: dict[str, pd.DataFrame] = {}
+        for omics, table in self.tables.items():
+            try:
+                mapped, _ = remap_table_tissues(
+                    table, self.experiment.config.tissue_aliases_for(omics),
+                    context=f"来源 {self.label} 的 {omics}",
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from exc
+            out[omics] = mapped
+        return out
 
 
 def _read_tables(run_dir: Path, layers: tuple[str, ...]) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None, list[Path]]:
@@ -125,6 +168,9 @@ def other_source(project: Project, spec: dict[str, Any], primary_contrasts: set[
         raise RunError(f"来源 {label}（运行 {bundle.path.name}）中没有比较 {missing}")
     if not contrast_map:
         raise RunError(f"来源 {label} 没有与本实验对应的比较：用 contrast_map 声明（来源的比较 → 本实验的比较）")
-    tissue_map = {str(k): str(v) for k, v in (spec.get("tissue_map") or {}).items()}
+    try:
+        tissue_map = validate_tissue_aliases(spec.get("tissue_map") or {}, f"来源 {label} 的 tissue_map")
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
     return DossierSource(label, experiment, bundle.path, tissue_map, contrast_map, layers, False, tables, derived,
                          inputs)

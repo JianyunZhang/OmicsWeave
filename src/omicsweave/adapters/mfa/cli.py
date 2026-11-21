@@ -15,9 +15,17 @@ import sys
 from pathlib import Path
 
 from omicsweave.contract.dataset import ContractError
-from omicsweave.contract.mfa import MFAResults, read_mfa, validate_mfa, write_mfa, write_template
+from omicsweave.contract.mfa import (
+    MFAResults,
+    apply_mfa_tissue_aliases,
+    read_mfa,
+    validate_mfa,
+    write_mfa,
+    write_template,
+)
 from omicsweave.core.config import ConfigError, load_experiment, load_project
 from omicsweave.core.model import Omics
+from omicsweave.core.tissues import format_alias_note
 
 from .legacy import convert_legacy_mfa, detect_legacy_kind, read_input_sets, read_legacy_mid
 
@@ -87,6 +95,9 @@ def _check_experiment(experiment_id: str) -> int:
         return _report(["experiment.yaml 中 mfa.input.files 为空"], [])
     results, notes = read_input_sets(files, spec.format, model_id=getattr(spec, "model_id", None),
                                      flux_units=getattr(spec, "flux_units", None))
+    results, applied_aliases = apply_mfa_tissue_aliases(results, exp.config.tissue_aliases_for(Omics.MFA))
+    if applied_aliases:
+        notes.append(format_alias_note(Omics.MFA.value, applied_aliases))
     errors, warnings = validate_mfa(results)
 
     rows = exp.samples[exp.samples["omics"] == Omics.MFA.value]

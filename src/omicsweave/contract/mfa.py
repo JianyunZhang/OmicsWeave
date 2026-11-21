@@ -32,6 +32,8 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from omicsweave.core.tissues import remap_tissue_series
+
 from .dataset import ContractError
 
 TEMPLATE_VERSION = 1
@@ -289,6 +291,60 @@ def merge_mfa(parts: list[MFAResults]) -> MFAResults:
     info = MFAInfo(model_id=parts[0].info.model_id, flux_units=parts[0].info.flux_units,
                    software=joined("software"), tracer=joined("tracer"), notes=joined("notes"))
     return MFAResults(info=info, flux=stacked("flux"), mid=stacked("mid"), fits=stacked("fits"))
+
+
+def apply_mfa_tissue_aliases(results: MFAResults,
+                             aliases: dict[str, str] | None) -> tuple[MFAResults, dict[str, str]]:
+    """按组织别名表归一 ``MFAResults`` 中 ``flux`` 与 ``mid`` 的 ``tissue`` 列。
+
+    若同一样本内有多个原组织名映射到同一个规范组织并导致同一反应/MID 冲突，抛出 :class:`ContractError`。
+    """
+    if not aliases:
+        return results, {}
+    applied: dict[str, str] = {}
+    flux = results.flux
+    if not flux.empty and "tissue" in flux.columns:
+        orig_tissue = flux["tissue"].astype(str)
+        mapped, flux_applied = remap_tissue_series(orig_tissue, aliases)
+        if flux_applied:
+            applied.update(flux_applied)
+            flux = flux.copy()
+            flux["tissue"] = mapped
+            key = ["sample_id", "tissue", "reaction_id", "direction", "fit_id"]
+            if set(key) <= set(flux.columns):
+                before_dup = results.flux.duplicated(key)
+                after_dup = flux.duplicated(key, keep=False) & ~before_dup
+                if after_dup.any():
+                    samples = sorted(flux.loc[after_dup, "sample_id"].astype(str).unique())
+                    tissues = sorted(flux.loc[after_dup, "tissue"].astype(str).unique())
+                    raise ContractError(
+                        f"组织别名归一后，同一 MFA 样本（{', '.join(samples[:5])}）在同一规范组织"
+                        f"（{', '.join(tissues[:5])}）下出现重复通量行，请检查 tissue_aliases 是否合并了同一样本内的不同组织"
+                    )
+
+    mid = results.mid
+    if mid is not None and not mid.empty and "tissue" in mid.columns:
+        orig_mid = mid["tissue"].astype(str)
+        mapped_mid, mid_applied = remap_tissue_series(orig_mid, aliases)
+        if mid_applied:
+            applied.update(mid_applied)
+            mid = mid.copy()
+            mid["tissue"] = mapped_mid
+            mid_key = ["sample_id", "tissue", "metabolite", "isotopologue"]
+            if set(mid_key) <= set(mid.columns):
+                before_dup = results.mid.duplicated(mid_key)
+                after_dup = mid.duplicated(mid_key, keep=False) & ~before_dup
+                if after_dup.any():
+                    samples = sorted(mid.loc[after_dup, "sample_id"].astype(str).unique())
+                    tissues = sorted(mid.loc[after_dup, "tissue"].astype(str).unique())
+                    raise ContractError(
+                        f"组织别名归一后，同一 MFA 样本（{', '.join(samples[:5])}）在同一规范组织"
+                        f"（{', '.join(tissues[:5])}）下出现重复 MID 行"
+                    )
+
+    if not applied:
+        return results, {}
+    return MFAResults(info=results.info, flux=flux, mid=mid, fits=results.fits), applied
 
 
 def _parse_info(raw: dict[str, Any], source: str) -> MFAInfo:

@@ -176,8 +176,8 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
                 spec = omics_config.input
                 if spec.level == "raw" or spec.format == "salmon":
                     problems.append(f"{exp_id} 的 {layer.value} 输入格式 {spec.format} 尚未接入统一运行")
-                if spec.format == "counts_matrix" and len(spec.files) != 1:
-                    problems.append(f"{exp_id} 的 counts_matrix 需要一张包含样本的计数矩阵")
+                if spec.format == "counts_matrix" and not spec.files and not getattr(spec, "tissue_files", None):
+                    problems.append(f"{exp_id} 的 counts_matrix 需要至少一张包含样本的计数矩阵")
                 if spec.format == "kallisto":
                     mapping = getattr(spec, "tx2gene", None) or omics_config.adapter.get("transcriptome_fasta")
                     if not mapping or not project.resolve(mapping).is_file():

@@ -215,6 +215,7 @@ PALETTES: dict[str, SemanticPalette] = {
     "nature_editorial": NATURE_EDITORIAL,
     "metro_atlas": METRO_ATLAS,
     "slide_dark": SLIDE_DARK,
+    "poster_editorial": NATURE_EDITORIAL,
 }
 
 # 默认全局常量（对应 nature_editorial，供所有模块统一导入）

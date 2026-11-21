@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -33,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from omicsweave.contract.export import write_excel_tsv
+from omicsweave.core.tissues import merge_tissue_aliases, resolve_tissue
 from omicsweave.contract.manifest import read_manifest
 from omicsweave.core.provenance import sha256_file
 from omicsweave.core.reliability import QC_DIR, RELIABILITY_FILE
@@ -84,6 +86,22 @@ class Candidates:
     files: list[Path] = field(default_factory=list)
 
 
+def _bundle_tissue_aliases(integration_dir: Path, manifest) -> dict[str, str]:
+    design_aliases: dict[str, str] = {}
+    exp_json = integration_dir / "metadata" / "experiment.json"
+    if exp_json.is_file():
+        try:
+            raw = json.loads(exp_json.read_text(encoding="utf-8"))
+            design_aliases = dict(((raw.get("design") or {}).get("tissue_aliases")) or {})
+        except (OSError, ValueError, TypeError):
+            design_aliases = {}
+    dossier_map = dict(((manifest.parameters.get(DOSSIER) or {}).get("tissue_map")) or {})
+    try:
+        return merge_tissue_aliases(design_aliases, dossier_map)
+    except ValueError:
+        return design_aliases
+
+
 def panel_info(integration_dir: Path, project_root: Path) -> PanelInfo | None:
     """整合运行清单登记的 panels.yaml；内容与登记的校验值不同时不读取面板，只记一条说明。"""
     manifest = read_manifest(integration_dir)
@@ -103,6 +121,11 @@ def panel_info(integration_dir: Path, project_root: Path) -> PanelInfo | None:
         return info
     try:
         info.panels = load_panels(path)
+        aliases = _bundle_tissue_aliases(integration_dir, manifest)
+        if aliases:
+            for panel in info.panels.values():
+                if panel.tissues:
+                    panel.tissues = list(dict.fromkeys(resolve_tissue(t, aliases) for t in panel.tissues))
         selection = load_panel_selection(path)
     except PanelError as exc:
         info.note = f"面板声明无法读取：{exc}"

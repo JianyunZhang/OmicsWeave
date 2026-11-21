@@ -204,7 +204,7 @@ class Delivery:
             row["target"] = PurePosixPath(PANELS_DIR, row["面板"], row["组织"], row["文件"])
             destination = self.directory / row["target"]
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(self.directory / row["source"], destination)
+            shutil.copy2((self.directory / row["source"]).resolve(), destination)
         return rows
 
     def copy_maps(self) -> list[dict]:
@@ -244,7 +244,7 @@ class Delivery:
                 continue
             destination = self.directory / row["target"]
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(self.directory / path, destination)
+            shutil.copy2((self.directory / path).resolve(), destination)
             rows.append(row)
         return rows
 
@@ -286,7 +286,7 @@ class Delivery:
             return None
         from omicsweave.integration.candidates import write_candidates
 
-        result = write_candidates(self.directory / integrate["path"], self.directory / CANDIDATES_DIR,
+        result = write_candidates((self.directory / integrate["path"]).resolve(), self.directory / CANDIDATES_DIR,
                                   self.project_root)
         if result is None:
             return None
@@ -312,7 +312,7 @@ class Delivery:
         self.collect_exports()
         tables, contrasts = [], []
         for item in self.artifacts:
-            path = self.directory / item["path"]
+            path = (self.directory / item["path"]).resolve()
             if item.get("missing") or path.suffix != ".parquet" or path.parent.name not in {"tables", "qc", "evaluation"}:
                 continue
             tables.append({"阶段": item["stage"], "范围": path.parent.parent.name, "表": path.stem,

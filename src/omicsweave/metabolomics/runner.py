@@ -50,6 +50,7 @@ from omicsweave.core.config import Experiment, Project
 from omicsweave.core.idmap.metabolite_id_mapping import annotate_metabolites
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.core.tissues import format_alias_note, select_tissue_file_rows
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from .derived_features import UNITS, DerivedFeatures, derive_features
@@ -84,6 +85,64 @@ class _Block:
     biological: list[str]
     qc: list[str]
     annotations: list[str]
+    paths: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.paths:
+            self.paths = (self.path,)
+
+
+def _merge_blocks(existing: _Block, incoming: _Block, spec) -> _Block:
+    """将同一规范组织来自多张数据表的峰面积表按特征 ID 合并为单一块。"""
+    overlap = [s for s in (*incoming.biological, *incoming.qc) if s in set(existing.biological) | set(existing.qc)]
+    if overlap:
+        raise RunError(f"代谢组 {existing.tissue} 的样本 {'、'.join(overlap[:5])} 在多张数据表中重复出现")
+    fid_left, _ = _feature_columns(existing, spec)
+    fid_right, _ = _feature_columns(incoming, spec)
+    if fid_left != fid_right:
+        raise RunError(
+            f"代谢组 {existing.tissue} 合并多张数据表时特征 ID 列不一致："
+            f"{existing.path.name} 为 {fid_left!r}，{incoming.path.name} 为 {fid_right!r}"
+        )
+    left_ids = existing.table[fid_left].astype(str)
+    right_ids = incoming.table[fid_right].astype(str)
+    for label, ids in ((existing.path.name, left_ids), (incoming.path.name, right_ids)):
+        if ids.duplicated().any():
+            raise RunError(f"代谢组 {existing.tissue}（{label}）的特征 ID 列 {fid_left} 有重复："
+                           f"{'、'.join(ids[ids.duplicated()][:5])}")
+    left = existing.table.set_axis(left_ids)
+    right = incoming.table.set_axis(right_ids)
+    ordered = pd.Index(dict.fromkeys([*left.index, *right.index]), name="feature_id")
+    annotations = list(dict.fromkeys([*existing.annotations, *incoming.annotations]))
+    cols: dict[str, pd.Series] = {}
+    for col in annotations:
+        if col == fid_left:
+            cols[col] = pd.Series(ordered.to_numpy(), index=ordered)
+        elif col in left.columns and col in right.columns:
+            primary = left[col].reindex(ordered)
+            fallback = right[col].reindex(ordered)
+            empty = primary.isna() | primary.astype(str).str.strip().eq("")
+            cols[col] = primary.where(~empty, fallback)
+        elif col in left.columns:
+            cols[col] = left[col].reindex(ordered)
+        else:
+            cols[col] = right[col].reindex(ordered)
+    left_samples = [c for c in existing.table.columns if c not in existing.annotations]
+    right_samples = [c for c in incoming.table.columns if c not in incoming.annotations]
+    for col in left_samples:
+        cols[col] = left[col].reindex(ordered)
+    for col in right_samples:
+        cols[col] = right[col].reindex(ordered)
+    merged = pd.DataFrame(cols, index=ordered).reset_index(drop=True)
+    return _Block(
+        tissue=existing.tissue,
+        path=existing.path,
+        table=merged,
+        biological=[*existing.biological, *incoming.biological],
+        qc=[*existing.qc, *incoming.qc],
+        annotations=annotations,
+        paths=(*existing.paths, *incoming.paths),
+    )
 
 
 def _settings(analysis: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -106,27 +165,43 @@ def _read_table(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep="," if suffix == ".csv" else "\t")
 
 
-def _blocks(project: Project, experiment: Experiment, spec) -> tuple[list[_Block], list[Path], list[str]]:
+def _blocks(project: Project, experiment: Experiment, spec) -> tuple[list[_Block], list[Path], list[str], dict[str, str]]:
     rows = experiment.samples[experiment.samples["omics"] == Omics.METABOLOMICS.value].copy()
     rows["column"] = rows["data_column"].where(rows["data_column"] != "", rows["sample_id"]) \
         if "data_column" in rows.columns else rows["sample_id"]
     rows["type"] = rows["sample_type"].replace("", "sample") if "sample_type" in rows.columns else "sample"
     rows = rows[~rows["type"].isin(_EXCLUDED_TYPES)]
     declared = set(rows["column"])
+    applied_aliases = experiment.applied_sample_aliases(Omics.METABOLOMICS)
 
     tissue_files = getattr(spec, "tissue_files", None) or {}
-    jobs = ([(str(t), project.resolve(p)) for t, p in tissue_files.items()] if tissue_files
-            else [(None, project.resolve(f)) for f in spec.files])
+    if tissue_files:
+        resolved_jobs = [
+            (str(t), experiment.config.canonical_tissue(str(t), Omics.METABOLOMICS), project.resolve(p))
+            for t, p in tissue_files.items()
+        ]
+        canonical_counts: dict[str, int] = {}
+        for raw_key, canon_key, _ in resolved_jobs:
+            canonical_counts[canon_key] = canonical_counts.get(canon_key, 0) + 1
+            if raw_key != canon_key:
+                applied_aliases.setdefault(raw_key, canon_key)
+    else:
+        resolved_jobs = [(None, None, project.resolve(f)) for f in spec.files]
+        canonical_counts = {}
     blocks: dict[str, _Block] = {}
     notes: list[str] = []
-    for tissue, path in jobs:
+    for raw_key, canon_key, path in resolved_jobs:
         table = _read_table(path)
         table.columns = [str(c) for c in table.columns]
-        candidates = rows if tissue is None else rows[rows["tissue"] == tissue]
+        if canon_key is None:
+            candidates = rows
+        else:
+            candidates = select_tissue_file_rows(
+                rows, raw_key, canon_key,
+                multi_key_canonical=canonical_counts[canon_key] > 1,
+                raw_tissues=experiment.raw_tissues,
+            )
         present = candidates[candidates["column"].isin(table.columns)]
-        if tissue is not None and len(present) < len(candidates):
-            absent = candidates.loc[~candidates["column"].isin(table.columns), "sample_id"]
-            notes.append(f"代谢组 {tissue} 的数据表中找不到 {len(absent)} 个样本：{'、'.join(absent[:5])}")
         metadata = set(classify_data_columns(table.columns).metadata)
         annotations = [c for c in table.columns if c not in declared and c in metadata]
         ignored = [c for c in table.columns if c not in declared and c not in metadata]
@@ -136,18 +211,28 @@ def _blocks(project: Project, experiment: Experiment, spec) -> tuple[list[_Block
             if part["column"].duplicated().any():
                 raise RunError(f"代谢组 {block_tissue} 有多个样本对应数据表中的同一列："
                                f"{'、'.join(part.loc[part['column'].duplicated(), 'column'][:5])}")
-            if block_tissue in blocks:
-                raise RunError(f"代谢组 {block_tissue} 的样本分布在多张数据表中（{blocks[block_tissue].path.name}、{path.name}）")
             by_column = part.set_index("column")
             order = [c for c in table.columns if c in by_column.index]
             biological = [by_column.at[c, "sample_id"] for c in order if by_column.at[c, "type"] not in _QC_TYPES]
             qc = [by_column.at[c, "sample_id"] for c in order if by_column.at[c, "type"] in _QC_TYPES]
             renamed = table[annotations + order].rename(columns=dict(zip(order, by_column.loc[order, "sample_id"])))
-            blocks[block_tissue] = _Block(block_tissue, path, renamed, biological, qc, annotations)
+            incoming = _Block(block_tissue, path, renamed, biological, qc, annotations)
+            blocks[block_tissue] = _merge_blocks(blocks[block_tissue], incoming, spec) if block_tissue in blocks else incoming
+    for block in blocks.values():
+        if len(block.paths) > 1:
+            names = "、".join(p.name for p in block.paths)
+            notes.append(f"代谢组 {block.tissue}：已合并来自 {len(block.paths)} 张数据表的样本（{names}，共 {len(block.biological)} 个生物学样本）")
+    found_samples = {s for block in blocks.values() for s in (*block.biological, *block.qc)}
+    for tissue, part in rows.groupby("tissue", sort=False):
+        if tissue not in blocks:
+            continue
+        absent = [s for s in part["sample_id"] if s not in found_samples]
+        if absent:
+            notes.append(f"代谢组 {tissue} 的数据表中找不到 {len(absent)} 个样本：{'、'.join(absent[:5])}")
     unread = sorted(set(rows["tissue"]) - set(blocks))
     if unread:
         notes.append(f"samples.tsv 中以下组织的代谢组样本没有对应的数据表：{'、'.join(unread)}")
-    return list(blocks.values()), [path for _, path in jobs], notes
+    return list(blocks.values()), [path for _, _, path in resolved_jobs], notes, applied_aliases
 
 
 def _feature_columns(block: _Block, spec) -> tuple[str, str | None]:
@@ -233,8 +318,10 @@ def run(ctx: RunContext) -> OmicsRun:
     out = ctx.omics_dir(Omics.METABOLOMICS)
     record = OmicsRun(Omics.METABOLOMICS)
     settings, record.notes = _settings(experiment.config.omics.metabolomics.analysis)
-    blocks, record.inputs, notes = _blocks(ctx.project, experiment, spec)
+    blocks, record.inputs, notes, applied_aliases = _blocks(ctx.project, experiment, spec)
     record.notes += notes
+    if applied_aliases:
+        record.notes.append(format_alias_note(Omics.METABOLOMICS.value, applied_aliases))
     if not blocks:
         raise RunError("代谢组数据表中没有找到 samples.tsv 声明的样本")
 
@@ -274,9 +361,10 @@ def run(ctx: RunContext) -> OmicsRun:
             raise RunError(f"代谢组 {tissue} 的特征 ID 列 {feature_id} 有重复：{'、'.join(ids[ids.duplicated()][:5])}")
 
         matrix = processed[block.biological].set_axis(ids)
+        source_file = block.path.name if len(block.paths) == 1 else "; ".join(p.name for p in block.paths)
         meta = DatasetMeta(omics=Omics.METABOLOMICS, tissue=tissue, value_type=ValueType.PEAK_AREA, scale="log2",
                            normalization=pre.summary["normalization_method"], feature_id_type=feature_id,
-                           source={"file": block.path.name, "detection_rule": pre.summary["detection_rule"]})
+                           source={"file": source_file, "detection_rule": pre.summary["detection_rule"]})
         write_dataset(out / "data" / tissue, Dataset(matrix, _features(processed, block.annotations, ids), meta))
 
         derived = None
@@ -380,4 +468,6 @@ def run(ctx: RunContext) -> OmicsRun:
         "derived_features": derived_counts,
         "analysis": settings,
     }
+    if applied_aliases:
+        record.parameters["tissue_aliases_applied"] = applied_aliases
     return record

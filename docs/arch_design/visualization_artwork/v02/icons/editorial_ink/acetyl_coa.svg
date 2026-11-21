@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Acetyl-CoA</title>
+  <desc>Schematic icon for Acetyl-CoA.</desc>
+  <path d="M 5 12 L 12 7 L 20 12 L 20 20 L 12 25 L 5 20 Z" transform="translate(.55 .75)" fill="#715844" opacity=".30"/>
+  <path d="M 5 12 L 12 7 L 20 12 L 20 20 L 12 25 L 5 20 Z" fill="#EAC477" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 5 12 L 12 7 L 20 12 L 20 20 L 12 25 L 5 20 Z" transform="translate(-.35 -.40)" fill="none" stroke="#715844" stroke-width=".38" opacity=".72"/>
+  <path d="M 20 16 L 24 16 M 28 14 L 28 22 M 25 21 L 25 25" fill="none" stroke="#34312E" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 23 10 L 30 10 L 30 16 L 23 16 Z" transform="translate(.55 .75)" fill="#715844" opacity=".30"/>
+  <path d="M 23 10 L 30 10 L 30 16 L 23 16 Z" fill="#EAC477" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 23 10 L 30 10 L 30 16 L 23 16 Z" transform="translate(-.35 -.40)" fill="none" stroke="#715844" stroke-width=".38" opacity=".72"/>
+  <path d="M 9 13 L 13 10 L 17 13" fill="none" stroke="#FFF0BF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -165,6 +165,16 @@ def fit_counts(model: ModelSpec, design: DesignMatrix, table: pd.DataFrame, data
             with contextlib.redirect_stdout(io.StringIO()):
                 result = run_pydeseq2_analysis(counts, meta, design_formula=" + ".join([*others, "condition"]),
                                                contrast=("condition", numerator, reference))
+        except ImportError as exc:
+            name = getattr(exc, "name", None) or ""
+            if name.split(".")[0] == "omicsweave":
+                raise
+            from omicsweave.core.run import RunError
+            pkg = name.split(".")[0] or "pydeseq2"
+            raise RunError(
+                f"模型 {model.id} 在转录组 {tissue} 运行 PyDESeq2 需要可选依赖 {pkg}（{exc}）；"
+                f'请安装：pip install "omicsweave[transcriptomics]"（或 pip install {pkg}）'
+            ) from exc
         except Exception as exc:  # noqa: BLE001 — PyDESeq2 的拟合失败写入提示，不中断其他模型
             notes.append(f"模型 {model.id} 在转录组 {tissue} 的 PyDESeq2 拟合失败：{exc}")
             continue

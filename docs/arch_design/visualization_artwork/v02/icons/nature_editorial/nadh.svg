@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>NADH</title>
+  <desc>Schematic icon for NADH.</desc>
+  <path d="M 4 15 L 8 8 L 14 10 L 17 16 L 12 22 L 6 21 Z M 17 16 L 22 10 L 28 12 L 30 19 L 25 24 L 20 22 Z" fill="#EDE1FC" stroke="#283B43" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 8 16 L 12 13 M 22 18 L 26 18 M 24 16 L 24 20" fill="none" stroke="#283B43" stroke-width="1.54" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

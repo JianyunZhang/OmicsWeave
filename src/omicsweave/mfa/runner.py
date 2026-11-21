@@ -51,11 +51,12 @@ from omicsweave.adapters.mfa.legacy import (
     read_input_sets,
 )
 from omicsweave.contract.dataset import ContractError, Dataset, DatasetMeta, ValueType, empty_features, write_dataset
-from omicsweave.contract.mfa import MFAResults, validate_mfa
+from omicsweave.contract.mfa import MFAResults, apply_mfa_tissue_aliases, validate_mfa
 from omicsweave.contract.tables import validate_differential, write_differential
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
+from omicsweave.core.tissues import format_alias_note
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
 from . import flux_groups as fg
@@ -324,6 +325,13 @@ def run(ctx: RunContext) -> OmicsRun:
 
     results, record.inputs, notes = load_results(ctx.project, settings.input)
     record.notes += [f"MFA 输入：{n}" for n in notes]
+    aliases = experiment.config.tissue_aliases_for(Omics.MFA)
+    try:
+        results, applied_aliases = apply_mfa_tissue_aliases(results, aliases)
+    except ContractError as exc:
+        raise RunError(str(exc)) from exc
+    if applied_aliases:
+        record.notes.append(format_alias_note(Omics.MFA.value, applied_aliases))
     errors, warnings = validate_mfa(results)
     if errors:
         raise RunError("MFA 输入不符合标准格式：" + "；".join(errors))
@@ -386,4 +394,6 @@ def run(ctx: RunContext) -> OmicsRun:
     if tracer_of is not None:
         counts = pd.Series(tracer_of).value_counts()
         record.parameters["tracers"] = {str(t): int(counts[t]) for t in sorted(counts.index)}
+    if applied_aliases:
+        record.parameters["tissue_aliases_applied"] = applied_aliases
     return record

@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,14 +242,21 @@ def _check_inputs(exp: Experiment, out: _Collector) -> None:
             else:
                 _check_raw_files(project, omics, spec.format, getattr(spec, "layout", None), rows, out)
         else:
-            if not spec.files:
+            tissue_files = getattr(spec, "tissue_files", None) or {}
+            input_files = list(dict.fromkeys([*spec.files, *tissue_files.values()]))
+            if not input_files:
                 out.error(f"{omics.value} 使用表格层输入，需要在 input.files 中列出文件")
-            for f in spec.files:
+            for f in input_files:
                 if not project.resolve(f).exists():
                     out.error(f"{omics.value} 的输入文件不存在：{f}")
             if omics is Omics.MFA:
                 _check_mfa_input(project, spec, out)
                 _check_mfa_tracers(rows, out)
+            if omics is Omics.TRANSCRIPTOMICS and importlib.util.find_spec("pydeseq2") is None:
+                out.warning(
+                    "未检测到可选依赖 pydeseq2：每组生物学重复 ≥ 2 的转录组差异表达需要 PyDESeq2，"
+                    '运行前请安装：pip install "omicsweave[transcriptomics]"（或 pip install pydeseq2）'
+                )
 
         executable = settings.adapter.get("executable")
         if executable and shutil.which(str(executable)) is None and not project.resolve(executable).is_file():

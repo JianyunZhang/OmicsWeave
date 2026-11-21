@@ -36,7 +36,7 @@ from omicsweave.visualization.theme import (
 class ThemePresetsTest(unittest.TestCase):
     def test_default_preset_is_nature_editorial(self) -> None:
         self.assertEqual(DEFAULT_PRESET, "nature_editorial")
-        self.assertEqual(set(list_presets()), {"nature_editorial", "metro_atlas", "slide_dark"})
+        self.assertEqual(set(list_presets()), {"nature_editorial", "metro_atlas", "slide_dark", "poster_editorial"})
         preset = get_preset()
         self.assertEqual(preset.palette.surface, "#FFFFFF")
         self.assertFalse(preset.rc["axes.spines.top"])
@@ -61,6 +61,16 @@ class ThemePresetsTest(unittest.TestCase):
                 self.assertEqual(plt.rcParams["figure.facecolor"], "#111827")
         self.assertEqual(dict(matplotlib.rcParams), rc_before)
 
+    def test_poster_preset_uses_horizontal_guides_and_preserves_direction_colors(self) -> None:
+        with themed(preset="poster_editorial") as poster:
+            self.assertEqual(poster.palette.up, NATURE_EDITORIAL.up)
+            self.assertEqual(poster.palette.down, NATURE_EDITORIAL.down)
+            self.assertTrue(plt.rcParams["axes.grid"])
+            self.assertEqual(plt.rcParams["axes.grid.axis"], "y")
+            self.assertEqual(plt.rcParams["axes.titlelocation"], "left")
+        with themed():
+            self.assertFalse(plt.rcParams["axes.grid"])
+
     def test_monochrome_tier_tokens_and_colorblind_safe_grades(self) -> None:
         tok_light = tier_tokens("nature_editorial")
         tok_dark = tier_tokens("slide_dark")
@@ -72,6 +82,7 @@ class ThemePresetsTest(unittest.TestCase):
         # scoring_plots 不再使用红绿对比色 (#1B7837)
         self.assertNotEqual(EVIDENCE_GRADE_COLORS["Replicated"], "#1B7837")
         self.assertEqual(get_palette("nature_editorial").up, NATURE_EDITORIAL.up)
+        self.assertEqual(get_palette("poster_editorial"), get_preset("poster_editorial").palette)
         self.assertEqual(len(tint_color("#2166AC", 0.1)), 3)
 
     def test_journal_figsize_and_deterministic_save_stem(self) -> None:

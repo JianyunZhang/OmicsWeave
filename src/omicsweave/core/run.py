@@ -228,6 +228,14 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
         func, _ = runners[o]
         try:
             runs.append(func(ctx))
+        except ModuleNotFoundError as exc:
+            if exc.name and exc.name.split(".")[0] == "omicsweave":
+                raise
+            pkg = exc.name.split(".")[0] if exc.name else str(exc)
+            raise RunError(
+                f"运行 {o.value} 需要可选依赖 {pkg}，请安装：pip install \"omicsweave[{o.value}]\""
+                f"（结果包 {ctx.run_dir} 不完整，没有 manifest.json）"
+            ) from exc
         except RunError as exc:
             raise RunError(f"{o.value} 运行失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
 

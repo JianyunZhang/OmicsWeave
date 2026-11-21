@@ -1,0 +1,710 @@
+{
+  "schema_version": 1,
+  "artwork_version": "v02",
+  "palettes": {
+    "aqua": [
+      "#DEF3D8",
+      "#8BC9A8",
+      "#4D9D91",
+      "#345D68"
+    ],
+    "clay": [
+      "#FFE2CC",
+      "#D4927F",
+      "#A76572",
+      "#63485D"
+    ],
+    "amber": [
+      "#FFF0BF",
+      "#EAC477",
+      "#BA8954",
+      "#715844"
+    ],
+    "violet": [
+      "#EDE1FC",
+      "#B9A6DC",
+      "#8777B5",
+      "#584A78"
+    ],
+    "sky": [
+      "#D8F0F3",
+      "#8FBDD3",
+      "#5A83AC",
+      "#384E70"
+    ],
+    "neutral": [
+      "#F0EADF",
+      "#B9B8A5",
+      "#858F8A",
+      "#4E625E"
+    ]
+  },
+  "icons": {
+    "g6p": {
+      "label": "Glucose-6-phosphate",
+      "category": "metabolite",
+      "palette": "aqua",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/g6p.svg",
+        "editorial_ink": "icons/editorial_ink/g6p.svg",
+        "pixel_abstract": "icons/pixel_abstract/g6p.svg"
+      },
+      "pixel_png": "icons/pixel_png/g6p.png"
+    },
+    "lactate": {
+      "label": "Lactate",
+      "category": "metabolite",
+      "palette": "clay",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/lactate.svg",
+        "editorial_ink": "icons/editorial_ink/lactate.svg",
+        "pixel_abstract": "icons/pixel_abstract/lactate.svg"
+      },
+      "pixel_png": "icons/pixel_png/lactate.png"
+    },
+    "acetyl_coa": {
+      "label": "Acetyl-CoA",
+      "category": "metabolite",
+      "palette": "amber",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/acetyl_coa.svg",
+        "editorial_ink": "icons/editorial_ink/acetyl_coa.svg",
+        "pixel_abstract": "icons/pixel_abstract/acetyl_coa.svg"
+      },
+      "pixel_png": "icons/pixel_png/acetyl_coa.png"
+    },
+    "citrate": {
+      "label": "Citrate",
+      "category": "metabolite",
+      "palette": "aqua",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/citrate.svg",
+        "editorial_ink": "icons/editorial_ink/citrate.svg",
+        "pixel_abstract": "icons/pixel_abstract/citrate.svg"
+      },
+      "pixel_png": "icons/pixel_png/citrate.png"
+    },
+    "succinate": {
+      "label": "Succinate",
+      "category": "metabolite",
+      "palette": "sky",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/succinate.svg",
+        "editorial_ink": "icons/editorial_ink/succinate.svg",
+        "pixel_abstract": "icons/pixel_abstract/succinate.svg"
+      },
+      "pixel_png": "icons/pixel_png/succinate.png"
+    },
+    "nadh": {
+      "label": "NADH",
+      "category": "metabolite",
+      "palette": "violet",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/nadh.svg",
+        "editorial_ink": "icons/editorial_ink/nadh.svg",
+        "pixel_abstract": "icons/pixel_abstract/nadh.svg"
+      },
+      "pixel_png": "icons/pixel_png/nadh.png"
+    },
+    "glutathione": {
+      "label": "Glutathione",
+      "category": "metabolite",
+      "palette": "aqua",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/glutathione.svg",
+        "editorial_ink": "icons/editorial_ink/glutathione.svg",
+        "pixel_abstract": "icons/pixel_abstract/glutathione.svg"
+      },
+      "pixel_png": "icons/pixel_png/glutathione.png"
+    },
+    "palmitate": {
+      "label": "Palmitate",
+      "category": "metabolite",
+      "palette": "amber",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/palmitate.svg",
+        "editorial_ink": "icons/editorial_ink/palmitate.svg",
+        "pixel_abstract": "icons/pixel_abstract/palmitate.svg"
+      },
+      "pixel_png": "icons/pixel_png/palmitate.png"
+    },
+    "hepatocyte": {
+      "label": "Hepatocyte",
+      "category": "compartment",
+      "palette": "clay",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/hepatocyte.svg",
+        "editorial_ink": "icons/editorial_ink/hepatocyte.svg",
+        "pixel_abstract": "icons/pixel_abstract/hepatocyte.svg"
+      },
+      "pixel_png": "icons/pixel_png/hepatocyte.png"
+    },
+    "mitochondrion": {
+      "label": "Mitochondrion",
+      "category": "compartment",
+      "palette": "clay",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/mitochondrion.svg",
+        "editorial_ink": "icons/editorial_ink/mitochondrion.svg",
+        "pixel_abstract": "icons/pixel_abstract/mitochondrion.svg"
+      },
+      "pixel_png": "icons/pixel_png/mitochondrion.png"
+    },
+    "peroxisome": {
+      "label": "Peroxisome",
+      "category": "compartment",
+      "palette": "aqua",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/peroxisome.svg",
+        "editorial_ink": "icons/editorial_ink/peroxisome.svg",
+        "pixel_abstract": "icons/pixel_abstract/peroxisome.svg"
+      },
+      "pixel_png": "icons/pixel_png/peroxisome.png"
+    },
+    "lipid_droplet": {
+      "label": "Lipid droplet",
+      "category": "compartment",
+      "palette": "amber",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/lipid_droplet.svg",
+        "editorial_ink": "icons/editorial_ink/lipid_droplet.svg",
+        "pixel_abstract": "icons/pixel_abstract/lipid_droplet.svg"
+      },
+      "pixel_png": "icons/pixel_png/lipid_droplet.png"
+    },
+    "nucleus": {
+      "label": "Nucleus",
+      "category": "compartment",
+      "palette": "violet",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/nucleus.svg",
+        "editorial_ink": "icons/editorial_ink/nucleus.svg",
+        "pixel_abstract": "icons/pixel_abstract/nucleus.svg"
+      },
+      "pixel_png": "icons/pixel_png/nucleus.png"
+    },
+    "membrane": {
+      "label": "Membrane",
+      "category": "compartment",
+      "palette": "sky",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/membrane.svg",
+        "editorial_ink": "icons/editorial_ink/membrane.svg",
+        "pixel_abstract": "icons/pixel_abstract/membrane.svg"
+      },
+      "pixel_png": "icons/pixel_png/membrane.png"
+    },
+    "transcriptomics": {
+      "label": "Transcriptomics",
+      "category": "omics",
+      "palette": "violet",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/transcriptomics.svg",
+        "editorial_ink": "icons/editorial_ink/transcriptomics.svg",
+        "pixel_abstract": "icons/pixel_abstract/transcriptomics.svg"
+      },
+      "pixel_png": "icons/pixel_png/transcriptomics.png"
+    },
+    "proteomics": {
+      "label": "Proteomics",
+      "category": "omics",
+      "palette": "clay",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/proteomics.svg",
+        "editorial_ink": "icons/editorial_ink/proteomics.svg",
+        "pixel_abstract": "icons/pixel_abstract/proteomics.svg"
+      },
+      "pixel_png": "icons/pixel_png/proteomics.png"
+    },
+    "metabolomics": {
+      "label": "Metabolomics",
+      "category": "omics",
+      "palette": "amber",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/metabolomics.svg",
+        "editorial_ink": "icons/editorial_ink/metabolomics.svg",
+        "pixel_abstract": "icons/pixel_abstract/metabolomics.svg"
+      },
+      "pixel_png": "icons/pixel_png/metabolomics.png"
+    },
+    "fluxomics": {
+      "label": "Fluxomics",
+      "category": "omics",
+      "palette": "aqua",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/fluxomics.svg",
+        "editorial_ink": "icons/editorial_ink/fluxomics.svg",
+        "pixel_abstract": "icons/pixel_abstract/fluxomics.svg"
+      },
+      "pixel_png": "icons/pixel_png/fluxomics.png"
+    },
+    "tracer_c13": {
+      "label": "Carbon-13 tracer",
+      "category": "omics",
+      "palette": "sky",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/tracer_c13.svg",
+        "editorial_ink": "icons/editorial_ink/tracer_c13.svg",
+        "pixel_abstract": "icons/pixel_abstract/tracer_c13.svg"
+      },
+      "pixel_png": "icons/pixel_png/tracer_c13.png"
+    },
+    "reaction_branch": {
+      "label": "Branched reaction",
+      "category": "notation",
+      "palette": "neutral",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/reaction_branch.svg",
+        "editorial_ink": "icons/editorial_ink/reaction_branch.svg",
+        "pixel_abstract": "icons/pixel_abstract/reaction_branch.svg"
+      },
+      "pixel_png": "icons/pixel_png/reaction_branch.png"
+    },
+    "reaction_reversible": {
+      "label": "Reversible reaction",
+      "category": "notation",
+      "palette": "neutral",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/reaction_reversible.svg",
+        "editorial_ink": "icons/editorial_ink/reaction_reversible.svg",
+        "pixel_abstract": "icons/pixel_abstract/reaction_reversible.svg"
+      },
+      "pixel_png": "icons/pixel_png/reaction_reversible.png"
+    },
+    "compartment_exchange": {
+      "label": "Compartment exchange",
+      "category": "notation",
+      "palette": "neutral",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/compartment_exchange.svg",
+        "editorial_ink": "icons/editorial_ink/compartment_exchange.svg",
+        "pixel_abstract": "icons/pixel_abstract/compartment_exchange.svg"
+      },
+      "pixel_png": "icons/pixel_png/compartment_exchange.png"
+    },
+    "evidence_conflict": {
+      "label": "Conflicting evidence",
+      "category": "notation",
+      "palette": "neutral",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/evidence_conflict.svg",
+        "editorial_ink": "icons/editorial_ink/evidence_conflict.svg",
+        "pixel_abstract": "icons/pixel_abstract/evidence_conflict.svg"
+      },
+      "pixel_png": "icons/pixel_png/evidence_conflict.png"
+    },
+    "grid_lab": {
+      "label": "Laboratory grid",
+      "category": "notation",
+      "palette": "sky",
+      "version": "new",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/grid_lab.svg",
+        "editorial_ink": "icons/editorial_ink/grid_lab.svg",
+        "pixel_abstract": "icons/pixel_abstract/grid_lab.svg"
+      },
+      "pixel_png": "icons/pixel_png/grid_lab.png"
+    },
+    "glucose": {
+      "label": "Glucose",
+      "category": "metabolite",
+      "palette": "amber",
+      "version": "revision",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/glucose.svg",
+        "editorial_ink": "icons/editorial_ink/glucose.svg",
+        "pixel_abstract": "icons/pixel_abstract/glucose.svg"
+      },
+      "pixel_png": "icons/pixel_png/glucose.png"
+    },
+    "pyruvate": {
+      "label": "Pyruvate",
+      "category": "metabolite",
+      "palette": "clay",
+      "version": "revision",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/pyruvate.svg",
+        "editorial_ink": "icons/editorial_ink/pyruvate.svg",
+        "pixel_abstract": "icons/pixel_abstract/pyruvate.svg"
+      },
+      "pixel_png": "icons/pixel_png/pyruvate.png"
+    },
+    "tca": {
+      "label": "TCA cycle",
+      "category": "metabolite",
+      "palette": "aqua",
+      "version": "revision",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/tca.svg",
+        "editorial_ink": "icons/editorial_ink/tca.svg",
+        "pixel_abstract": "icons/pixel_abstract/tca.svg"
+      },
+      "pixel_png": "icons/pixel_png/tca.png"
+    },
+    "atp": {
+      "label": "ATP",
+      "category": "metabolite",
+      "palette": "amber",
+      "version": "revision",
+      "view_box": [
+        0,
+        0,
+        32,
+        32
+      ],
+      "svg": {
+        "nature_editorial": "icons/nature_editorial/atp.svg",
+        "editorial_ink": "icons/editorial_ink/atp.svg",
+        "pixel_abstract": "icons/pixel_abstract/atp.svg"
+      },
+      "pixel_png": "icons/pixel_png/atp.png"
+    }
+  },
+  "components": {
+    "pixel_ui": {
+      "tile_floor": {
+        "label": "Laboratory linoleum tile",
+        "size": [
+          32,
+          32
+        ],
+        "svg": "components/pixel/tile_floor.svg",
+        "png": "components/pixel/tile_floor.png"
+      },
+      "tile_grate": {
+        "label": "Recessed service grate",
+        "size": [
+          32,
+          32
+        ],
+        "svg": "components/pixel/tile_grate.svg",
+        "png": "components/pixel/tile_grate.png"
+      },
+      "pipe_straight": {
+        "label": "Straight pipe",
+        "size": [
+          32,
+          32
+        ],
+        "svg": "components/pixel/pipe_straight.svg",
+        "png": "components/pixel/pipe_straight.png",
+        "ports": {
+          "W": [
+            0,
+            16
+          ],
+          "E": [
+            32,
+            16
+          ]
+        }
+      },
+      "pipe_elbow": {
+        "label": "Elbow pipe",
+        "size": [
+          32,
+          32
+        ],
+        "svg": "components/pixel/pipe_elbow.svg",
+        "png": "components/pixel/pipe_elbow.png",
+        "ports": {
+          "N": [
+            16,
+            0
+          ],
+          "E": [
+            32,
+            16
+          ]
+        }
+      },
+      "pipe_tee": {
+        "label": "Tee pipe",
+        "size": [
+          32,
+          32
+        ],
+        "svg": "components/pixel/pipe_tee.svg",
+        "png": "components/pixel/pipe_tee.png",
+        "ports": {
+          "W": [
+            0,
+            16
+          ],
+          "E": [
+            32,
+            16
+          ],
+          "S": [
+            16,
+            32
+          ]
+        }
+      },
+      "panel_instrument": {
+        "label": "Instrument frame",
+        "size": [
+          96,
+          64
+        ],
+        "svg": "components/pixel/panel_instrument.svg",
+        "png": "components/pixel/panel_instrument.png"
+      },
+      "control_chip": {
+        "label": "Selectable layer control",
+        "size": [
+          80,
+          24
+        ],
+        "svg": "components/pixel/control_chip.svg",
+        "png": "components/pixel/control_chip.png"
+      },
+      "sample_slot": {
+        "label": "Recessed sample slot",
+        "size": [
+          40,
+          40
+        ],
+        "svg": "components/pixel/sample_slot.svg",
+        "png": "components/pixel/sample_slot.png"
+      }
+    },
+    "scientific_ink": {
+      "hepatocyte_cutaway": {
+        "view_box": [
+          0,
+          0,
+          470,
+          320
+        ],
+        "svg": "components/ink/hepatocyte_cutaway.svg"
+      },
+      "mitochondrial_inset": {
+        "view_box": [
+          0,
+          0,
+          260,
+          165
+        ],
+        "svg": "components/ink/mitochondrial_inset.svg"
+      }
+    }
+  },
+  "font": {
+    "family": "Ark Pixel 12px Proportional",
+    "upstream_release": "2026.11.10",
+    "source": "https://github.com/TakWolf/ark-pixel-font/releases/tag/2026.11.10",
+    "source_archive_sha256": "7929b4d2603665c173383717ec1264f22c13af0a1bc58408f05d473fbe894e2b",
+    "redistributed_font": "font/ark-pixel-12px-proportional-latin.otf.woff2",
+    "license": "OFL-1.1",
+    "license_file": "font/OFL.txt",
+    "local_preview_scripts": [
+      "latin",
+      "zh-Hans"
+    ],
+    "preview_text_encoding": "SVG outlines"
+  },
+  "previews": {
+    "icon_catalog": {
+      "svg": "previews/icon_catalog.svg",
+      "png": "previews/icon_catalog.png"
+    },
+    "pixel_ui": {
+      "svg": "previews/pixel_ui.svg",
+      "png": "previews/pixel_ui.png"
+    },
+    "ink_keynote": {
+      "svg": "previews/ink_keynote.svg",
+      "png": "previews/ink_keynote.png"
+    }
+  },
+  "source_notes": {
+    "artwork": "Original programmatic artwork for OmicsWeave, AI-assisted drafting.",
+    "asset_scope": "Prototype artwork only; does not encode experimental data."
+  }
+}

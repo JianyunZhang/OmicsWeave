@@ -3,6 +3,7 @@
 > 文档类型：架构与设计方案（v1.0，2026-11-20）
 > 适用范围：`omicsweave.visualization` 通用绘图包、反应档案图 A–E（`integration/plotting`）、单组学图件主题收敛，以及独立解耦的 Graphical Abstract 子系统。
 > 配套文档：[分组织代谢通路总图（图 E）](omicsweave_pathway_map.md)、[反应档案与分轴评估](omicsweave_reaction_dossier_and_assessment.md)、[v2 架构设计](../omicsweave_arch_design_v2.md)
+> 海报与组合图版：[figure_draw 海报衍生绘图标准](visualization_artwork/figure_draw_style.md)，定量图可显式使用 `poster_editorial`。
 
 ---
 

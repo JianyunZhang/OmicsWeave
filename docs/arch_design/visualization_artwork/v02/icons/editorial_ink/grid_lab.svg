@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Laboratory grid</title>
+  <desc>Schematic icon for Laboratory grid.</desc>
+  <path d="M 1 0 L 1 32 M 17 0 L 17 32 M 0 1 L 32 1 M 0 17 L 32 17" fill="none" stroke="#8FBDD3" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 9 6 L 9 12 M 6 9 L 12 9 M 25 22 L 25 28 M 22 25 L 28 25" fill="none" stroke="#5A83AC" stroke-width="0.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

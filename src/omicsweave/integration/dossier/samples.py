@@ -65,7 +65,7 @@ def group_labels(experiment: Experiment, samples: list[str]) -> tuple[dict[str, 
 
 def _dataset_dir(source: DossierSource, layer: str, tissue: str) -> Path:
     omics, kind = (Omics.METABOLOMICS.value, "derived") if layer == "derived" else (layer, "data")
-    return source.run_dir / "omics" / omics / kind / source.raw_tissue(layer if layer != "derived" else omics, tissue)
+    return source.run_dir / "omics" / omics / kind / source.raw_tissue(layer, tissue)
 
 
 def dossier_samples(source: DossierSource, members: pd.DataFrame) -> tuple[pd.DataFrame, list[Path]]:

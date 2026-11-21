@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,11 +24,22 @@ from openpyxl import load_workbook
 from omicsweave import cli
 from omicsweave.core.config import load_experiment, load_project
 from omicsweave.core.delivery import Delivery
-from omicsweave.integration.dossier.map_view import coverage_table, map_view, physiological_sign
+from omicsweave.integration.dossier.map_view import (
+    coverage_table,
+    extra_pathway_fusion,
+    map_view,
+    physiological_sign,
+    signed_module_summary,
+)
 from omicsweave.integration.dossier.panels import load_panels, panel_elements
-from omicsweave.integration.dossier.view import matrix_view
+from omicsweave.integration.dossier.view import matrix_view, node_members
 from omicsweave.integration.mappings import FLUX_GENE_MAPPING, FLUX_METABOLITE_MAPPING, REACTION_ENZYME_MAPPING
-from omicsweave.integration.mappings.network_annotation import network_reactions
+from omicsweave.integration.mappings.network_annotation import (
+    curated_reactions,
+    network_reactions,
+    pathway_reactions,
+    reaction_semantics,
+)
 from omicsweave.integration.mappings.network_layout import (
     LayoutError, default_layout, load_layout, network_table_sha256, validate_layout)
 from omicsweave.integration.mappings.reaction_aliases import assessment_universe, reaction_aliases, validate_aliases
@@ -67,9 +79,9 @@ class LayoutTest(unittest.TestCase):
     def test_validation_reports_problems(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder) / "layout.yaml"
-            text = default_layout().path.read_text(encoding="utf-8").replace("\r\n", "\n")
-            text = text.replace("  HEX_c: {region: glycolysis_gng, offset: 1.2}\n", "") \
-                       .replace("  PYR_m: [38, 47]\n", "")
+            lines = default_layout().path.read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()
+            lines = [line for line in lines if not line.startswith(("  HEX_c:", "  PYR_m:"))]
+            text = "\n".join(lines) + "\n"
             tmp.write_text(text.replace("network_sha256: ", "network_sha256: x"), encoding="utf-8")
             problems = validate_layout(load_layout(tmp))
         joined = "；".join(problems)
@@ -80,7 +92,7 @@ class LayoutTest(unittest.TestCase):
     def test_clones_pick_the_nearest_position(self) -> None:
         layout = default_layout()
         geometry = layout.geometry(network_reactions()["GLUD_m"])
-        self.assertEqual(dict(geometry["substrates"])["AKG_m"], (38.0, 64.0))   # 左侧的克隆，不是 TCA 环上的
+        self.assertEqual(dict(geometry["substrates"])["AKG_m"], layout.nodes["AKG_m"].at[1])   # 左侧的克隆，不是 TCA 环上的
 
     def test_secondary_species_are_notes(self) -> None:
         """转氨的谷氨酸 / α-酮戊二酸不画线：GPT 只连丙酮酸与丙氨酸，次要物种单列。"""
@@ -92,8 +104,11 @@ class LayoutTest(unittest.TestCase):
     def test_unused_clone_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder) / "layout.yaml"
-            text = default_layout().path.read_text(encoding="utf-8").replace("\r\n", "\n")
-            tmp.write_text(text.replace("  GLN_c: [44, 81]", "  GLN_c: {at: [[44, 81], [5, 99]]}"), encoding="utf-8")
+            layout = default_layout()
+            gx, gy = layout.nodes["GLN_c"].at[0]
+            lines = layout.path.read_text(encoding="utf-8").replace("\r\n", "\n").splitlines()
+            lines = [f"  GLN_c: {{at: [[{gx}, {gy}], [5, 99]]}}" if line.startswith("  GLN_c:") else line for line in lines]
+            tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
             problems = validate_layout(load_layout(tmp), check_sha=False)
         self.assertEqual(problems, ["nodes.GLN_c 的位置 [5.0, 99.0] 没有反应连到"])
 
@@ -132,6 +147,84 @@ class CoverageTest(unittest.TestCase):
         placement = dict(zip(table["flux_id"], table["placement"]))
         self.assertEqual(placement, {"TRIOSE_c": "covered_by_steps", "TPI_c": "edge", "FAO_m": "aggregate",
                                      "UREA_cycle": "aggregate", "PK_c": "alias", "XYZ_c": "unplaced"})
+
+    def test_layout_pure_english_and_expanded_modules(self) -> None:
+        layout = default_layout()
+        cjk = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
+        texts = (
+            [r.label for r in layout.regions.values()]
+            + [str(c.get("label", "")) for c in layout.compartments.values()]
+            + [n.label for n in layout.nodes.values() if n.label]
+            + [a.label for a in layout.aggregates.values() if a.label]
+        )
+        self.assertEqual([t for t in texts if cjk.search(t)], [])
+        for mod in ("OXPHOS_CI", "OXPHOS_CIII", "OXPHOS_CIV", "OXPHOS_CV", "THERMOGENESIS_UCP",
+                    "HIS_metabolism", "PHE_TYR_metabolism", "HYP_metabolism", "BALA_metabolism",
+                    "INO_metabolism", "HEME_synthesis"):
+            self.assertIn(mod, layout.aggregates)
+            self.assertIn(mod, FLUX_GENE_MAPPING)
+            self.assertIn(mod, REACTION_ENZYME_MAPPING)
+        for edge_id in ("ME_m", "SUC_trans", "FUM_trans", "MAL_trans", "NOS_c", "ORNT_m",
+                        "POLYAMINE_synthesis", "FRUCTOSE_METABOLISM", "HEXOSAMINE_HBP",
+                        "BCAA_trans", "PROPIONATE_ANAPLEROSIS", "HMGCR", "BILE_acid",
+                        "PUFA_EICOSANOID", "PHOSPHOLIPID", "SPHINGOLIPID", "PEROX_FAO",
+                        "ETHER_LIPID", "FOLATE_cycle", "MET_cycle", "GSH_synthesis",
+                        "PYROGLU", "TAU_metabolism", "ADK_c", "ALLANTOIN",
+                        "TRP_metabolism", "NAD_SALVAGE"):
+            self.assertIn(edge_id, layout.edges)
+            self.assertIn(edge_id, curated_reactions())
+            self.assertIn(edge_id, FLUX_GENE_MAPPING)
+            self.assertIn(edge_id, REACTION_ENZYME_MAPPING)
+            self.assertTrue(curated_reactions()[edge_id].kegg_pathway, edge_id)
+            self.assertTrue(curated_reactions()[edge_id].reactome_id, edge_id)
+
+    def test_dual_layer_semantics_and_mfa_precedence(self) -> None:
+        mfa = network_reactions()
+        cur = curated_reactions()
+        merged = pathway_reactions()
+        self.assertTrue(set(cur).isdisjoint(set(mfa)))
+        self.assertEqual(set(merged), set(mfa) | set(cur))
+        # Curated transport / near-equilibrium steps carry capacity semantics; irreversible steps are directional
+        for fid in ("SUC_trans", "FUM_trans", "MAL_trans", "ORNT_m", "ADK_c", "FOLATE_cycle"):
+            self.assertEqual(reaction_semantics(fid).direction_evidence, "capacity", fid)
+        for fid in ("ME_m", "NOS_c", "HMGCR", "PROPIONATE_ANAPLEROSIS", "HEXOSAMINE_HBP"):
+            self.assertEqual(reaction_semantics(fid).direction_evidence, "directional", fid)
+        # MDH_m must not hijack mitochondrial dicarboxylate carriers (Slc25a10/11)
+        self.assertTrue({"Slc25a10", "Slc25a11"}.isdisjoint(REACTION_ENZYME_MAPPING["MDH_m"].get("transporters", [])))
+
+    def test_sidebar_p3_helpers_and_derived_lipid_nodes(self) -> None:
+        layout = default_layout()
+        fusion = pd.DataFrame([
+            {"tissue": "liver", "comparison": DIET, "pathway_term": "citrate cycle (tca cycle)",
+             "fused_fdr": 0.01, "n_omics": 3, "omics_directions": "proteomics:up"},
+            {"tissue": "liver", "comparison": DIET, "pathway_term": "ppar signaling pathway",
+             "fused_fdr": 0.007, "n_omics": 2, "omics_directions": "proteomics:up;transcriptomics:up"},
+            {"tissue": "liver", "comparison": DIET, "pathway_term": "retinol metabolism",
+             "fused_fdr": 0.40, "n_omics": 2, "omics_directions": "proteomics:up"},
+        ])
+        extra = extra_pathway_fusion(fusion, layout, "liver", DIET)
+        self.assertEqual(list(extra["pathway_term"]), ["ppar signaling pathway"])
+
+        tests = pd.DataFrame([
+            {"test": "crossover", "name": "HEX_c", "layer": "metabolomics", "tissue": "liver",
+             "contrast_id": DIET, "statistic": 0.1, "pvalue": 0.5, "padj": 0.5, "direction": "concordant",
+             "n_members": 2, "members": "GLC -> G6P"},
+            {"test": "signed_module", "name": "gluconeogenic_routing", "layer": "proteomics", "tissue": "liver",
+             "contrast_id": DIET, "statistic": 2.32, "pvalue": 0.0028, "padj": 0.0028, "direction": "as_declared",
+             "n_members": 5, "members": "Pcx(+), Pck1(+)"},
+        ])
+        sm = signed_module_summary(tests, "liver", DIET)
+        self.assertEqual(list(sm["name"]), ["gluconeogenic_routing"])
+
+        rows = pd.DataFrame([
+            {"layer": "derived", "role": "product", "feature_id": "class_total:TG", "member_id": "TG class total",
+             "log2fc": 2.5, "cell_state": "changed"},
+            {"layer": "derived", "role": "substrate", "feature_id": "class_total:FFA", "member_id": "FFA class total",
+             "log2fc": -0.3, "cell_state": "no_evidence"},
+        ])
+        self.assertEqual(list(node_members(rows, "TAG_c", {})["feature_id"]), ["class_total:TG"])
+        self.assertEqual(list(node_members(rows, "TGPAL_c", {})["feature_id"]), ["class_total:TG"])
+        self.assertEqual(list(node_members(rows, "FA_c", {})["feature_id"]), ["class_total:FFA"])
 
 
 class PathwayMapBundleTest(unittest.TestCase):

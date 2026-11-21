@@ -61,6 +61,7 @@ from omicsweave.contract.export import write_excel_tsv
 from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
+from omicsweave.core.tissues import merge_tissue_aliases, resolve_tissue, validate_tissue_aliases
 from omicsweave.stats.data import analysis_values
 
 from ..dossier import calibration as cal
@@ -249,9 +250,11 @@ class _Context:
                        if layer in source.layers and layer in tables}
         self.long = {layer: _long_index(tables.get(layer)) for layer in self.frames}
         self.derived_long = _long_index(derived)
-        # 可靠性与稳健性按来源自己的名称计算，再换成共同名称
-        reliability, self.inputs = build_reliability(source.experiment, source.run_dir, source.tables, imbalance)
-        self.reliability_table = reliability
+        # 可靠性与稳健性按来源自己的样本表计算，再换成共同名称
+        reliability, self.inputs = build_reliability(source.experiment, source.run_dir, source.reliability_tables(), imbalance)
+        self.reliability_table = reliability.assign(
+            tissue=[source.common_tissue(str(o), str(t)) for o, t in zip(reliability["omics"], reliability["tissue"])]
+        ) if not reliability.empty else reliability
         self.reliability = {
             (str(r.omics), source.common_tissue(str(r.omics), str(r.tissue)), source.contrast_map[str(r.contrast_id)]):
                 str(r.status)
@@ -572,9 +575,27 @@ def _tissues(frames: dict) -> set[str]:
     return set(frames)
 
 
+def _normalize_panels_tissues(panels: dict[str, Panel], aliases: dict[str, str]) -> dict[str, Panel]:
+    """将面板声明与对照中的组织名按实验级别名表归一，避免产出同名异写的组织目录。"""
+    if not aliases:
+        return panels
+    for panel in panels.values():
+        if panel.tissues:
+            panel.tissues = list(dict.fromkeys(resolve_tissue(t, aliases) for t in panel.tissues))
+        for control in panel.controls:
+            if control.get("tissue"):
+                control["tissue"] = resolve_tissue(control["tissue"], aliases)
+    return panels
+
+
 def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> IntegrationRun:
     params = _parameters(ctx, parameters)
-    tissue_map = {str(k): str(v) for k, v in (params["tissue_map"] or {}).items()}
+    try:
+        tissue_map = validate_tissue_aliases(params["tissue_map"] or {}, f"integration.parameters.{MODE.value}.tissue_map")
+        filter_aliases = merge_tissue_aliases(ctx.experiment.config.design.tissue_aliases, tissue_map,
+                                              label=f"integration.parameters.{MODE.value}.tissue_map")
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
     label = str(params["label"] or ctx.project.id)
     primary = primary_source(ctx.experiment, source, label, tissue_map)
     sources = [primary]
@@ -587,9 +608,14 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     if params["panels"]:
         panels_path = ctx.experiment.root / str(params["panels"])
         try:
-            panels = load_panels(panels_path)
+            panels = _normalize_panels_tissues(load_panels(panels_path), filter_aliases)
         except PanelError as exc:
             raise RunError(str(exc)) from exc
+    if params["pathway_map"].get("tissues"):
+        params["pathway_map"] = {
+            **params["pathway_map"],
+            "tissues": list(dict.fromkeys(resolve_tissue(t, filter_aliases) for t in params["pathway_map"]["tissues"])),
+        }
 
     scoring = {k: params[k] for k in ("pval_cutoff", "log2fc_cutoff", "omics_cutoffs", "fallback_mode", "isozyme")}
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={}, scoring=scoring))
@@ -602,7 +628,7 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         reactions, excluded_aliases = [str(r) for r in params["reactions"]], []
     else:
         reactions = universe
-    tissues = {tissue_map.get(str(t), str(t)) for t in params["tissues"]} or None
+    tissues = {resolve_tissue(str(t), filter_aliases) for t in params["tissues"]} or None
     dossier = pd.concat([build_dossier(builder, c, params, reactions, tissues) for c in contexts], ignore_index=True)
 
     base = mode_dir(ctx, MODE)

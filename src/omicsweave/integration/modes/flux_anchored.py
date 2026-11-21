@@ -50,6 +50,7 @@ from omicsweave.contract.tables import read_differential
 from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.reliability import DEFAULT_IMBALANCE, QC_DIR, RELIABILITY_FILE, build_reliability, summary_note
 from omicsweave.core.run import RunContext, RunError
+from omicsweave.core.tissues import remap_table_tissues, resolve_tissue, validate_tissue_aliases
 
 from ..integrate import IntegrationRun, mode_dir
 from ..methods.flux_evidence import FluxEvidenceBuilder
@@ -96,7 +97,7 @@ def mfa_frames(diff: pd.DataFrame, tissue_map: dict[str, str] | None = None) -> 
         low_n = (rows[["n_numerator", "n_denominator"]].min(axis=1) < 2).to_numpy()
         frame = pd.DataFrame({
             "flux_id": rows["feature_id"].astype(str),
-            "tissue": rows["tissue"].astype(str).map(lambda t: tissue_map.get(t, t)),
+            "tissue": rows["tissue"].astype(str).map(lambda t: resolve_tissue(t, tissue_map)),
             "flux_log2fc": _numeric(rows, "log2fc"),
             "flux_pvalue": _numeric(rows, "pvalue"),
             "flux_fdr": _numeric(rows, "padj"),
@@ -332,9 +333,25 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     derived = read_differential(derived_path) if derived_path.is_file() else None
     empty = pd.DataFrame(columns=["contrast_id", "tissue", "feature_id", "evidence_level"])
 
-    tissue_map = {str(k): str(v) for k, v in (params["tissue_map"] or {}).items()}
+    try:
+        tissue_map = validate_tissue_aliases(params["tissue_map"] or {}, f"integration.parameters.{MODE.value}.tissue_map")
+        for omics in list(tables):
+            aliases = ctx.experiment.config.tissue_aliases_for(omics)
+            tables[omics], _ = remap_table_tissues(tables[omics], aliases, context=f"源结果包 {source.name} 的 {omics}")
+        if derived is not None:
+            derived, _ = remap_table_tissues(
+                derived, ctx.experiment.config.tissue_aliases_for(Omics.METABOLOMICS),
+                context=f"源结果包 {source.name} 的 metabolomics 派生特征",
+            )
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+
+    tx_id_types = {
+        ctx.experiment.config.canonical_tissue(t, Omics.TRANSCRIPTOMICS): v
+        for t, v in _transcriptomics_id_types(source).items()
+    }
     mfa = mfa_frames(tables[Omics.MFA.value], tissue_map)
-    tx = transcriptomics_frames(tables.get(Omics.TRANSCRIPTOMICS.value, empty), _transcriptomics_id_types(source))
+    tx = transcriptomics_frames(tables.get(Omics.TRANSCRIPTOMICS.value, empty), tx_id_types)
     prot = proteomics_frames(tables.get(Omics.PROTEOMICS.value, empty))
     metab = metabolomics_frames(tables.get(Omics.METABOLOMICS.value, empty), derived)
 
@@ -345,13 +362,18 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     reliability.to_parquet(qc_dir / RELIABILITY_FILE, index=False)
     mapped = reliability.copy()
     is_mfa = mapped["omics"] == Omics.MFA.value
-    mapped.loc[is_mfa, "tissue"] = mapped.loc[is_mfa, "tissue"].map(lambda t: tissue_map.get(t, t))
+    mapped.loc[is_mfa, "tissue"] = mapped.loc[is_mfa, "tissue"].map(lambda t: resolve_tissue(t, tissue_map))
 
     builder = FluxEvidenceBuilder(SimpleNamespace(experiment_id=ctx.experiment.id, estimand={},
                                                   scoring=scoring_config(params, tables[Omics.MFA.value]),
                                                   contrast_reliability=mapped))
     profile = builder.build_all(mfa, tx, prot, metab)
-    flagged, robustness_inputs = single_subject_features(source, tables)
+    raw_flagged, robustness_inputs = single_subject_features(source, tables)
+    flagged = {
+        (o, resolve_tissue(ctx.experiment.config.canonical_tissue(t, o), tissue_map) if o == Omics.MFA.value
+         else ctx.experiment.config.canonical_tissue(t, o), c, f)
+        for o, t, c, f in raw_flagged
+    }
     if not profile.empty:
         profile["single_subject_driven_layers"] = single_subject_layers(profile, flagged)
     roles = dict(zip(tables[Omics.MFA.value]["contrast_id"].astype(str),
@@ -395,7 +417,8 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     unmatched = sorted({t for frame in mfa.values() for t in frame["tissue"]} - other_tissues)
     if unmatched:
         record.notes.append(f"MFA 组织 {'、'.join(unmatched)} 在其他组学中没有同名组织，只有 MFA 层证据；"
-                            f"名称不同时用 integration.parameters.{MODE.value}.tissue_map 对应")
+                            f"名称不同时可在 design.tissue_aliases、omics.mfa.tissue_aliases 或 "
+                            f"integration.parameters.{MODE.value}.tissue_map 中对应")
     contrasts = {c for omics, t in tables.items() if omics != Omics.MFA.value for c in t["contrast_id"].astype(str)}
     missing = sorted(set(mfa) - contrasts)
     if missing:

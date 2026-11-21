@@ -115,14 +115,18 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
 
 `omicsweave integrate` 只读取结果包中的统一结果表，结果写入新的结果包（`integration/<模式>/`），运行清单记录源结果包。
 模式默认取 `experiment.yaml` 的 `integration.modes`，参数写在 `integration.parameters.<模式>`。
+不同组学或批次对同一组织有别名（如 `white_adipose` / `sq_adipose`、`cerebral_cortex` / `brain`、`renal_cortex` / `kidney`）时，
+可在 `experiment.yaml` 的 `design.tissue_aliases`（实验级）与 `omics.<组学>.tissue_aliases`（组学级，合并并覆写实验级）声明
+`别名 → 规范组织名`：所有单组学运行器在样本层面即合并为同一组织并只输出一个规范组织目录，所有整合模式、面板与通路总图也一致生效。
 
 - `pathway_convergence`（已接入）：同一组织、同一比较下各组学通路富集结果的融合（组学内 Bonferroni、组学间 Fisher、BH 校正，
-  与本模块 `PathwayConvergenceAnalyzer` 相同），附各组学的效应方向与方向一致性，以及显著通路的两两交集。
+  与本模块 `PathwayConvergenceAnalyzer` 相同），附各组学的效应方向与方向一致性，以及显著通路的两两交集；自动套用实验级与组学级
+  `tissue_aliases`，并支持可选参数 `tissue_map`。
 - `flux_anchored`（已接入）：以 MFA 差异通量为锚点，读取各组学的统一差异结果表（`differential.parquet`），
   按反应 → 基因/蛋白/代谢物映射提取证据，输出多维证据画像 `flux_evidence_profile`、证据长表 `flux_evidence_table`
   与通路汇总 `flux_pathway_profile`。需要 MFA 与至少 1 个其他组学。参数 `pval_cutoff`、`log2fc_cutoff`、`omics_cutoffs`、
   `fallback_mode`、`evidence_profile` 与旧配置的 `scoring` 同义（`evidence_profile.mfa_inference_unit` 默认取 MFA 结果的推断单位），
-  `tissue_map` 把 MFA 的组织名对应到其他组学。与旧命令的差别：MFA 的 p 值与 FDR 取差异分析的主检验路径
+  自动套用实验级与组学级 `tissue_aliases`，并保留 `tissue_map` 作为 MFA 层的模式级覆盖。与旧命令的差别：MFA 的 p 值与 FDR 取差异分析的主检验路径
   （旧加载器总是优先取 Mann-Whitney）；蛋白组、代谢组的有效样本量取自统一结果表的 `n_numerator + n_denominator`。
   证据等级随锚点状态而定（见下文“锚点状态与证据等级”）；样本 QC 标记按（组学, 组织, 比较）降权或判为不可评估，
   明细写在 `integration/flux_anchored/qc/contrast_reliability.parquet`（参数 `qc_imbalance`，见“质量信息与可靠性”）。

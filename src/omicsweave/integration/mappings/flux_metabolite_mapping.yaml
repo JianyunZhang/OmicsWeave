@@ -1397,6 +1397,7 @@ GSH_synthesis:
   - GR
   - NADPH
   - Oxidative stress
+  - Glutathione Oxidized
 HEME_synthesis:
   substrates:
   - Glycine
@@ -1437,8 +1438,8 @@ HMGCR:
   products:
   - Mevalonate
   - Mevalonic acid
-  related:
   - Cholesterol
+  related:
   - Isoprenoid
   - Farnesyl-PP
   - Squalene
@@ -1460,6 +1461,7 @@ BILE_acid:
   - Lithocholic acid
   - Taurocholic acid
   - Glycocholic acid
+  - Taurochenodeoxycholic acid
   related:
   - Secondary bile acid
   - CYP7A1
@@ -2018,7 +2020,8 @@ ACSL_PAL_c:
 CRAT_m:
   substrates:
   - acetyl-coa
-  products: []
+  products:
+  - acetylcarnitine
   related: []
 PAL_beta_oxidation:
   substrates:
@@ -2029,12 +2032,14 @@ PAL_beta_oxidation:
 ELOVL6_c:
   substrates:
   - palmitate
-  products: []
+  products:
+  - stearate
   related: []
 SCD_PAL_c:
   substrates:
   - palmitate
-  products: []
+  products:
+  - palmitoleate
   related: []
 GPAT_c:
   substrates:
@@ -2221,3 +2226,222 @@ URI_degradation_c:
   products:
   - Uracil
   related: []
+CACT_PALCAR:
+  substrates: []
+  products: []
+  related:
+  - Palmitoylcarnitine
+CPS1_c:
+  substrates: []
+  products: []
+  related:
+  - Carbamoyl phosphate
+  - Ammonia
+FAS_c:
+  substrates:
+  - Acetyl-CoA
+  - Malonyl-CoA
+  products:
+  - Palmitate
+  related:
+  - NADPH
+  - Palmitic acid
+GLY_exchange:
+  substrates:
+  - Glycine
+  products: []
+  related:
+  - Serine
+FAO_m:
+  substrates:
+  - Palmitate
+  - Palmitoylcarnitine
+  - Oleate
+  - Stearate
+  products:
+  - Acetyl-CoA
+  - Acetylcarnitine
+  related:
+  - Carnitine
+  - Palmitoyl-CoA
+  - NADH
+OXPHOS_CI:
+  substrates:
+  - NADH
+  products:
+  - NAD
+  related:
+  - Coenzyme Q10
+OXPHOS_CIII:
+  substrates: []
+  products: []
+  related:
+  - NADH
+  - NAD
+  - Succinate
+OXPHOS_CIV:
+  substrates: []
+  products: []
+  related:
+  - ATP
+  - ADP
+OXPHOS_CV:
+  substrates:
+  - ADP
+  - Phosphate
+  products:
+  - ATP
+  related:
+  - AMP
+THERMOGENESIS_UCP:
+  substrates: []
+  products: []
+  related:
+  - Palmitate
+  - Oleate
+  - Succinate
+PEROX_FAO:
+  substrates:
+  - Palmitate
+  - Stearate
+  products:
+  - Acetyl-CoA
+  - Acetylcarnitine
+  related:
+  - Palmitoylcarnitine
+  - Carnitine
+ETHER_LIPID:
+  substrates:
+  - DHAP
+  products: []
+  related:
+  - Glycerol-3-phosphate
+  - Palmitate
+PROPIONATE_ANAPLEROSIS:
+  substrates:
+  - Propionylcarnitine
+  products:
+  - Succinate
+  related:
+  - Valine
+  - Isoleucine
+  - Methionine
+  - Threonine
+FRUCTOSE_METABOLISM:
+  substrates:
+  - Fructose
+  - Mannose
+  - Sorbitol
+  products:
+  - Fructose-6-phosphate
+  - DHAP
+  related:
+  - Glucose
+  - Glyceraldehyde-3-phosphate
+HEXOSAMINE_HBP:
+  substrates:
+  - Fructose-6-phosphate
+  - Glutamine
+  products:
+  - Glucosamine-6-phosphate
+  - UDP-N-acetylglucosamine
+  related:
+  - Acetyl-CoA
+  - UTP
+  - Glutamate
+PUFA_EICOSANOID:
+  substrates:
+  - Linoleate
+  - Arachidonate
+  products:
+  - Prostaglandin E2
+  - Prostaglandin D3
+  related:
+  - Oleate
+  - Palmitoleate
+NAD_SALVAGE:
+  substrates:
+  - Nicotinamide
+  - Nicotinamide mononucleotide
+  products:
+  - NAD
+  - NADP
+  related:
+  - NADH
+  - NADPH
+  - S-adenosylmethionine
+CPT1_c:
+  substrates: []
+  products:
+  - palmitoylcarnitine
+  related: []
+CPT2_m:
+  substrates:
+  - palmitoylcarnitine
+  products: []
+  related: []
+PAL_exchange:
+  substrates:
+  - palmitate
+  products: []
+  related: []
+SCD_STE_c:
+  substrates:
+  - stearate
+  products:
+  - oleate
+  related: []
+ARG_exchange:
+  substrates: []
+  products:
+  - Arginine
+  related: []
+CITR_exchange:
+  substrates: []
+  products:
+  - Citrulline
+  related: []
+CRN_output:
+  substrates:
+  - Creatinine
+  products: []
+  related: []
+CRN_formation_c:
+  substrates:
+  - Phosphocreatine
+  products:
+  - Creatinine
+  related:
+  - Creatine
+NT5_CMP_c:
+  substrates:
+  - CMP
+  products:
+  - Cytidine
+  related: []
+RNR_DCYTD_c:
+  substrates:
+  - CMP
+  products:
+  - Deoxycytidine
+  related: []
+DCYTD_degradation_c:
+  substrates:
+  - Deoxycytidine
+  products: []
+  related:
+  - Cytidine
+NOS_c:
+  substrates:
+  - Arginine
+  products:
+  - Citrulline
+  related:
+  - NADPH
+  - NADP
+ORNT_m:
+  substrates: []
+  products: []
+  related:
+  - Ornithine
+  - Citrulline

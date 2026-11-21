@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Metabolomics</title>
+  <desc>Schematic icon for Metabolomics.</desc>
+  <path d="M 5 8 L 18 8 L 18 13 L 16 13 L 16 25 L 7 25 L 7 13 L 5 13 Z" transform="translate(.55 .75)" fill="#715844" opacity=".30"/>
+  <path d="M 5 8 L 18 8 L 18 13 L 16 13 L 16 25 L 7 25 L 7 13 L 5 13 Z" fill="#EAC477" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 5 8 L 18 8 L 18 13 L 16 13 L 16 25 L 7 25 L 7 13 L 5 13 Z" transform="translate(-.35 -.40)" fill="none" stroke="#715844" stroke-width=".38" opacity=".72"/>
+  <path d="M 8 18 L 15 18 M 21 23 L 23 13 L 25 23 L 28 9 L 30 23" fill="none" stroke="#34312E" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

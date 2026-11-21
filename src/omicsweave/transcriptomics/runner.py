@@ -48,6 +48,7 @@ from omicsweave.core.config import Experiment, Project
 from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups
+from omicsweave.core.tissues import format_alias_note, select_tissue_file_rows
 from omicsweave.core.validate import biological_samples
 from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
 
@@ -115,8 +116,9 @@ def _tx2gene(project: Project, spec, adapter: dict) -> tuple[dict, Path]:
     return build_tx2gene_from_fasta(str(path)), path
 
 
-def _load_counts(ctx: RunContext, rows: pd.DataFrame, record: OmicsRun) -> tuple[pd.DataFrame, pd.DataFrame | None]:
-    """返回 (基因 × sample_id 的计数, kallisto 比对率或 None)。"""
+def _load_counts(ctx: RunContext, rows: pd.DataFrame,
+                 record: OmicsRun) -> tuple[pd.DataFrame, pd.DataFrame | None, dict[str, str]]:
+    """返回 (基因 × sample_id 的计数, kallisto 比对率或 None, 生效的组织别名)。"""
     settings = ctx.experiment.config.omics.transcriptomics
     spec = settings.input
     if spec.level == "raw":
@@ -125,41 +127,90 @@ def _load_counts(ctx: RunContext, rows: pd.DataFrame, record: OmicsRun) -> tuple
                        "已有基因计数矩阵时用 format: counts_matrix；也可暂用 omicsweave transcriptomics run")
     if spec.format not in ("counts_matrix", "kallisto"):
         raise RunError(f"转录组输入格式 {spec.format} 尚未接入统一运行（可用 counts_matrix、kallisto）")
+    applied_aliases = ctx.experiment.applied_sample_aliases(Omics.TRANSCRIPTOMICS)
     files = [ctx.project.resolve(f) for f in spec.files]
-    columns = dict(zip(rows["column"], rows["sample_id"]))
 
     if spec.format == "counts_matrix":
-        if len(files) != 1:
-            raise RunError("counts_matrix 目前只读取一个文件，请把各组织的样本放在同一张计数矩阵中")
-        table = _read_matrix(files[0])
-        present = [c for c in table.columns if c in columns]
-        record.inputs.append(files[0])
-        counts = table[present].apply(pd.to_numeric, errors="coerce")
-        if counts.isna().any().any():
-            raise RunError(f"{files[0].name} 的样本列中有非数值或空值")
+        tissue_files = getattr(spec, "tissue_files", None) or {}
+        if tissue_files:
+            jobs = [
+                (str(t), ctx.experiment.config.canonical_tissue(str(t), Omics.TRANSCRIPTOMICS), ctx.project.resolve(p))
+                for t, p in tissue_files.items()
+            ]
+            canonical_counts: dict[str, int] = {}
+            for raw_key, canon_key, _ in jobs:
+                canonical_counts[canon_key] = canonical_counts.get(canon_key, 0) + 1
+                if raw_key != canon_key:
+                    applied_aliases.setdefault(raw_key, canon_key)
+        else:
+            if not files:
+                raise RunError("counts_matrix 需要至少一张包含样本的计数矩阵")
+            jobs = [(None, None, path) for path in files]
+            canonical_counts = {}
+        parts: list[pd.DataFrame] = []
+        seen_samples: set[str] = set()
+        for raw_key, canon_key, path in jobs:
+            table = _read_matrix(path)
+            candidates = rows if canon_key is None else select_tissue_file_rows(
+                rows, raw_key, canon_key,
+                multi_key_canonical=canonical_counts[canon_key] > 1,
+                raw_tissues=ctx.experiment.raw_tissues,
+            )
+            if candidates["column"].duplicated().any():
+                dups = candidates.loc[candidates["column"].duplicated(), "column"].tolist()
+                raise RunError(f"{path.name} 中有多个转录组样本对应同一数据列：{_preview(dups)}")
+            col_map = dict(zip(candidates["column"], candidates["sample_id"]))
+            present_cols = [c for c in table.columns if c in col_map]
+            record.inputs.append(path)
+            if not present_cols:
+                continue
+            part = table[present_cols].apply(pd.to_numeric, errors="coerce")
+            if part.isna().any().any():
+                raise RunError(f"{path.name} 的样本列中有非数值或空值")
+            part = part.rename(columns=col_map)
+            overlap = [s for s in part.columns if s in seen_samples]
+            if overlap:
+                raise RunError(f"转录组样本 {_preview(overlap)} 在多张计数矩阵中重复出现")
+            seen_samples.update(part.columns)
+            parts.append(part)
+        if not parts:
+            raise RunError("转录组数据中没有找到 samples.tsv 声明的样本")
+        if len(parts) == 1:
+            counts = parts[0]
+        else:
+            counts = pd.concat(parts, axis=1)
+            if counts.isna().any().any():
+                n_missing = int(counts.isna().any(axis=1).sum())
+                counts = counts.fillna(0)
+                record.notes.append(f"合并多张计数矩阵时有 {n_missing} 个基因未在全部文件中出现，缺失处按 0 填充")
         quant = None
-    else:
-        quant_dir = files[0]
-        present = [c for c in columns if (quant_dir / c / "abundance.tsv").is_file()]
-        record.inputs += [quant_dir / c / "abundance.tsv" for c in present]
-        tx_counts, tpm, efflen = merge_kallisto_counts(str(quant_dir), present)
-        if tx_counts is None:
-            raise RunError(f"{quant_dir} 下没有找到任何样本的 abundance.tsv")
-        tx2gene, mapping = _tx2gene(ctx.project, spec, settings.adapter)
-        record.inputs.append(mapping)
-        method = str(settings.analysis.get("gene_aggregation", AGGREGATION_LENGTH_SCALED_TPM))
-        if method not in VALID_AGGREGATION_METHODS:
-            raise RunError(f"gene_aggregation 应为 {' / '.join(VALID_AGGREGATION_METHODS)}")
-        counts, info = aggregate_counts_to_gene(tx_counts, tx2gene, tpm_df=tpm, efflen_df=efflen, method=method)
-        record.parameters["gene_aggregation"] = info.get("gene_aggregation", method)
-        quant = qc_gate.collect_quant_summary(quant_dir, present)
-        quant.insert(0, "sample_id", quant.pop("sample").map(columns))
+        missing = [s for s in rows["sample_id"] if s not in seen_samples]
+        if missing:
+            record.notes.append(f"转录组数据中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
+        return counts, quant, applied_aliases
+
+    columns = dict(zip(rows["column"], rows["sample_id"]))
+    quant_dir = files[0]
+    present = [c for c in columns if (quant_dir / c / "abundance.tsv").is_file()]
+    record.inputs += [quant_dir / c / "abundance.tsv" for c in present]
+    tx_counts, tpm, efflen = merge_kallisto_counts(str(quant_dir), present)
+    if tx_counts is None:
+        raise RunError(f"{quant_dir} 下没有找到任何样本的 abundance.tsv")
+    tx2gene, mapping = _tx2gene(ctx.project, spec, settings.adapter)
+    record.inputs.append(mapping)
+    method = str(settings.analysis.get("gene_aggregation", AGGREGATION_LENGTH_SCALED_TPM))
+    if method not in VALID_AGGREGATION_METHODS:
+        raise RunError(f"gene_aggregation 应为 {' / '.join(VALID_AGGREGATION_METHODS)}")
+    counts, info = aggregate_counts_to_gene(tx_counts, tx2gene, tpm_df=tpm, efflen_df=efflen, method=method)
+    record.parameters["gene_aggregation"] = info.get("gene_aggregation", method)
+    quant = qc_gate.collect_quant_summary(quant_dir, present)
+    quant.insert(0, "sample_id", quant.pop("sample").map(columns))
     missing = [s for c, s in columns.items() if c not in present]
     if missing:
         record.notes.append(f"转录组数据中找不到 {len(missing)} 个 samples.tsv 中的样本：{_preview(missing)}")
     if not present:
         raise RunError("转录组数据中没有找到 samples.tsv 声明的样本")
-    return counts.rename(columns=columns), quant
+    return counts.rename(columns=columns), quant, applied_aliases
 
 
 def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
@@ -197,7 +248,16 @@ def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
                 try:
                     result = run_pydeseq2_analysis(counts[samples], meta, design_formula=formula,
                                                    contrast=("condition", contrast.numerator, contrast.denominator))
-                except Exception as exc:  # 与旧流程相同：拟合失败时视情况退回秩和检验
+                except ImportError as exc:
+                    name = getattr(exc, "name", None) or ""
+                    if name.split(".")[0] == "omicsweave":
+                        raise
+                    pkg = name.split(".")[0] or "pydeseq2"
+                    raise RunError(
+                        f"{label} 需要 PyDESeq2（缺少或无法导入依赖 {pkg}：{exc}），不能静默退回秩和检验；"
+                        f'请安装：pip install "omicsweave[transcriptomics]"（或 pip install {pkg}）'
+                    ) from exc
+                except Exception as exc:  # 与旧流程相同：仅数值拟合失败时视情况退回秩和检验
                     record.notes.append(f"{label} 的 PyDESeq2 拟合失败：{exc}")
             if result is None:
                 if active:
@@ -220,7 +280,10 @@ def run(ctx: RunContext) -> OmicsRun:
     out = ctx.omics_dir(Omics.TRANSCRIPTOMICS)
     record = OmicsRun(Omics.TRANSCRIPTOMICS)
     rows = _samples(ctx.experiment)
-    counts, quant = _load_counts(ctx, rows, record)
+    counts, quant, applied_aliases = _load_counts(ctx, rows, record)
+    if applied_aliases:
+        record.notes.append(format_alias_note(Omics.TRANSCRIPTOMICS.value, applied_aliases))
+        record.parameters["tissue_aliases_applied"] = applied_aliases
     tissues = rows.set_index("sample_id")["tissue"]
     record.parameters["input_format"] = ctx.experiment.config.omics.transcriptomics.input.format
 

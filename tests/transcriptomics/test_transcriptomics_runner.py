@@ -265,5 +265,73 @@ class KallistoInputTest(unittest.TestCase):
         self.assertFalse(table["selected"].any())
 
 
+class PyDESeq2DependencyGuardTest(unittest.TestCase):
+    def _build_counts_project(self, root: Path) -> None:
+        exp_dir = root / "experiments" / EXP
+        data_dir = exp_dir / "data"
+        data_dir.mkdir(parents=True)
+        samples = ["liver_m1", "liver_m2", "liver_m3", "liver_m4", "liver_m5", "liver_m6"]
+        gene_counts(samples, {"liver_m4", "liver_m5", "liver_m6"}, set(), seed=7, n_genes=40).to_csv(
+            data_dir / "counts.csv"
+        )
+        (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                           encoding="utf-8")
+        (exp_dir / "experiment.yaml").write_text(yaml.safe_dump({
+            "schema_version": 1, "experiment": {"id": EXP},
+            "design": {
+                "factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"]}},
+                "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD", "denominator": "LFD"}],
+            },
+            "omics": {"transcriptomics": {"enabled": True, "input": {
+                "level": "table", "format": "counts_matrix", "files": [f"experiments/{EXP}/data/counts.csv"],
+            }}},
+        }, sort_keys=False), encoding="utf-8")
+        pd.DataFrame({"subject_id": [f"m{i}" for i in range(1, 7)], "diet": ["LFD"] * 3 + ["HFD"] * 3}).to_csv(
+            exp_dir / "subjects.tsv", sep="\t", index=False
+        )
+        pd.DataFrame({"sample_id": samples, "subject_id": [f"m{i}" for i in range(1, 7)],
+                      "omics": "transcriptomics", "tissue": "liver"}).to_csv(
+            exp_dir / "samples.tsv", sep="\t", index=False
+        )
+
+    def test_missing_pydeseq2_fails_fast_without_wilcoxon_fallback(self) -> None:
+        from omicsweave.transcriptomics import runner as tx_runner
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_counts_project(root)
+            err = ModuleNotFoundError("No module named 'pydeseq2'", name="pydeseq2")
+            with mock.patch.object(tx_runner, "run_pydeseq2_analysis", side_effect=err), \
+                    mock.patch.object(tx_runner, "run_wilcoxon_analysis") as wilcoxon_mock:
+                with self.assertRaises(RunError) as ctx:
+                    _quiet(run_experiment, EXP, ["transcriptomics"], steps=["differential"], root=root)
+            self.assertIn("pydeseq2", str(ctx.exception))
+            self.assertIn("omicsweave[transcriptomics]", str(ctx.exception))
+            wilcoxon_mock.assert_not_called()
+
+    def test_numerical_pydeseq2_failure_still_falls_back_to_wilcoxon(self) -> None:
+        from omicsweave.transcriptomics import runner as tx_runner
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_counts_project(root)
+            with mock.patch.object(tx_runner, "run_pydeseq2_analysis", side_effect=RuntimeError("dispersion failed")):
+                run_dir, notes = _quiet(run_experiment, EXP, ["transcriptomics"], steps=["differential"], root=root)
+            table = read_differential(run_dir / "omics" / "transcriptomics" / "tables" / "differential.parquet")
+            self.assertEqual(set(table["method"]), {"wilcoxon"})
+            self.assertTrue(any("dispersion failed" in note for note in notes))
+
+    def test_validate_warns_when_pydeseq2_is_missing(self) -> None:
+        from omicsweave.core.validate import validate_project
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_counts_project(root)
+            with mock.patch("omicsweave.core.validate.importlib.util.find_spec", return_value=None):
+                report = validate_project(root)
+            self.assertTrue(report.ok)
+            self.assertTrue(any("pydeseq2" in issue.message for issue in report.warnings))
+
+
 if __name__ == "__main__":
     unittest.main()

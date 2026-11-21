@@ -29,7 +29,7 @@ from typing import Any, Iterable
 import pandas as pd
 import yaml
 
-from ..mappings.network_annotation import network_reactions, split_metabolite
+from ..mappings.network_annotation import curated_reactions, network_reactions, split_metabolite
 
 PANEL_KEYS = {"title", "tissues", "contrasts", "segments", "branch_nodes", "expected_tracers", "signed_modules",
               "controls"}
@@ -77,9 +77,9 @@ def _main_species(species: tuple[str, ...]) -> list[str]:
 
 @lru_cache(maxsize=1)
 def species_labels() -> dict[str, str]:
-    """网络物种 → 可读名称：取各反应的组织层名称（与非辅因子物种一一对应时）；没有时用物种名的基名。"""
+    """网络物种 → 可读名称：MFA 网络优先，策展扩展反应补齐；没有时用物种名的基名。"""
     names: dict[str, str] = {}
-    for reaction in network_reactions().values():
+    for reaction in (*network_reactions().values(), *curated_reactions().values()):
         for species, tissue_names in ((reaction.substrates, reaction.tissue_substrate_names),
                                       (reaction.products, reaction.tissue_product_names)):
             main = _main_species(species)

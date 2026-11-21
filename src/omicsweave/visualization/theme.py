@@ -109,6 +109,23 @@ PRESETS: dict[str, StylePreset] = {
         palette=PALETTES["slide_dark"],
         rc=_preset_rc(PALETTES["slide_dark"]),
     ),
+    "poster_editorial": StylePreset(
+        name="poster_editorial",
+        description="用户海报风格的统计图版式（白底、黑色层级标题、细横向参考线）",
+        palette=PALETTES["nature_editorial"],
+        rc={
+            **_preset_rc(PALETTES["nature_editorial"], grid=True),
+            "axes.grid.axis": "y",
+            "axes.axisbelow": True,
+            "axes.titlelocation": "left",
+            "axes.titlepad": 9,
+            "axes.titlecolor": "#232323",
+            "grid.linewidth": 0.45,
+            "lines.linewidth": 1.4,
+            "lines.markersize": 4,
+            "errorbar.capsize": 2.5,
+        },
+    ),
 }
 
 
@@ -172,7 +189,7 @@ def apply_theme(
         显式传入 matplotlib 内置样式（如 ``seaborn-v0_8-whitegrid``）时先套用该样式，再叠加字体/矢量/DPI
         基础设置，不覆写该样式的网格与框线；省略时默认套用 ``preset``（默认 ``nature_editorial``）。
     preset : str, default "nature_editorial"
-        OmicsWeave 主题预设名（``nature_editorial`` / ``metro_atlas`` / ``slide_dark``）。
+        OmicsWeave 主题预设名，见 :func:`list_presets`。
     dpi, save_dpi : int
         屏幕显示与保存分辨率（默认保存 300 dpi）。
     rc : dict, optional

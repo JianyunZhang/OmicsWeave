@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Membrane</title>
+  <desc>Schematic icon for Membrane.</desc>
+  <path d="M 4 10 L 28 10 M 4 22 L 28 22 M 6 12 L 6 19 M 11 12 L 11 19 M 21 12 L 21 19 M 26 12 L 26 19" fill="none" stroke="#34312E" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 13 7 L 19 7 L 19 25 L 13 25 Z" transform="translate(.55 .75)" fill="#384E70" opacity=".30"/>
+  <path d="M 13 7 L 19 7 L 19 25 L 13 25 Z" fill="#8FBDD3" stroke="#34312E" stroke-width="1.48" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 13 7 L 19 7 L 19 25 L 13 25 Z" transform="translate(-.35 -.40)" fill="none" stroke="#384E70" stroke-width=".38" opacity=".72"/>
+  <path d="M 16 11 L 16 21" fill="none" stroke="#D8F0F3" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

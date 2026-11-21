@@ -29,13 +29,14 @@ import pandas as pd
 from omicsweave.contract.tables import read_enrichment
 from omicsweave.core.model import IntegrationMode
 from omicsweave.core.run import RunContext, RunError
+from omicsweave.core.tissues import merge_tissue_aliases, remap_table_tissues, validate_tissue_aliases
 
 from ..integrate import IntegrationRun, mode_dir
 from ..methods.pathway_convergence import fuse_pathway_evidence, normalize_term
 
 MODE = IntegrationMode.PATHWAY_CONVERGENCE
-# 与旧流程相同：ORA 用 padj < 0.05；GSEA 按惯例用 FDR < 0.25
-DEFAULTS: dict[str, Any] = {"ora_padj_cutoff": 0.05, "gsea_padj_cutoff": 0.25}
+# 与旧流程相同：ORA 用 padj < 0.05；GSEA 按惯例用 FDR < 0.25；tissue_map 可选地将各组学组织名换为共同名
+DEFAULTS: dict[str, Any] = {"ora_padj_cutoff": 0.05, "gsea_padj_cutoff": 0.25, "tissue_map": {}}
 
 
 def evidence_table(enrichment: pd.DataFrame) -> pd.DataFrame:
@@ -115,7 +116,22 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         found = "、".join(p.parent.parent.name for p in paths) or "没有"
         raise RunError(f"{MODE.value} 需要至少 2 个组学的富集结果；结果包 {source.name} 中只有：{found}。"
                        f"请先对启用的组学运行 omicsweave run（含 enrichment 步骤）")
-    enrichment = pd.concat([read_enrichment(p) for p in paths], ignore_index=True)
+    try:
+        tissue_map = validate_tissue_aliases(params["tissue_map"] or {}, f"integration.parameters.{MODE.value}.tissue_map")
+        parts = []
+        for path in paths:
+            omics = path.parent.parent.name
+            aliases = merge_tissue_aliases(
+                ctx.experiment.config.tissue_aliases_for(omics), tissue_map,
+                label=f"integration.parameters.{MODE.value}.tissue_map",
+            )
+            part, _ = remap_table_tissues(
+                read_enrichment(path), aliases, context=f"源结果包 {source.name} 的 {omics} 富集表",
+            )
+            parts.append(part)
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+    enrichment = pd.concat(parts, ignore_index=True)
 
     evidence = evidence_table(enrichment)
     fusion = fusion_table(evidence)

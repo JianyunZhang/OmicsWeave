@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .tissues import merge_tissue_aliases, resolve_tissue, validate_tissue_aliases
+
 SCHEMA_VERSION = 1
 ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
 
@@ -334,6 +336,13 @@ class Design(_Strict):
     models: list[ModelSpec] = Field(default_factory=list)
     # 对各差异结果做自适应收缩，增加 lfsr 列（证据画像据此计算方向可信度）
     adaptive_shrinkage: bool = False
+    # 实验级组织别名（别名 → 规范组织名），所有单组学运行与整合模式都会套用
+    tissue_aliases: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("tissue_aliases")
+    @classmethod
+    def _check_tissue_aliases(cls, value: dict[str, str]) -> dict[str, str]:
+        return validate_tissue_aliases(value, "design.tissue_aliases")
 
     @model_validator(mode="after")
     def _check_references(self) -> Design:
@@ -395,6 +404,13 @@ class OmicsSettings(_Strict):
     input: OmicsInput | None = None
     adapter: dict[str, Any] = Field(default_factory=dict)
     analysis: dict[str, Any] = Field(default_factory=dict)
+    # 组学级组织别名（别名 → 规范组织名），合并并覆写 design.tissue_aliases 的同名条目
+    tissue_aliases: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("tissue_aliases")
+    @classmethod
+    def _check_tissue_aliases(cls, value: dict[str, str]) -> dict[str, str]:
+        return validate_tissue_aliases(value, "omics.tissue_aliases")
 
     @model_validator(mode="after")
     def _check_input(self) -> OmicsSettings:
@@ -508,7 +524,28 @@ class ExperimentConfig(_Strict):
         duplicated = sorted({i for i in ids if ids.count(i) > 1})
         if duplicated:
             raise ValueError(f"派生特征 id 重复：{'、'.join(duplicated)}")
+        for omics in Omics:
+            own = self.omics.settings(omics).tissue_aliases
+            if own or self.design.tissue_aliases:
+                merge_tissue_aliases(self.design.tissue_aliases, own, label=f"omics.{omics.value}.tissue_aliases")
         return self
+
+    def tissue_aliases_for(self, omics: Omics | str | None = None) -> dict[str, str]:
+        """某个组学生效的组织别名表（实验级 ``design.tissue_aliases`` 与组学级 ``omics.<组学>.tissue_aliases`` 合并）。"""
+        if omics is None:
+            return dict(self.design.tissue_aliases)
+        try:
+            key = omics if isinstance(omics, Omics) else Omics(str(omics))
+        except ValueError:
+            return dict(self.design.tissue_aliases)
+        own = self.omics.settings(key).tissue_aliases
+        if not own:
+            return dict(self.design.tissue_aliases)
+        return merge_tissue_aliases(self.design.tissue_aliases, own, label=f"omics.{key.value}.tissue_aliases")
+
+    def canonical_tissue(self, tissue: str, omics: Omics | str | None = None) -> str:
+        """按实验级与组学级组织别名表返回规范组织名。"""
+        return resolve_tissue(tissue, self.tissue_aliases_for(omics))
 
 
 def export_json_schema() -> dict[str, dict[str, Any]]:

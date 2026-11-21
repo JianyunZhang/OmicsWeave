@@ -266,6 +266,7 @@ design:
   reversal_pairs:                   # 疾病效应被治疗逆转时标记 reversal（见总纲 2.3 节）
     - {disease: HFD_vs_LFD_saline, treatment: GLP1_vs_Saline_in_HFD}
   stratify_by: [tissue]             # 各组织分别分析
+  tissue_aliases: {}                # 可选：实验级组织别名 → 规范名，如 {white_adipose: sq_adipose, cerebral_cortex: brain, renal_cortex: kidney}
   covariates: [batch]               # 批次 > 1 个水平时自动加入设计公式
 
 omics:
@@ -274,6 +275,7 @@ omics:
     input: {level: raw, format: fastq_gz, layout: paired, strandedness: reverse}
     adapter: {name: kallisto, executable: kallisto, index: references/kallisto.idx}
     analysis: {method: deseq2, min_count: 10}
+    tissue_aliases: {}              # 可选：组学级组织别名，合并并覆写 design.tissue_aliases
   proteomics:
     enabled: true
     input: {level: raw, format: thermo_raw, acquisition: dia}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import codecs
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +20,9 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from .model import ExperimentConfig, ProjectConfig
+from .model import ExperimentConfig, Omics, ProjectConfig
 from .project import project_dir
+from .tissues import resolve_tissue
 
 PROJECT_FILE = "project.yaml"
 EXPERIMENT_FILE = "experiment.yaml"
@@ -73,10 +74,25 @@ class Experiment:
     config: ExperimentConfig
     subjects: pd.DataFrame
     samples: pd.DataFrame
+    # 组织别名归一前的 sample_id → 原 tissue（仅当配置了 tissue_aliases 时记录）
+    raw_tissues: dict[str, str] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
         return self.config.experiment.id
+
+    def applied_sample_aliases(self, omics: Omics | str) -> dict[str, str]:
+        """某组学在 samples.tsv 中实际因 tissue_aliases 发生改名的 ``{原组织名: 规范组织名}``。"""
+        if not self.raw_tissues or "sample_id" not in self.samples.columns or "tissue" not in self.samples.columns:
+            return {}
+        target = omics.value if isinstance(omics, Omics) else str(omics)
+        rows = self.samples[self.samples["omics"] == target] if "omics" in self.samples.columns else self.samples
+        applied: dict[str, str] = {}
+        for sid, canon in zip(rows["sample_id"], rows["tissue"]):
+            raw = self.raw_tissues.get(sid, canon)
+            if raw and canon and raw != canon:
+                applied.setdefault(raw, canon)
+        return applied
 
 
 def _format_validation_error(source: Path, error: ValidationError) -> list[str]:
@@ -173,6 +189,28 @@ def load_project(root: str | Path | Project | None = None) -> Project:
     return Project(root=root_path, config=_parse(ProjectConfig, path, _read_yaml(path)))
 
 
+def _has_tissue_aliases(config: ExperimentConfig) -> bool:
+    return bool(config.design.tissue_aliases or any(config.omics.settings(o).tissue_aliases for o in Omics))
+
+
+def apply_sample_tissue_aliases(samples: pd.DataFrame,
+                                config: ExperimentConfig) -> tuple[pd.DataFrame, dict[str, str]]:
+    """按实验级与组学级 ``tissue_aliases`` 归一 ``samples.tsv`` 的 ``tissue`` 列，并保留原名索引。"""
+    if "tissue" not in samples.columns or not _has_tissue_aliases(config):
+        return samples, {}
+    raw_tissues = dict(zip(samples["sample_id"], samples["tissue"])) if "sample_id" in samples.columns else {}
+    aliases_by_omics = {o.value: config.tissue_aliases_for(o) for o in Omics}
+    default_aliases = config.tissue_aliases_for(None)
+    omics_col = samples["omics"].tolist() if "omics" in samples.columns else [None] * len(samples)
+    resolved = [
+        resolve_tissue(tissue, aliases_by_omics.get(omics, default_aliases)) if tissue else ""
+        for tissue, omics in zip(samples["tissue"].tolist(), omics_col)
+    ]
+    updated = samples.copy()
+    updated["tissue"] = resolved
+    return updated, raw_tissues
+
+
 def load_experiment(project: Project, experiment: str | Path) -> Experiment:
     """按实验 ID（``paths.experiments`` 下的目录名）或实验目录路径读取实验。"""
     candidate = Path(experiment)
@@ -183,5 +221,6 @@ def load_experiment(project: Project, experiment: str | Path) -> Experiment:
     data = _substitute(_read_yaml(path), project.config.project.references)
     config: ExperimentConfig = _parse(ExperimentConfig, path, data)
     subjects = read_table(exp_dir / config.design.subjects)
-    samples = read_table(exp_dir / config.design.samples)
-    return Experiment(project=project, root=exp_dir, config=config, subjects=subjects, samples=samples)
+    samples, raw_tissues = apply_sample_tissue_aliases(read_table(exp_dir / config.design.samples), config)
+    return Experiment(project=project, root=exp_dir, config=config, subjects=subjects, samples=samples,
+                      raw_tissues=raw_tissues)
