@@ -169,9 +169,10 @@ src/omicsweave/visualization/
   - `map_view.py` 为每条反应同时填充真实分层读数 `P_state`/`P_value`（蛋白）与 `R_layer_state`/`R_value`（mRNA），消除早期反应卡片中 `R = Regulation` 与聚合卡片 `R = mRNA` 的语义冲突；
   - 微条顶栏以 4 枚纯矢量微图标取代难懂缩写：`⇉`（Flux）、`◑` 活性口袋酶球（Protein）、`∿` 波形单链（mRNA）、`⬡` 苯环/六边形（Metab）。
 - **状态符号全面图标化**：所有格状态均由 `draw_status_cell` 纯矢量绘制并在总图/子图图例中给出实景色块对照：实心 `▲▼`（Sig. FDR<0.05）、空心 `△▽`（Suggestive p<0.05）、红蓝斜拼（Mixed）、横杠 `—`（Unchanged）、细斜线 `/`（Not measured）、圆圈斜杠 `⊘`（Unidentifiable flux）、虚线空圈 `◌`（Not detected）、琥珀三角叹号 `⚠`（QC / Low-n）。
-- **自解释证据徽章与串联通量徽章**：
+- **自解释证据徽章、串联通量徽章与净通量反转徽章**：
   - 三点阶梯徽章直观呈现 `●●● Confirmed`、`●●○ Flux`、`●○○ Enz-pred`（取消裸代码 `L3`/`L2`/`L1`）；
-  - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在图例中明示“Stoichiometrically linked reactions sharing one MFA test (non-independent)”。
+  - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在图例中明示“Stoichiometrically linked reactions sharing one MFA test (non-independent)”；
+  - 组间净通量方向反转以纯矢量琥珀圆上下反向双箭头徽章 `draw_sign_reversal_badge`（`⇄`）标注，与无单一净方向的可逆反应轨道双向箭头（`< >`）在总图与子图图例中并列实景区分。
 - **全库绘图统一收敛**：
   - `primitives.py` 的 `draw_status_cell` / `draw_layer_icon` / `draw_tier_badge` 同时支持 y 向下画布（图 E / 子图 / GA）与标准 y 向上非等比坐标系（图 A–D 矩阵与面板）；
   - 反应档案图 A–D（`dossier_plots.py`）、Graphical Abstract 全部 4 套皮肤（含 `pixel_abstract` 像素能量条）以及单组学 / MFA 绘图模块（`mfa`、`metabolomics`、`proteomics`、`transcriptomics`、`integration`）统一采用 `NATURE_EDITORIAL` 红蓝语义色板与 **300 dpi** 出版输出规范。

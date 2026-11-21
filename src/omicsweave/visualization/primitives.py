@@ -448,6 +448,64 @@ def draw_coupled_badge(
     return bw
 
 
+def draw_sign_reversal_badge(
+    ax,
+    cx: float,
+    cy: float,
+    radius: float = 0.78,
+    *,
+    palette: SemanticPalette = NATURE_EDITORIAL,
+    lw: float = 0.68,
+    zorder: float = 4.5,
+    y_scale: float = 1.0,
+) -> None:
+    """绘制两组间净通量方向反转（Net flux reversal）纯矢量琥珀圆徽章（内部为上下反向双箭头 ``⇄``）。
+
+    与热力学可逆反应（轨道双向箭头 ``< >``）严格区分：仅当实验组与对照组净通量均值异号时出现。
+    """
+    rx = float(radius)
+    ry = rx * y_scale
+    ax.add_patch(Ellipse(
+        (cx, cy), 2.0 * rx, 2.0 * ry,
+        facecolor=palette.sign_change_bg,
+        edgecolor=palette.sign_change_edge,
+        lw=lw,
+        zorder=zorder,
+    ))
+    arrow_lw = max(0.55, lw * 0.96)
+    ink = palette.sign_change_ink
+
+    # 上排向右箭头（→）
+    y_top = cy - ry * 0.27
+    ax.add_line(Line2D(
+        [cx - rx * 0.54, cx + rx * 0.44], [y_top, y_top],
+        color=ink, lw=arrow_lw, solid_capstyle="round", zorder=zorder + 0.10,
+    ))
+    head_r = MplPath(
+        [(cx + rx * 0.16, y_top - ry * 0.24), (cx + rx * 0.56, y_top), (cx + rx * 0.16, y_top + ry * 0.24)],
+        [MplPath.MOVETO, MplPath.LINETO, MplPath.LINETO],
+    )
+    ax.add_patch(PathPatch(
+        head_r, facecolor="none", edgecolor=ink, lw=arrow_lw,
+        capstyle="round", joinstyle="miter", zorder=zorder + 0.12,
+    ))
+
+    # 下排向左箭头（←）
+    y_bot = cy + ry * 0.27
+    ax.add_line(Line2D(
+        [cx + rx * 0.54, cx - rx * 0.44], [y_bot, y_bot],
+        color=ink, lw=arrow_lw, solid_capstyle="round", zorder=zorder + 0.10,
+    ))
+    head_l = MplPath(
+        [(cx - rx * 0.16, y_bot - ry * 0.24), (cx - rx * 0.56, y_bot), (cx - rx * 0.16, y_bot + ry * 0.24)],
+        [MplPath.MOVETO, MplPath.LINETO, MplPath.LINETO],
+    )
+    ax.add_patch(PathPatch(
+        head_l, facecolor="none", edgecolor=ink, lw=arrow_lw,
+        capstyle="round", joinstyle="miter", zorder=zorder + 0.12,
+    ))
+
+
 # ---------------------------------------------------------------------------
 # 极简纯矢量组学微图标（通量 / 蛋白 / mRNA / 代谢物）与单格状态绘制原语
 # ---------------------------------------------------------------------------
@@ -869,6 +927,7 @@ __all__ = [
     "draw_organelle_box",
     "draw_quad_arrow",
     "draw_rank_tab",
+    "draw_sign_reversal_badge",
     "draw_status_cell",
     "draw_stealth_head",
     "draw_tier_badge",

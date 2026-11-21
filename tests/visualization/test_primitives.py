@@ -24,6 +24,7 @@ from omicsweave.visualization.primitives import (
     draw_organelle_box,
     draw_quad_arrow,
     draw_rank_tab,
+    draw_sign_reversal_badge,
     draw_status_cell,
     draw_tier_badge,
     draw_zone_card,
@@ -77,10 +78,11 @@ class PrimitivesTest(unittest.TestCase):
                 tier_badge_width("L2", label_style="code"),
             )
 
-            # Rank tab & Linked flux badge
+            # Rank tab, Linked flux badge & net-flux reversal amber badge
             rt_w = draw_rank_tab(ax, 20, 6, 1, 6.0, palette=pal)
             cb_w = draw_coupled_badge(ax, 24, 6, 1, 6.0, palette=pal, total_groups=1)
             cb_w2 = draw_coupled_badge(ax, 24, 9, 2, 6.0, palette=pal, total_groups=3)
+            draw_sign_reversal_badge(ax, 18.0, 10.0, radius=0.8, palette=pal, zorder=6.0)
             self.assertGreater(rt_w, 0)
             self.assertAlmostEqual(cb_w, coupled_badge_width(1, total_groups=1))
             self.assertAlmostEqual(cb_w2, coupled_badge_width(2, total_groups=3))

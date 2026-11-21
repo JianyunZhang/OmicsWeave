@@ -64,6 +64,7 @@ from omicsweave.visualization.primitives import (
     draw_organelle_box,
     draw_quad_arrow,
     draw_rank_tab,
+    draw_sign_reversal_badge,
     draw_status_cell,
     draw_tier_badge,
     draw_zone_card,
@@ -1009,9 +1010,7 @@ def _draw_edge(
 
     hub = geometry["hub"]
     if bool(row["sign_change"]):
-        ax.add_patch(Circle(hub, 0.74, facecolor=palette.sign_change_bg, edgecolor=palette.sign_change_edge, lw=0.65, zorder=4.5))
-        ax.text(hub[0], hub[1], "↔", fontsize=4.8 * font_scale, ha="center", va="center",
-                color=palette.sign_change_ink, fontweight="bold", zorder=4.6)
+        draw_sign_reversal_badge(ax, hub[0], hub[1], radius=0.78, palette=palette, lw=0.68, zorder=4.5)
     if geometry["note"]:
         ax.text(
             hub[0], hub[1] + 0.45, geometry["note"], fontsize=NOTE_SIZE * font_scale, ha="center", va="top",
@@ -1626,49 +1625,51 @@ def _legend_atlas(
             fontsize=4.7, fontweight="bold", color=palette.ink, va="top")
     if metro:
         metro_samples = [
-            (y0 + 3.45, palette.edge_grey, 2.2, False, True, "MFA flux fitted (solid rail; grey = undecided)"),
-            (y0 + 5.45, palette.up, 3.2, False, True,
+            (y0 + 3.05, palette.edge_grey, 2.2, False, True, False, "MFA flux fitted (solid rail; grey = undecided)"),
+            (y0 + 4.88, palette.up, 3.2, False, True, False,
              "MFA flux directional (solid rail; red up / blue down)" if color_mode == "semantic" else "MFA flux active (solid rail; color = pathway family)"),
-            (y0 + 7.45, "#5B6C82", 2.6, True, True, "Omics-only / Enzyme-predicted (hollow double-rail)"),
-            (y0 + 9.45, palette.faint, 1.0, False, False, "Not assessed skeleton (no MFA & no mapped members)"),
+            (y0 + 6.71, "#5B6C82", 2.6, True, True, False, "Omics-only / Enzyme-predicted (hollow double-rail)"),
+            (y0 + 8.54, palette.edge_grey, 2.2, False, True, True, "Reversible reaction (no single net dir.; opposing < >)"),
+            (y0 + 10.37, palette.faint, 1.0, False, False, False, "Not assessed skeleton (no MFA & no mapped members)"),
         ]
-        for ey, col, lw, hollow, chev, desc in metro_samples:
+        for ey, col, lw, hollow, chev, bidir, desc in metro_samples:
             draw_metro_track(
                 ax, [(c2, ey), (c2 + 6.4, ey)], col,
                 width=lw, hollow=hollow, surface=palette.card_bg,
-                chevrons=chev, chevron_spacing=10.0, unit_in=unit_in,
-                corner_radius=0.0, halo=False, zorder=2.5,
+                chevrons=chev, chevron_spacing=10.0, chevron_bidirectional=bidir,
+                unit_in=unit_in, corner_radius=0.0, halo=False, zorder=2.5,
             )
-            ax.text(c2 + 7.4, ey, desc, fontsize=3.65, color=palette.ink2, va="center")
+            ax.text(c2 + 7.4, ey, desc, fontsize=3.6, color=palette.ink2, va="center")
         draw_metro_coupled_halo(
-            ax, [[(c2, y0 + 11.65), (c2 + 6.4, y0 + 11.65)]],
-            color=palette.coupled_track, edge_color=palette.coupled_edge, width=7.2, zorder=2.2,
+            ax, [[(c2, y0 + 12.22), (c2 + 6.4, y0 + 12.22)]],
+            color=palette.coupled_track, edge_color=palette.coupled_edge, width=7.0, zorder=2.2,
         )
         draw_metro_track(
-            ax, [(c2, y0 + 11.65), (c2 + 6.4, y0 + 11.65)], palette.up,
+            ax, [(c2, y0 + 12.22), (c2 + 6.4, y0 + 12.22)], palette.up,
             width=2.8, hollow=False, surface=palette.card_bg,
             chevrons=True, chevron_spacing=10.0, unit_in=unit_in,
             corner_radius=0.0, halo=False, zorder=2.6,
         )
-        ax.text(c2 + 7.4, y0 + 11.65, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
-                fontsize=3.6, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.22, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
+                fontsize=3.55, color=palette.coupled_ink, va="center")
     else:
         edge_samples = [
-            (y0 + 3.45, "-", palette.edge_grey, 1.2, False, True, "MFA flux fitted (grey = undecided / unident.)"),
-            (y0 + 5.45, "-", palette.up, 1.9, False, True, "MFA flux directional (red up / blue down)"),
-            (y0 + 7.45, (0, (3.2, 2.0)), palette.omics_grey, 1.05, False, True, "Omics-only / Enzyme-predicted edge (no MFA yet)"),
-            (y0 + 9.45, (0, (1.2, 1.8)), palette.faint, 0.72, False, True, "Not assessed (no MFA & no mapped members)"),
+            (y0 + 3.05, "-", palette.edge_grey, 1.2, False, True, "MFA flux fitted (grey = undecided / unident.)"),
+            (y0 + 4.88, "-", palette.up, 1.9, False, True, "MFA flux directional (red up / blue down)"),
+            (y0 + 6.71, (0, (3.2, 2.0)), palette.omics_grey, 1.05, False, True, "Omics-only / Enzyme-predicted edge (no MFA yet)"),
+            (y0 + 8.54, "-", palette.edge_grey, 1.2, True, True, "Reversible reaction (no single net direction)"),
+            (y0 + 10.37, (0, (1.2, 1.8)), palette.faint, 0.72, False, True, "Not assessed (no MFA & no mapped members)"),
         ]
         for ey, st, col, lw, hs, he, desc in edge_samples:
             draw_quad_arrow(ax, (c2, ey), (c2 + 3.2, ey), (c2 + 6.4, ey), col, lw, st, hs, he, 0.0, 0.0,
                             zorder=2.5, surface=palette.card_bg)
-            ax.text(c2 + 7.4, ey, desc, fontsize=3.65, color=palette.ink2, va="center")
-        draw_coupled_track(ax, [{"p0": (c2, y0 + 11.65), "c": (c2 + 3.2, y0 + 11.65), "p1": (c2 + 6.4, y0 + 11.65), "trim0": 0, "trim1": 0}],
-                           color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.5, zorder=2.2)
-        draw_quad_arrow(ax, (c2, y0 + 11.65), (c2 + 3.2, y0 + 11.65), (c2 + 6.4, y0 + 11.65), palette.up, 1.6, "-", False, True, 0.0, 0.0,
+            ax.text(c2 + 7.4, ey, desc, fontsize=3.6, color=palette.ink2, va="center")
+        draw_coupled_track(ax, [{"p0": (c2, y0 + 12.22), "c": (c2 + 3.2, y0 + 12.22), "p1": (c2 + 6.4, y0 + 12.22), "trim0": 0, "trim1": 0}],
+                           color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.4, zorder=2.2)
+        draw_quad_arrow(ax, (c2, y0 + 12.22), (c2 + 3.2, y0 + 12.22), (c2 + 6.4, y0 + 12.22), palette.up, 1.6, "-", False, True, 0.0, 0.0,
                         zorder=2.6, surface=palette.card_bg)
-        ax.text(c2 + 7.4, y0 + 11.65, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
-                fontsize=3.6, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.22, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
+                fontsize=3.55, color=palette.coupled_ink, va="center")
 
     # Col 3: 4-Layer Icon Strip, Real Visual State Swatches & Self-Explanatory Badges
     layer_defs = (
@@ -1714,8 +1715,10 @@ def _legend_atlas(
     ):
         draw_status_cell(ax, ix, ry2 - sw / 2, sw, st, 0, palette=palette, font_scale=1.1, zorder=2.5, draw_box=True)
         ax.text(ix + sw + 0.45, ry2, desc, fontsize=3.55, color=palette.ink2, va="center")
-        ix += sw + 0.55 + _text_width(desc, 3.55, unit=unit_in) + 1.75
-    ax.text(ix + 0.2, ry2, "(↔ net flux sign reversal)", fontsize=3.45, color=palette.muted, va="center")
+        ix += sw + 0.55 + _text_width(desc, 3.55, unit=unit_in) + 1.55
+    draw_sign_reversal_badge(ax, ix + 0.72, ry2, radius=0.72, palette=palette, lw=0.65, zorder=2.5)
+    ax.text(ix + 1.85, ry2, "Net flux reversal (group sign flip)", fontsize=3.55, color=palette.sign_change_ink,
+            fontweight="medium", va="center")
 
     # Row 3c: Self-explanatory 3-dot tier badges (●●● Confirmed / ●●○ Flux / ●○○ Enz-pred)
     by1 = y0 + 9.15
@@ -1866,7 +1869,7 @@ def _pub_legend_plan(
     bar_len = min(20.0, max(11.0, vw * 0.22))
     sw = 1.28
 
-    # Row-group A: Colorbar + Track/Arrow types + Linked conduit + FDR-sig metabolite
+    # Row-group A: Colorbar + Track/Arrow types + Reversible + Linked conduit + Sign reversal + FDR-sig metabolite
     cb_w = max(bar_len, _text_width("log2FC (−2 → +2)", fs * 0.90, bold=True, unit=unit_in)) + 1.0
     if metro:
         flux_lbl = "MFA Flux (solid)" if color_mode == "semantic" else "MFA Flux (pathway)"
@@ -1874,14 +1877,18 @@ def _pub_legend_plan(
             ("colorbar", "", cb_w),
             ("metro_flux", flux_lbl, 5.8 + _text_width(flux_lbl, fs, unit=unit_in)),
             ("metro_omics", "Omics-only (hollow)", 5.8 + _text_width("Omics-only (hollow)", fs, unit=unit_in)),
+            ("metro_rev", "Reversible (no net dir.)", 5.8 + _text_width("Reversible (no net dir.)", fs, unit=unit_in)),
             ("metro_coupled", "Linked flux conduit", 5.8 + _text_width("Linked flux conduit", fs, unit=unit_in)),
+            ("sign_reversal", "Net flux reversal", 2.3 + _text_width("Net flux reversal", fs, unit=unit_in)),
             ("metab", "FDR-sig. metab.", 2.6 + _text_width("FDR-sig. metab.", fs, unit=unit_in)),
         ]
     else:
         a_items = [
             ("colorbar", "", cb_w),
             ("arrow_flux", "MFA Flux Δ", 5.6 + _text_width("MFA Flux Δ", fs, unit=unit_in)),
+            ("arrow_rev", "Reversible (no net dir.)", 5.6 + _text_width("Reversible (no net dir.)", fs, unit=unit_in)),
             ("arrow_coupled", "Linked flux conduit", 5.6 + _text_width("Linked flux conduit", fs, unit=unit_in)),
+            ("sign_reversal", "Net flux reversal", 2.3 + _text_width("Net flux reversal", fs, unit=unit_in)),
             ("metab", "FDR-sig. metab.", 2.6 + _text_width("FDR-sig. metab.", fs, unit=unit_in)),
         ]
     a_pos, a_rows = _flow_rows([w for _, _, w in a_items], inner_w, gap=2.2)
@@ -2010,6 +2017,14 @@ def _legend_publication(
                 corner_radius=0.0, halo=False, zorder=2.5,
             )
             ax.text(x + 5.7, y, lbl, fontsize=fs, color=palette.ink2, va="center")
+        elif kind == "metro_rev":
+            draw_metro_track(
+                ax, [(x, y), (x + 5.0, y)], palette.edge_grey,
+                width=2.4, hollow=False, surface=palette.card_bg,
+                chevrons=True, chevron_spacing=9.0, chevron_bidirectional=True,
+                unit_in=unit_in, corner_radius=0.0, halo=False, zorder=2.5,
+            )
+            ax.text(x + 5.7, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "metro_coupled":
             draw_metro_coupled_halo(
                 ax, [[(x, y), (x + 5.0, y)]],
@@ -2026,12 +2041,19 @@ def _legend_publication(
             draw_quad_arrow(ax, (x, y), (x + 2.4, y), (x + 4.8, y),
                             palette.up, 1.9, "-", False, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
             ax.text(x + 5.5, y, lbl, fontsize=fs, color=palette.ink2, va="center")
+        elif kind == "arrow_rev":
+            draw_quad_arrow(ax, (x, y), (x + 2.4, y), (x + 4.8, y),
+                            palette.edge_grey, 1.4, "-", True, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
+            ax.text(x + 5.5, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "arrow_coupled":
             draw_coupled_track(ax, [{"p0": (x, y), "c": (x + 2.4, y), "p1": (x + 4.8, y), "trim0": 0, "trim1": 0}],
                                color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.4, zorder=2.2)
             draw_quad_arrow(ax, (x, y), (x + 2.4, y), (x + 4.8, y),
                             palette.up, 1.5, "-", False, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
             ax.text(x + 5.5, y, lbl, fontsize=fs, color=palette.coupled_ink, va="center")
+        elif kind == "sign_reversal":
+            draw_sign_reversal_badge(ax, x + 0.85, y, radius=0.82, palette=palette, lw=0.70, zorder=2.5)
+            ax.text(x + 2.15, y, lbl, fontsize=fs, color=palette.sign_change_ink, fontweight="medium", va="center")
         elif kind == "metab":
             ax.add_patch(Circle((x + 0.9, y), 0.90, facecolor=cmap(DEFAULT_NORM(1.5)), edgecolor=palette.ink, lw=0.75, zorder=2.3))
             ax.add_patch(Circle((x + 0.9, y), 1.08, facecolor="none", edgecolor=palette.ink, lw=1.1, zorder=2.4))
