@@ -80,9 +80,17 @@ class AbstractSpec:
     subtitle: str = ""
     contrast: str = ""
     takeaway: str = ""
+    rules_note: str = ""
     provenance: str = ""
     canvas: tuple[float, float] = (120.0, 74.0)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+DEFAULT_AGGREGATION_RULES: str = (
+    "Quantification: Hub tier = max claim (Confirmed > Flux > Enz-pred); "
+    "Dir. priority: Flux (F sig./sug. majority) > Enzyme (C majority) > Pool (|median log2FC| ≥ 0.45); "
+    "hits = L2+ count (else L1); Track = higher-tier end."
+)
 
 
 def validate_spec(spec: AbstractSpec) -> None:
@@ -157,6 +165,7 @@ def spec_from_dict(doc: dict[str, Any]) -> AbstractSpec:
         subtitle=str(doc.get("subtitle", "")),
         contrast=str(doc.get("contrast", "")),
         takeaway=str(doc.get("takeaway", "")),
+        rules_note=str(doc.get("rules_note", "")),
         provenance=str(doc.get("provenance", "")),
         hubs=hubs,
         flows=flows,
@@ -470,6 +479,7 @@ def build_abstract_from_pathway_view(
         subtitle=sub,
         contrast=contrast_nice,
         takeaway=takeaway,
+        rules_note=DEFAULT_AGGREGATION_RULES,
         provenance=provenance,
         hubs=tuple(hubs),
         flows=tuple(flows),

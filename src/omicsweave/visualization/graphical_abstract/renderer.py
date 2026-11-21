@@ -20,7 +20,7 @@ from ..figures import DOUBLE_COL_IN, FIGURE_FORMATS, SAVE_DPI, save_stem
 from ..palettes import VALID_COLOR_MODES
 from ..theme import themed
 from .spec import AbstractSpec, validate_spec
-from .styles import GA_STYLES, STYLE_RENDERERS
+from .styles import GA_STYLES, STYLE_RENDERERS, ga_footer_height
 
 _STYLE_SURFACES = {
     "nature_editorial": "#FFFFFF",
@@ -68,7 +68,7 @@ def render_graphical_abstract(
 
     w_units, h_units = spec.canvas
     header_units = 11.0
-    footer_units = (8.0 if spec.takeaway else 0.0) + (3.6 if spec.provenance else 0.0) + 2.0
+    footer_units = ga_footer_height(spec)
     total_h_units = h_units + header_units + footer_units
     height_in = float(width_in) * (total_h_units / float(w_units))
     unit_in = float(width_in) / float(w_units)

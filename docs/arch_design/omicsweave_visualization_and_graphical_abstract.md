@@ -171,8 +171,9 @@ src/omicsweave/visualization/
 - **状态符号全面图标化**：所有格状态均由 `draw_status_cell` 纯矢量绘制并在总图/子图图例中给出实景色块对照：实心 `▲▼`（Sig. FDR<0.05）、空心 `△▽`（Suggestive p<0.05）、红蓝斜拼（Mixed）、横杠 `—`（Unchanged）、细斜线 `/`（Not measured）、圆圈斜杠 `⊘`（Unidentifiable flux）、虚线空圈 `◌`（Not detected）、琥珀三角叹号 `⚠`（QC / Low-n）。
 - **自解释证据徽章、串联通量徽章与净通量反转徽章**：
   - 三点阶梯徽章直观呈现 `●●● Confirmed`、`●●○ Flux`、`●○○ Enz-pred`（取消裸代码 `L3`/`L2`/`L1`）；
-  - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在图例中明示“Stoichiometrically linked reactions sharing one MFA test (non-independent)”；
-  - 组间净通量方向反转以纯矢量琥珀圆上下反向双箭头徽章 `draw_sign_reversal_badge`（`⇄`）标注，与无单一净方向的可逆反应轨道双向箭头（`< >`）在总图与子图图例中并列实景区分。
+  - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在总图/子图/GA 图例中明示确切判别标准：`Stoichiometrically locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test, shown when F sig./sug.)`；
+  - 组间净通量方向反转以纯矢量琥珀圆上下反向双箭头徽章 `draw_sign_reversal_badge`（`⇄`）标注，与无单一净方向的可逆反应轨道双向箭头（`< >`）在总图与子图图例中并列实景区分；
+  - Graphical Abstract 底栏新增量化图例与聚合细则卡片（`AbstractSpec.rules_note`），完整展示三点证据徽章、`Linked flux` 轨道以及自动聚合量化标准（枢纽等级取最高 claim；方向优先级 `Flux (F sig./sug. 多数) > Enzyme (C 多数) > Pool (|median log2FC| ≥ 0.45)`；`hits` 取 `L2+` 计数否则 `L1`；连线继承证据等级更高一端）。
 - **全库绘图统一收敛**：
   - `primitives.py` 的 `draw_status_cell` / `draw_layer_icon` / `draw_tier_badge` 同时支持 y 向下画布（图 E / 子图 / GA）与标准 y 向上非等比坐标系（图 A–D 矩阵与面板）；
   - 反应档案图 A–D（`dossier_plots.py`）、Graphical Abstract 全部 4 套皮肤（含 `pixel_abstract` 像素能量条）以及单组学 / MFA 绘图模块（`mfa`、`metabolomics`、`proteomics`、`transcriptomics`、`integration`）统一采用 `NATURE_EDITORIAL` 红蓝语义色板与 **300 dpi** 出版输出规范。

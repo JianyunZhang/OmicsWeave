@@ -79,6 +79,8 @@ class GraphicalAbstractTest(unittest.TestCase):
         self.assertEqual(by_id["tca_cycle"].direction, 1)
         self.assertIn("2 Flux-Supported (L2+)", spec.takeaway)
         self.assertIn("2 Enzyme-Predicted (L1)", spec.takeaway)
+        self.assertIn("Quantification:", spec.rules_note)
+        self.assertIn("0.45", spec.rules_note)
 
     def test_load_example_yaml_and_render_all_three_styles_deterministically(self) -> None:
         example = Path(__file__).resolve().parents[2] / "examples" / "graphical_abstract.example.yaml"

@@ -12,6 +12,7 @@ Graphical Abstract 专用四套渲染皮肤（严格限定于 ≤ 12 枢纽的�
 from __future__ import annotations
 
 import math
+import textwrap
 from typing import Callable
 
 import numpy as np
@@ -90,6 +91,133 @@ def _box_exit_trim(dx: float, dy: float, half_w: float, half_h: float, pad: floa
     return min(tx, ty) + pad
 
 
+def _wrap_rules_lines(spec: AbstractSpec) -> list[str]:
+    if not spec.rules_note:
+        return []
+    wrap_cols = max(84, int((spec.canvas[0] - 8.4) * 0.94))
+    return textwrap.wrap(spec.rules_note, wrap_cols)[:3]
+
+
+def ga_footer_height(spec: AbstractSpec) -> float:
+    """计算 Graphical Abstract 底栏精确所需画布高度（量化图例规则卡 + Takeaway + Provenance）。"""
+    rules_lines = _wrap_rules_lines(spec)
+    legend_box_h = (3.8 + len(rules_lines) * 2.15 + 0.6) if rules_lines else 4.2
+    total = 2.0 + legend_box_h + 1.4
+    if spec.takeaway:
+        total += 5.0 + 1.4
+    if spec.provenance:
+        total += 3.2
+    return total + 1.2
+
+
+def _draw_ga_bottom_panels(
+    ax,
+    spec: AbstractSpec,
+    *,
+    surface: str,
+    ink: str,
+    ink2: str,
+    muted: str,
+    card_bg: str,
+    card_edge: str,
+    up: str,
+    preset: str = "nature_editorial",
+    unit_in: float = 0.062,
+    pixel_mode: bool = False,
+    metro_mode: bool = False,
+) -> None:
+    """绘制所有 Graphical Abstract 共用的量化细则与徽章图例卡 + Takeaway + Provenance。"""
+    W, H = spec.canvas
+    pal = METRO_ATLAS if metro_mode else NATURE_EDITORIAL
+    foot_y = H + 2.0
+
+    # 1. 徽章、Linked flux 与聚合量化细则图例卡
+    rules_lines = _wrap_rules_lines(spec)
+    legend_h = (3.8 + len(rules_lines) * 2.15 + 0.6) if rules_lines else 4.2
+    if pixel_mode:
+        ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, legend_h, facecolor=card_bg, edgecolor=ink, lw=1.2, zorder=2))
+    else:
+        ax.add_patch(FancyBboxPatch(
+            (2.2, foot_y), W - 4.4, legend_h,
+            boxstyle="round,pad=0,rounding_size=1.2",
+            facecolor=card_bg, edgecolor=card_edge, lw=0.72, zorder=2,
+        ))
+
+    # Row 1: 实景三点证据徽章 + Linked flux 轨道样块
+    ry = foot_y + 2.05
+    cx = 4.0
+    lbl_fs = 5.25
+    b_sc = 1.20
+    for lvl, desc in (
+        ("L3", "Multi-tracer"),
+        ("L2", "MFA flux (F sig./sug.)"),
+        ("L1", "Enzyme only (C sig./sug.)"),
+    ):
+        if pixel_mode:
+            bw = _draw_pixel_tier_meter(
+                ax, cx, ry, lvl, ink=ink, up_col="#D99B26" if lvl != "L1" else ink,
+                unit_in=unit_in, zorder=3.2,
+            )
+        else:
+            bw = draw_tier_badge(
+                ax, cx, ry, lvl, zorder=3.2, scale=b_sc, preset=preset, unit_in=unit_in,
+            )
+        ax.text(cx + bw + 0.75, ry, desc, fontsize=lbl_fs, color=ink2, ha="left", va="center", zorder=3.2)
+        cx += bw + 0.75 + estimate_text_width(desc, lbl_fs, unit_in) + 2.5
+
+    # Indigo linked-flux conduit sample (with exact |r| criterion)
+    seg_w = 4.2
+    linked_txt = "Linked flux (|r| ≥ 1−1e-6; 1 BH test)"
+    if cx + seg_w + 1.0 + estimate_text_width(linked_txt, lbl_fs, unit_in) <= W - 3.6:
+        if metro_mode:
+            draw_metro_coupled_halo(
+                ax, [[(cx, ry), (cx + seg_w, ry)]],
+                color=pal.coupled_track, edge_color=pal.coupled_edge, width=7.2, zorder=3.0,
+            )
+            draw_metro_track(
+                ax, [(cx, ry), (cx + seg_w, ry)], up,
+                width=2.8, hollow=False, surface=card_bg,
+                chevrons=True, chevron_spacing=9.0, unit_in=unit_in,
+                corner_radius=0.0, halo=False, zorder=3.2,
+            )
+        else:
+            from ..primitives import draw_coupled_track
+            draw_coupled_track(
+                ax, [{"p0": (cx, ry), "c": (cx + seg_w * 0.5, ry), "p1": (cx + seg_w, ry), "trim0": 0.0, "trim1": 0.0}],
+                color=pal.coupled_track, edge_color=pal.coupled_edge, width=6.4, zorder=3.0,
+            )
+            ax.plot([cx, cx + seg_w], [ry, ry], color=up, lw=1.6, zorder=3.2)
+        ax.text(cx + seg_w + 0.85, ry, linked_txt, fontsize=lbl_fs, color=pal.coupled_ink, ha="left", va="center", zorder=3.2)
+
+    # Row 2+: 自动聚合量化统计规则细则
+    if rules_lines:
+        ax.plot([3.8, W - 3.8], [foot_y + 3.55, foot_y + 3.55], color=card_edge, lw=0.45, alpha=0.75, zorder=2.5)
+        for idx, rline in enumerate(rules_lines):
+            ax.text(
+                4.0, foot_y + 4.95 + idx * 2.15, rline,
+                fontsize=5.2, color=ink2, ha="left", va="center", zorder=3.0,
+            )
+
+    foot_y += legend_h + 1.4
+
+    # 2. Takeaway 摘要卡
+    if spec.takeaway:
+        if pixel_mode:
+            ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, 5.0, facecolor=card_bg, edgecolor=ink, lw=1.3, zorder=2))
+        else:
+            ax.add_patch(FancyBboxPatch(
+                (2.2, foot_y), W - 4.4, 5.0,
+                boxstyle="round,pad=0,rounding_size=1.2",
+                facecolor=card_bg, edgecolor=card_edge, lw=0.75, zorder=2,
+            ))
+        ax.text(4.0, foot_y + 2.5, spec.takeaway, fontsize=6.6, fontweight="medium", color=ink, ha="left", va="center", zorder=3)
+        foot_y += 6.4
+
+    # 3. Provenance 来源说明
+    if spec.provenance:
+        ax.text(2.4, foot_y + 0.4, spec.provenance, fontsize=5.6, color=muted, ha="left", va="top", zorder=3)
+
+
 def _draw_footer_and_header(
     ax,
     spec: AbstractSpec,
@@ -103,8 +231,9 @@ def _draw_footer_and_header(
     up: str,
     down: str,
     pixel_mode: bool = False,
+    unit_in: float = 0.062,
 ) -> None:
-    W, H = spec.canvas
+    W, _H = spec.canvas
     # 顶栏标题
     ax.text(2.2, -7.8, spec.title, fontsize=11.0, fontweight="bold", color=ink, ha="left", va="center")
     if spec.subtitle:
@@ -136,21 +265,12 @@ def _draw_footer_and_header(
 
     ax.plot([2.2, W - 2.2], [-1.0, -1.0], color=card_edge, lw=0.8 if not pixel_mode else 1.4, zorder=1)
 
-    # 底栏 Takeaway + Provenance
-    foot_y = H + 2.2
-    if spec.takeaway:
-        if pixel_mode:
-            ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, 5.2, facecolor=card_bg, edgecolor=ink, lw=1.3, zorder=2))
-        else:
-            ax.add_patch(FancyBboxPatch(
-                (2.2, foot_y), W - 4.4, 5.2,
-                boxstyle="round,pad=0,rounding_size=1.2",
-                facecolor=card_bg, edgecolor=card_edge, lw=0.75, zorder=2,
-            ))
-        ax.text(4.2, foot_y + 2.6, spec.takeaway, fontsize=6.8, fontweight="medium", color=ink, ha="left", va="center", zorder=3)
-        foot_y += 6.6
-    if spec.provenance:
-        ax.text(2.4, foot_y + 0.6, spec.provenance, fontsize=5.8, color=muted, ha="left", va="top", zorder=3)
+    _draw_ga_bottom_panels(
+        ax, spec,
+        surface=surface, ink=ink, ink2=ink2, muted=muted,
+        card_bg=card_bg, card_edge=card_edge, up=up,
+        preset="nature_editorial", unit_in=unit_in, pixel_mode=pixel_mode, metro_mode=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +381,7 @@ def render_nature_editorial(ax, spec: AbstractSpec, *, unit_in: float = 0.062) -
         ax, spec,
         surface=pal.surface, ink=pal.ink, ink2=pal.ink2, muted=pal.muted,
         card_bg=pal.card_bg, card_edge=pal.card_edge, up=pal.up, down=pal.down,
+        unit_in=unit_in,
     )
 
 
@@ -436,6 +557,7 @@ def render_editorial_ink(ax, spec: AbstractSpec, *, unit_in: float = 0.062) -> N
         ax, spec,
         surface=paper, ink=ink, ink2=ink2, muted=muted,
         card_bg=card_bg, card_edge=card_edge, up=up, down=down,
+        unit_in=unit_in,
     )
 
 
@@ -617,6 +739,7 @@ def render_pixel_abstract(ax, spec: AbstractSpec, *, unit_in: float = 0.062) -> 
         ax, spec,
         surface=bg, ink=ink, ink2=ink2, muted=muted,
         card_bg=card_bg, card_edge=ink, up=up, down=down, pixel_mode=True,
+        unit_in=unit_in,
     )
 
 
@@ -721,17 +844,12 @@ def _draw_metro_header_and_footer(
 
     ax.plot([2.2, W - 2.2], [-1.0, -1.0], color=pal.card_edge, lw=0.85, zorder=1)
 
-    foot_y = H + 2.2
-    if spec.takeaway:
-        ax.add_patch(FancyBboxPatch(
-            (2.2, foot_y), W - 4.4, 5.2,
-            boxstyle="round,pad=0,rounding_size=1.2",
-            facecolor=pal.card_bg, edgecolor=pal.card_edge, lw=0.75, zorder=2,
-        ))
-        ax.text(4.2, foot_y + 2.6, spec.takeaway, fontsize=6.8, fontweight="medium", color=pal.ink, ha="left", va="center", zorder=3)
-        foot_y += 6.6
-    if spec.provenance:
-        ax.text(2.4, foot_y + 0.6, spec.provenance, fontsize=5.8, color=pal.muted, ha="left", va="top", zorder=3)
+    _draw_ga_bottom_panels(
+        ax, spec,
+        surface=pal.surface, ink=pal.ink, ink2=pal.ink2, muted=pal.muted,
+        card_bg=pal.card_bg, card_edge=pal.card_edge, up=pal.up,
+        preset="metro_atlas", unit_in=unit_in, pixel_mode=False, metro_mode=True,
+    )
 
 
 def render_metro_atlas(
@@ -990,6 +1108,7 @@ STYLE_RENDERERS: dict[str, Callable[..., None]] = {
 __all__ = [
     "GA_STYLES",
     "STYLE_RENDERERS",
+    "ga_footer_height",
     "render_editorial_ink",
     "render_metro_atlas",
     "render_nature_editorial",

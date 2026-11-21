@@ -1650,8 +1650,8 @@ def _legend_atlas(
             chevrons=True, chevron_spacing=10.0, unit_in=unit_in,
             corner_radius=0.0, halo=False, zorder=2.6,
         )
-        ax.text(c2 + 7.4, y0 + 12.22, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
-                fontsize=3.55, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.22, "Linked flux conduit: MFA-locked steps (|r| ≥ 1−1e-6 across fits; 1 grouped BH test)",
+                fontsize=3.5, color=palette.coupled_ink, va="center")
     else:
         edge_samples = [
             (y0 + 3.05, "-", palette.edge_grey, 1.2, False, True, "MFA flux fitted (grey = undecided / unident.)"),
@@ -1668,8 +1668,8 @@ def _legend_atlas(
                            color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.4, zorder=2.2)
         draw_quad_arrow(ax, (c2, y0 + 12.22), (c2 + 3.2, y0 + 12.22), (c2 + 6.4, y0 + 12.22), palette.up, 1.6, "-", False, True, 0.0, 0.0,
                         zorder=2.6, surface=palette.card_bg)
-        ax.text(c2 + 7.4, y0 + 12.22, "Indigo conduit: stoichiometrically linked steps (shared MFA test)",
-                fontsize=3.55, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.22, "Linked flux conduit: MFA-locked steps (|r| ≥ 1−1e-6 across fits; 1 grouped BH test)",
+                fontsize=3.5, color=palette.coupled_ink, va="center")
 
     # Col 3: 4-Layer Icon Strip, Real Visual State Swatches & Self-Explanatory Badges
     layer_defs = (
@@ -1739,8 +1739,11 @@ def _legend_atlas(
     ax.text(bx + 2.55, by2, "Corner #n: Top-N rank", fontsize=3.6, color=palette.ink2, va="center")
     bx2 = bx + 2.55 + _text_width("Corner #n: Top-N rank", 3.6, unit=unit_in) + 2.8
     bx2 += draw_coupled_badge(ax, bx2, by2, 1, zorder=2.5, scale=1.06, palette=palette, total_groups=1, unit_in=unit_in) + 0.7
-    ax.text(bx2, by2, "Stoichiometrically linked reactions sharing one MFA test (non-independent)",
-            fontsize=3.55, color=palette.ink2, va="center")
+    ax.text(
+        bx2, by2,
+        "Stoichiometrically locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test, shown when F sig./sug.)",
+        fontsize=3.45, color=palette.ink2, va="center",
+    )
 
     # Col 4: Nodes, Organelles & Modules
     ax.text(c4, y0 + 1.0, "4. Nodes, Organelles & Modules", fontsize=4.7, fontweight="bold", color=palette.ink, va="top")
@@ -1914,9 +1917,9 @@ def _pub_legend_plan(
     ])
     b_pos, b_rows = _flow_rows([w for _, _, w in b_items], inner_w, gap=1.8)
 
-    # Row-group C: Self-explanatory Tier Badges + Linked Flux Badge
+    # Row-group C: Self-explanatory Tier Badges + Linked Flux Badge (with exact |r| criterion)
     c_scale = 1.02 * font_scale
-    linked_desc = "Shared MFA test (non-independent)"
+    linked_desc = "Locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test)"
     c_items = [
         ("L3", "Multi-tracer", tier_badge_width("L3", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("Multi-tracer", fs, unit=unit_in)),
         ("L2", "MFA supported", tier_badge_width("L2", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("MFA supported", fs, unit=unit_in)),
