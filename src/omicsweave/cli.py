@@ -171,6 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝涨跌色）/ pathway（低饱和莫兰迪通路分区色）")
     maps.add_argument("--strip-mode", choices=["omics", "axes"], default=None,
                       help="四格微条内容：omics（默认，Flux / Protein / mRNA / Metab 四层组学图标）/ axes（S3 四机制轴）")
+    maps.add_argument("--omics-edge-color", choices=["tinted", "grey"], default=None,
+                      help="无方向性 MFA 通量的 Enz-pred (L1) 反应边配色：tinted（默认，饱和度封顶的空心柔彩红/蓝双轨）/ grey（保守中性灰）")
     maps.add_argument("--region", action="append", default=None,
                       help="publication 模式下显式指定保留的通路区域 ID，可重复；省略时自动聚焦活跃区域")
     maps.add_argument("--submap", action="append", default=None,
@@ -487,6 +489,7 @@ def _run_map(args: argparse.Namespace) -> int:
             "style": args.style,
             "color_mode": args.color_mode,
             "strip_mode": args.strip_mode,
+            "omics_edge_color": args.omics_edge_color,
             "regions": args.region,
         }
         configured.update({k: v for k, v in overrides.items() if v})

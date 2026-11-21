@@ -173,6 +173,7 @@ src/omicsweave/visualization/
   - 三点阶梯徽章直观呈现 `●●● Confirmed`、`●●○ Flux`、`●○○ Enz-pred`（取消裸代码 `L3`/`L2`/`L1`）；
   - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在总图/子图/GA 图例中明示确切判别标准：`Stoichiometrically locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test, shown when F sig./sug.)`；
   - 组间净通量方向反转以纯矢量琥珀圆上下反向双箭头徽章 `draw_sign_reversal_badge`（`⇄`）标注，与无单一净方向的可逆反应轨道双向箭头（`< >`）在总图与子图图例中并列实景区分；
+  - **酶容量推断空心柔彩双轨（`omics_edge_color="tinted"` 默认，支持 `--omics-edge-color grey` 切回保守灰）**：对于缺乏方向性 MFA 通量但达到 `Enz-pred (L1)` 酶容量证据的反应，采用空心白芯 + 饱和度封顶（≤72%）的柔和红/蓝双轨表示推断方向，绝不因代谢物池浓度给反应边上色，实现与 Graphical Abstract 的视觉语法统一；
   - Graphical Abstract 底栏新增量化图例与聚合细则卡片（`AbstractSpec.rules_note`），完整展示三点证据徽章、`Linked flux` 轨道以及自动聚合量化标准（枢纽等级取最高 claim；方向优先级 `Flux (F sig./sug. 多数) > Enzyme (C 多数) > Pool (|median log2FC| ≥ 0.45)`；`hits` 取 `L2+` 计数否则 `L1`；连线继承证据等级更高一端）。
 - **全库绘图统一收敛**：
   - `primitives.py` 的 `draw_status_cell` / `draw_layer_icon` / `draw_tier_badge` 同时支持 y 向下画布（图 E / 子图 / GA）与标准 y 向上非等比坐标系（图 A–D 矩阵与面板）；

@@ -46,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
     "style": "metro_atlas",
     "color_mode": "semantic",
     "strip_mode": "omics",
+    "omics_edge_color": "tinted",
     "regions": [],
     "submaps": {
         "enabled": True,
@@ -113,6 +114,10 @@ def settings(raw: dict[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"pathway_map.color_mode 应为 {'、'.join(VALID_COLOR_MODES)} 之一，实际为 {merged['color_mode']!r}")
     if merged["strip_mode"] not in ("omics", "axes"):
         raise ValueError(f"pathway_map.strip_mode 应为 omics、axes 之一，实际为 {merged['strip_mode']!r}")
+    if merged["omics_edge_color"] not in ("tinted", "grey"):
+        raise ValueError(
+            f"pathway_map.omics_edge_color 应为 tinted、grey 之一，实际为 {merged['omics_edge_color']!r}"
+        )
     return merged
 
 
@@ -231,6 +236,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                          style=str(conf["style"]),
                          color_mode=str(conf["color_mode"]),
                          strip_mode=str(conf["strip_mode"]),
+                         omics_edge_color=str(conf["omics_edge_color"]),
                          focus_regions=list(conf["regions"]) or None)
 
         # 默认生成正文分专题代谢子通路图（沿用与图 E 相同的风格与色彩语义，无数据时自动跳过）
@@ -256,6 +262,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                     style=str(conf["style"]),
                     color_mode=str(conf["color_mode"]),
                     strip_mode=str(conf["strip_mode"]),
+                    omics_edge_color=str(conf["omics_edge_color"]),
                     focus_regions=list(sub.regions),
                     include_reactions=list(sub.include_reactions) or None,
                     exclude_reactions=list(sub.exclude_reactions) or None,

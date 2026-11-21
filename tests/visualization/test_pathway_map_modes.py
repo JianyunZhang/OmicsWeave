@@ -112,7 +112,12 @@ class PathwayMapModesTest(unittest.TestCase):
                 formats=("png",), mode="publication", style="metro_atlas", strip_mode="axes",
                 focus_regions=["glycolysis_gng", "pyruvate_tca"],
             )
-            for paths in (p_pub, p_dark, p_atlas, p_metro_sem, p_metro_pw, p_axes):
+            p_grey = plot_pathway_map(
+                view, layout, regions, "Metro Grey Omics", ["Line 1"], Path(tmp) / "metro_grey",
+                formats=("png",), mode="publication", style="metro_atlas", omics_edge_color="grey",
+                focus_regions=["glycolysis_gng", "pyruvate_tca"],
+            )
+            for paths in (p_pub, p_dark, p_atlas, p_metro_sem, p_metro_pw, p_axes, p_grey):
                 self.assertEqual(len(paths), 1)
                 self.assertTrue(paths[0].is_file())
                 self.assertGreater(paths[0].stat().st_size, 5000)
@@ -123,6 +128,8 @@ class PathwayMapModesTest(unittest.TestCase):
             plot_pathway_map(view, layout, regions, "Bad", [], Path("unused"), style="metro_atlas", color_mode="neon")
         with self.assertRaises(ValueError):
             plot_pathway_map(view, layout, regions, "Bad", [], Path("unused"), strip_mode="invalid")
+        with self.assertRaises(ValueError):
+            plot_pathway_map(view, layout, regions, "Bad", [], Path("unused"), omics_edge_color="rainbow")
 
 
 if __name__ == "__main__":

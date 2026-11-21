@@ -93,6 +93,7 @@ MIN_EDGE = 0.8                   # floor |log2FC| for coloring directional F-axi
 
 VALID_MODES = ("atlas", "publication")
 VALID_STRIP_MODES = ("omics", "axes")
+VALID_OMICS_EDGE_COLORS = ("tinted", "grey")
 STRIP_AXIS_COLS = (
     ("F_state", "F_direction"),
     ("C_state", "C_direction"),
@@ -173,6 +174,40 @@ def _agg_card_dims(agg) -> tuple[float, float]:
 # Edge Geometry Computation
 # ---------------------------------------------------------------------------
 
+def _enzyme_inferred_direction(row: pd.Series) -> tuple[int, float]:
+    """当反应缺乏方向性 MFA 通量但达到 ``Enz-pred (L1)`` 酶容量证据时，返回 ``(direction, magnitude)``。
+
+    严格遵循代谢动力学约束：
+    - 已有方向性 MFA 通量（``F_state`` 为 changed/suggestive）时绝不用酶容量覆盖；
+    - 仅以酶容量 ``C`` 轴（蛋白优先、缺蛋白时看 mRNA）推断方向，绝不以代谢物池浓度（``M`` 轴）给反应边上色。
+    """
+    if row["draw_style"] == "not_assessed":
+        return 0, 0.0
+    if row["draw_style"] == "flux" and pd.notna(row["value"]):
+        return 0, 0.0
+    if str(row.get("flux_claim", "") or "") != "L1":
+        return 0, 0.0
+    dr = int(row["C_direction"]) if ("C_direction" in row.index and pd.notna(row["C_direction"])) else 0
+    if dr == 0 and "claim_direction" in row.index and pd.notna(row["claim_direction"]):
+        dr = int(row["claim_direction"])
+    if dr == 0:
+        return 0, 0.0
+    mag = 1.0
+    for col in ("P_value", "R_value"):
+        if col in row.index and pd.notna(row[col]):
+            mag = abs(float(row[col]))
+            break
+    return (1 if dr > 0 else -1), mag
+
+
+def _enzyme_tinted_color(direction: int, magnitude: float, palette: SemanticPalette) -> str:
+    """为 ``Enz-pred (L1)`` 空心双轨生成饱和度封顶的柔和红/蓝色（视觉权重恒弱于实心 MFA 主轨）。"""
+    base_col = palette.up if direction > 0 else palette.down
+    # 饱和度严格封顶在 56%–72%，即便基因 log2FC 很大也不会压过实心 MFA 实测通量轨
+    frac = 0.56 + 0.16 * min(max((float(magnitude) - 0.58) / 1.42, 0.0), 1.0)
+    return tint_color(base_col, frac, base=palette.surface)
+
+
 def _edge_color(
     row: pd.Series,
     palette: SemanticPalette,
@@ -180,6 +215,7 @@ def _edge_color(
     *,
     metro: bool = False,
     color_mode: str = "semantic",
+    omics_edge_color: str = "tinted",
     layout: Layout | None = None,
 ) -> str:
     if row["draw_style"] == "not_assessed":
@@ -188,12 +224,16 @@ def _edge_color(
         reg_id = str(row.get("region", "") or "")
         fallback = layout.regions[reg_id].accent if (layout is not None and reg_id in layout.regions) else ""
         return pathway_family_color(reg_id, fallback_accent=fallback)
+    value = row["value"]
+    if row["draw_style"] == "flux" and pd.notna(value):
+        return cmap(DEFAULT_NORM(math.copysign(max(abs(value), MIN_EDGE), value)))
+    if omics_edge_color == "tinted":
+        enz_dir, enz_mag = _enzyme_inferred_direction(row)
+        if enz_dir != 0:
+            return _enzyme_tinted_color(enz_dir, enz_mag, palette)
     if row["draw_style"] == "omics_only":
         return "#5B6C82" if metro else palette.omics_grey
-    value = row["value"]
-    if pd.isna(value):
-        return palette.edge_grey
-    return cmap(DEFAULT_NORM(math.copysign(max(abs(value), MIN_EDGE), value)))
+    return palette.edge_grey
 
 
 def _edge_geometry(layout: Layout, flux_id: str, *, metro: bool = False) -> dict:
@@ -935,24 +975,33 @@ def _draw_edge(
     font_scale: float = 1.0,
     metro: bool = False,
     color_mode: str = "semantic",
+    omics_edge_color: str = "tinted",
     unit_in: float = UNIT,
 ) -> None:
     draw_style = row["draw_style"]
     strong = row["key"] == "key"
     colored = draw_style == "flux" and pd.notna(row["value"])
-    zorder = 1.6 if draw_style == "not_assessed" else (3.6 if strong else (3.1 if colored else 2.2))
-    color = _edge_color(row, palette, cmap, metro=metro, color_mode=color_mode, layout=layout)
+    enz_dir, _ = _enzyme_inferred_direction(row) if omics_edge_color == "tinted" else (0, 0.0)
+    is_enz_tinted = (not colored) and (enz_dir != 0)
+    zorder = (
+        1.6 if draw_style == "not_assessed"
+        else (3.6 if strong else (3.1 if colored else (2.75 if is_enz_tinted else 2.2)))
+    )
+    color = _edge_color(
+        row, palette, cmap, metro=metro, color_mode=color_mode,
+        omics_edge_color=omics_edge_color, layout=layout,
+    )
     physio = int(row["physio_sign"]) if pd.notna(row["physio_sign"]) else 0
     both = bool(row["sign_change"]) or (physio == 0 and bool(row["reversible"]))
 
     if metro and geometry.get("metro_paths"):
         mpaths = geometry["metro_paths"]
-        hollow = draw_style == "omics_only"
+        hollow = (draw_style == "omics_only") or is_enz_tinted
         is_na = draw_style == "not_assessed"
         if is_na:
             width = 0.95
         elif hollow:
-            width = 2.75 if row["key"] == "l1" else 2.20
+            width = 2.85 if (row["key"] == "l1" or is_enz_tinted) else 2.20
         else:
             width = 3.70 if strong else (3.00 if colored else 2.15)
         chev_dir = -1 if (not both and physio < 0) else 1
@@ -986,11 +1035,14 @@ def _draw_edge(
                 geometry["hub"], 0.36, facecolor=color, edgecolor=palette.surface, lw=0.45, zorder=zorder + 0.18,
             ))
     else:
-        style = {"flux": "-", "omics_only": (0, (3.2, 2.0)), "not_assessed": (0, (1.2, 1.8))}[draw_style]
-        width = 0.62 if draw_style == "not_assessed" else (2.25 if strong else (1.60 if colored else 1.05))
+        style = (
+            (0, (3.2, 2.0)) if is_enz_tinted
+            else {"flux": "-", "omics_only": (0, (3.2, 2.0)), "not_assessed": (0, (1.2, 1.8))}[draw_style]
+        )
+        width = 0.62 if draw_style == "not_assessed" else (2.25 if strong else (1.60 if colored else (1.42 if is_enz_tinted else 1.05)))
         head_sub = both or physio < 0
         head_pro = both or physio >= 0
-        halo = strong or colored
+        halo = strong or colored or is_enz_tinted
 
         if is_coupled_member:
             draw_coupled_track(
@@ -1577,6 +1629,7 @@ def _legend_atlas(
     metro: bool = False,
     color_mode: str = "semantic",
     strip_mode: str = "omics",
+    omics_edge_color: str = "tinted",
     unit_in: float = UNIT,
 ) -> None:
     panel_w = total_width - 2.0
@@ -1612,34 +1665,58 @@ def _legend_atlas(
             "Track color: Morandi pathway family\n"
             "(check 4-icon strip for Up/Down direction)"
         )
+    elif omics_edge_color == "tinted":
+        col1_note = (
+            "Node fill: tissue metabolite / lipid-class total\n"
+            "Solid rail: MFA flux (full scale; min ±0.8)\n"
+            "Hollow rail: Enz-pred dir. (capped ≤72% sat.)"
+        )
     else:
         col1_note = (
             "Node fill: tissue metabolite or lipid-class total\n"
             "Edge color: MFA flux effect along net flow\n"
             "(directional |log2FC| < 0.8 floored at ±0.8)"
         )
-    ax.text(c1, y0 + 7.2, col1_note, fontsize=3.7, color=palette.ink2, va="top", linespacing=1.45)
+    ax.text(c1, y0 + 7.2, col1_note, fontsize=3.65, color=palette.ink2, va="top", linespacing=1.45)
 
     # Col 2: Edges & Linked Flux Conduit
     ax.text(c2, y0 + 1.0, "2. Reaction Tracks & Net Flow" if metro else "2. Reaction Edges & Net Flow",
             fontsize=4.7, fontweight="bold", color=palette.ink, va="top")
+    tinted_sem = (omics_edge_color == "tinted") and (color_mode == "semantic")
+    soft_up = _enzyme_tinted_color(1, 1.2, palette)
+    soft_dn = _enzyme_tinted_color(-1, 1.2, palette)
     if metro:
         metro_samples = [
             (y0 + 3.05, palette.edge_grey, 2.2, False, True, False, "MFA flux fitted (solid rail; grey = undecided)"),
             (y0 + 4.88, palette.up, 3.2, False, True, False,
              "MFA flux directional (solid rail; red up / blue down)" if color_mode == "semantic" else "MFA flux active (solid rail; color = pathway family)"),
-            (y0 + 6.71, "#5B6C82", 2.6, True, True, False, "Omics-only / Enzyme-predicted (hollow double-rail)"),
+            (y0 + 6.71, "ENZ_TINT" if tinted_sem else "#5B6C82", 2.75 if tinted_sem else 2.6, True, True, False,
+             "Enz-pred inferred dir. (hollow soft red/blue; lower conf.; grey = no L1)" if tinted_sem else "Omics-only / Enzyme-predicted (hollow double-rail)"),
             (y0 + 8.54, palette.edge_grey, 2.2, False, True, True, "Reversible reaction (no single net dir.; opposing < >)"),
             (y0 + 10.37, palette.faint, 1.0, False, False, False, "Not assessed skeleton (no MFA & no mapped members)"),
         ]
         for ey, col, lw, hollow, chev, bidir, desc in metro_samples:
-            draw_metro_track(
-                ax, [(c2, ey), (c2 + 6.4, ey)], col,
-                width=lw, hollow=hollow, surface=palette.card_bg,
-                chevrons=chev, chevron_spacing=10.0, chevron_bidirectional=bidir,
-                unit_in=unit_in, corner_radius=0.0, halo=False, zorder=2.5,
-            )
-            ax.text(c2 + 7.4, ey, desc, fontsize=3.6, color=palette.ink2, va="center")
+            if col == "ENZ_TINT":
+                draw_metro_track(
+                    ax, [(c2, ey), (c2 + 2.95, ey)], soft_up,
+                    width=lw, hollow=True, surface=palette.card_bg,
+                    chevrons=True, chevron_spacing=10.0, unit_in=unit_in,
+                    corner_radius=0.0, halo=False, zorder=2.5,
+                )
+                draw_metro_track(
+                    ax, [(c2 + 3.45, ey), (c2 + 6.4, ey)], soft_dn,
+                    width=lw, hollow=True, surface=palette.card_bg,
+                    chevrons=True, chevron_spacing=10.0, unit_in=unit_in,
+                    corner_radius=0.0, halo=False, zorder=2.5,
+                )
+            else:
+                draw_metro_track(
+                    ax, [(c2, ey), (c2 + 6.4, ey)], col,
+                    width=lw, hollow=hollow, surface=palette.card_bg,
+                    chevrons=chev, chevron_spacing=10.0, chevron_bidirectional=bidir,
+                    unit_in=unit_in, corner_radius=0.0, halo=False, zorder=2.5,
+                )
+            ax.text(c2 + 7.4, ey, desc, fontsize=3.55, color=palette.ink2, va="center")
         draw_metro_coupled_halo(
             ax, [[(c2, y0 + 12.22), (c2 + 6.4, y0 + 12.22)]],
             color=palette.coupled_track, edge_color=palette.coupled_edge, width=7.0, zorder=2.2,
@@ -1656,14 +1733,21 @@ def _legend_atlas(
         edge_samples = [
             (y0 + 3.05, "-", palette.edge_grey, 1.2, False, True, "MFA flux fitted (grey = undecided / unident.)"),
             (y0 + 4.88, "-", palette.up, 1.9, False, True, "MFA flux directional (red up / blue down)"),
-            (y0 + 6.71, (0, (3.2, 2.0)), palette.omics_grey, 1.05, False, True, "Omics-only / Enzyme-predicted edge (no MFA yet)"),
+            (y0 + 6.71, (0, (3.2, 2.0)), "ENZ_TINT" if tinted_sem else palette.omics_grey, 1.35 if tinted_sem else 1.05, False, True,
+             "Enz-pred inferred dir. (dashed soft red/blue; lower conf.)" if tinted_sem else "Omics-only / Enzyme-predicted edge (no MFA yet)"),
             (y0 + 8.54, "-", palette.edge_grey, 1.2, True, True, "Reversible reaction (no single net direction)"),
             (y0 + 10.37, (0, (1.2, 1.8)), palette.faint, 0.72, False, True, "Not assessed (no MFA & no mapped members)"),
         ]
         for ey, st, col, lw, hs, he, desc in edge_samples:
-            draw_quad_arrow(ax, (c2, ey), (c2 + 3.2, ey), (c2 + 6.4, ey), col, lw, st, hs, he, 0.0, 0.0,
-                            zorder=2.5, surface=palette.card_bg)
-            ax.text(c2 + 7.4, ey, desc, fontsize=3.6, color=palette.ink2, va="center")
+            if col == "ENZ_TINT":
+                draw_quad_arrow(ax, (c2, ey), (c2 + 1.5, ey), (c2 + 2.95, ey), soft_up, lw, st, False, True, 0.0, 0.0,
+                                zorder=2.5, surface=palette.card_bg)
+                draw_quad_arrow(ax, (c2 + 3.45, ey), (c2 + 4.9, ey), (c2 + 6.4, ey), soft_dn, lw, st, False, True, 0.0, 0.0,
+                                zorder=2.5, surface=palette.card_bg)
+            else:
+                draw_quad_arrow(ax, (c2, ey), (c2 + 3.2, ey), (c2 + 6.4, ey), col, lw, st, hs, he, 0.0, 0.0,
+                                zorder=2.5, surface=palette.card_bg)
+            ax.text(c2 + 7.4, ey, desc, fontsize=3.55, color=palette.ink2, va="center")
         draw_coupled_track(ax, [{"p0": (c2, y0 + 12.22), "c": (c2 + 3.2, y0 + 12.22), "p1": (c2 + 6.4, y0 + 12.22), "trim0": 0, "trim1": 0}],
                            color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.4, zorder=2.2)
         draw_quad_arrow(ax, (c2, y0 + 12.22), (c2 + 3.2, y0 + 12.22), (c2 + 6.4, y0 + 12.22), palette.up, 1.6, "-", False, True, 0.0, 0.0,
@@ -1865,6 +1949,7 @@ def _pub_legend_plan(
     metro: bool,
     color_mode: str,
     strip_mode: str = "omics",
+    omics_edge_color: str = "tinted",
 ) -> dict:
     """预先计算出版/子图紧凑图例的精确换行与总高度（全部状态与图标均以真实图元呈现）。"""
     fs = 3.75 * font_scale
@@ -1874,12 +1959,14 @@ def _pub_legend_plan(
 
     # Row-group A: Colorbar + Track/Arrow types + Reversible + Linked conduit + Sign reversal + FDR-sig metabolite
     cb_w = max(bar_len, _text_width("log2FC (−2 → +2)", fs * 0.90, bold=True, unit=unit_in)) + 1.0
+    tinted_sem = (omics_edge_color == "tinted") and (color_mode == "semantic")
     if metro:
         flux_lbl = "MFA Flux (solid)" if color_mode == "semantic" else "MFA Flux (pathway)"
+        omics_lbl = "Enz-pred (hollow soft red/blue; lower conf.)" if tinted_sem else "Omics-only (hollow)"
         a_items = [
             ("colorbar", "", cb_w),
             ("metro_flux", flux_lbl, 5.8 + _text_width(flux_lbl, fs, unit=unit_in)),
-            ("metro_omics", "Omics-only (hollow)", 5.8 + _text_width("Omics-only (hollow)", fs, unit=unit_in)),
+            ("metro_omics_tinted" if tinted_sem else "metro_omics", omics_lbl, 5.8 + _text_width(omics_lbl, fs, unit=unit_in)),
             ("metro_rev", "Reversible (no net dir.)", 5.8 + _text_width("Reversible (no net dir.)", fs, unit=unit_in)),
             ("metro_coupled", "Linked flux conduit", 5.8 + _text_width("Linked flux conduit", fs, unit=unit_in)),
             ("sign_reversal", "Net flux reversal", 2.3 + _text_width("Net flux reversal", fs, unit=unit_in)),
@@ -1889,6 +1976,10 @@ def _pub_legend_plan(
         a_items = [
             ("colorbar", "", cb_w),
             ("arrow_flux", "MFA Flux Δ", 5.6 + _text_width("MFA Flux Δ", fs, unit=unit_in)),
+            *(
+                [("arrow_omics_tinted", "Enz-pred (dashed soft; lower conf.)", 5.6 + _text_width("Enz-pred (dashed soft; lower conf.)", fs, unit=unit_in))]
+                if tinted_sem else []
+            ),
             ("arrow_rev", "Reversible (no net dir.)", 5.6 + _text_width("Reversible (no net dir.)", fs, unit=unit_in)),
             ("arrow_coupled", "Linked flux conduit", 5.6 + _text_width("Linked flux conduit", fs, unit=unit_in)),
             ("sign_reversal", "Net flux reversal", 2.3 + _text_width("Net flux reversal", fs, unit=unit_in)),
@@ -2020,6 +2111,22 @@ def _legend_publication(
                 corner_radius=0.0, halo=False, zorder=2.5,
             )
             ax.text(x + 5.7, y, lbl, fontsize=fs, color=palette.ink2, va="center")
+        elif kind == "metro_omics_tinted":
+            soft_up = _enzyme_tinted_color(1, 1.2, palette)
+            soft_dn = _enzyme_tinted_color(-1, 1.2, palette)
+            draw_metro_track(
+                ax, [(x, y), (x + 2.3, y)], soft_up,
+                width=2.75, hollow=True, surface=palette.card_bg,
+                chevrons=True, chevron_spacing=9.0, unit_in=unit_in,
+                corner_radius=0.0, halo=False, zorder=2.5,
+            )
+            draw_metro_track(
+                ax, [(x + 2.7, y), (x + 5.0, y)], soft_dn,
+                width=2.75, hollow=True, surface=palette.card_bg,
+                chevrons=True, chevron_spacing=9.0, unit_in=unit_in,
+                corner_radius=0.0, halo=False, zorder=2.5,
+            )
+            ax.text(x + 5.7, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "metro_rev":
             draw_metro_track(
                 ax, [(x, y), (x + 5.0, y)], palette.edge_grey,
@@ -2043,6 +2150,14 @@ def _legend_publication(
         elif kind == "arrow_flux":
             draw_quad_arrow(ax, (x, y), (x + 2.4, y), (x + 4.8, y),
                             palette.up, 1.9, "-", False, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
+            ax.text(x + 5.5, y, lbl, fontsize=fs, color=palette.ink2, va="center")
+        elif kind == "arrow_omics_tinted":
+            soft_up = _enzyme_tinted_color(1, 1.2, palette)
+            soft_dn = _enzyme_tinted_color(-1, 1.2, palette)
+            draw_quad_arrow(ax, (x, y), (x + 1.1, y), (x + 2.2, y),
+                            soft_up, 1.4, (0, (3.2, 2.0)), False, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
+            draw_quad_arrow(ax, (x + 2.6, y), (x + 3.7, y), (x + 4.8, y),
+                            soft_dn, 1.4, (0, (3.2, 2.0)), False, True, 0.0, 0.0, zorder=2.5, surface=palette.card_bg)
             ax.text(x + 5.5, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "arrow_rev":
             draw_quad_arrow(ax, (x, y), (x + 2.4, y), (x + 4.8, y),
@@ -2219,6 +2334,7 @@ def plot_pathway_map(
     style: str = "metro_atlas",
     color_mode: str = "semantic",
     strip_mode: str = "omics",
+    omics_edge_color: str = "tinted",
     focus_regions: Sequence[str] | None = None,
     include_reactions: Sequence[str] | None = None,
     exclude_reactions: Sequence[str] | None = None,
@@ -2237,6 +2353,10 @@ def plot_pathway_map(
     color_mode : ``"semantic"`` | ``"pathway"``
         Color encoding for ``style="metro_atlas"``: ``"semantic"`` (default) keeps the unified main-text
         red/blue directional scale; ``"pathway"`` uses muted Morandi pathway-family colors.
+    omics_edge_color : ``"tinted"`` | ``"grey"``
+        Visual encoding for enzyme-predicted (``Enz-pred`` / L1) edges without directional MFA flux:
+        ``"tinted"`` (default) draws saturation-capped soft red/blue hollow double-rails (or dashed arrows);
+        ``"grey"`` keeps all non-MFA-directional edges neutral slate grey.
     focus_regions : sequence of str, optional
         Explicit region IDs to include when ``mode="publication"`` (empty = auto-select active regions).
     panel_note : str, optional
@@ -2248,6 +2368,10 @@ def plot_pathway_map(
         raise ValueError(f"pathway_map color_mode 应为 {' / '.join(VALID_COLOR_MODES)} 之一，实际为 {color_mode!r}")
     if strip_mode not in VALID_STRIP_MODES:
         raise ValueError(f"pathway_map strip_mode 应为 {' / '.join(VALID_STRIP_MODES)} 之一，实际为 {strip_mode!r}")
+    if omics_edge_color not in VALID_OMICS_EDGE_COLORS:
+        raise ValueError(
+            f"pathway_map omics_edge_color 应为 {' / '.join(VALID_OMICS_EDGE_COLORS)} 之一，实际为 {omics_edge_color!r}"
+        )
     palette = get_palette(style)
     cmap = palette.diverging_cmap()
     metro = style == "metro_atlas"
@@ -2300,7 +2424,8 @@ def plot_pathway_map(
         )
         legend_plan = _pub_legend_plan(
             vw, caption, folded_regions, panel_note,
-            font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode, strip_mode=strip_mode,
+            font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode,
+            strip_mode=strip_mode, omics_edge_color=omics_edge_color,
         )
         pub_footer = legend_plan["footer_h"]
         fig_h = fig_w * ((vh + header_h + pub_footer) / (vw + 1.0))
@@ -2371,6 +2496,7 @@ def plot_pathway_map(
 
         draw_order = (
             reactions["draw_style"].map({"not_assessed": 0, "omics_only": 1, "flux": 2}).fillna(0)
+            + reactions["key"].eq("l1").astype(int)
             + reactions["value"].notna().astype(int) * 2
             + reactions["key"].eq("key").astype(int) * 2
         )
@@ -2380,7 +2506,8 @@ def plot_pathway_map(
                 ax, row, geometries[row["element_id"]],
                 palette=palette, cmap=cmap, layout=layout,
                 is_coupled_member=(gi in multi_groups),
-                font_scale=font_scale, metro=metro, color_mode=color_mode, unit_in=unit_in,
+                font_scale=font_scale, metro=metro, color_mode=color_mode,
+                omics_edge_color=omics_edge_color, unit_in=unit_in,
             )
 
         for _, row in aggs.iterrows():
@@ -2418,7 +2545,8 @@ def plot_pathway_map(
             _legend_atlas(
                 ax, layout.height + 1.8, layout.width + SIDEBAR, caption,
                 palette=palette, cmap=cmap, preset=style, metro=metro,
-                color_mode=color_mode, strip_mode=strip_mode, unit_in=unit_in,
+                color_mode=color_mode, strip_mode=strip_mode,
+                omics_edge_color=omics_edge_color, unit_in=unit_in,
             )
         else:
             _legend_publication(
