@@ -112,12 +112,24 @@ class PathwayMapModesTest(unittest.TestCase):
                 formats=("png",), mode="publication", style="metro_atlas", strip_mode="axes",
                 focus_regions=["glycolysis_gng", "pyruvate_tca"],
             )
+            p_econ_atlas = plot_pathway_map(
+                view, layout, regions, "Economist Atlas", ["Line 1"], Path(tmp) / "econ_atlas",
+                formats=("png", "html"), mode="atlas", style="economist",
+            )
+            self.assertEqual([p.suffix for p in p_econ_atlas], [".png", ".html"])
+            self.assertTrue(all(p.is_file() and p.stat().st_size > 5000 for p in p_econ_atlas))
+
+            p_econ_pub = plot_pathway_map(
+                view, layout, regions, "Economist Publication", ["Line 1"], Path(tmp) / "econ_pub",
+                formats=("png",), mode="publication", style="economist",
+                focus_regions=["glycolysis_gng", "pyruvate_tca"],
+            )
             p_grey = plot_pathway_map(
                 view, layout, regions, "Metro Grey Omics", ["Line 1"], Path(tmp) / "metro_grey",
                 formats=("png",), mode="publication", style="metro_atlas", omics_edge_color="grey",
                 focus_regions=["glycolysis_gng", "pyruvate_tca"],
             )
-            for paths in (p_pub, p_dark, p_atlas, p_metro_sem, p_metro_pw, p_axes, p_grey):
+            for paths in (p_pub, p_dark, p_atlas, p_metro_sem, p_metro_pw, p_axes, p_econ_pub, p_grey):
                 self.assertEqual(len(paths), 1)
                 self.assertTrue(paths[0].is_file())
                 self.assertGreater(paths[0].stat().st_size, 5000)

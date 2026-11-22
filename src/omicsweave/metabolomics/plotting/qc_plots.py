@@ -111,10 +111,10 @@ def plot_preprocessing_qc(
     if "QC_RSD" in qc_metrics.columns:
         rsd = pd.to_numeric(qc_metrics["QC_RSD"], errors="coerce").dropna() * 100.0
         if not rsd.empty:
-            from omicsweave.visualization.palettes import NATURE_EDITORIAL
+            from omicsweave.visualization.palettes import METRO_ATLAS
             fig, ax = plt.subplots(figsize=(8, 5))
-            sns.histplot(rsd, bins=40, ax=ax, color=NATURE_EDITORIAL.down)
-            ax.axvline(qc_rsd_cutoff * 100.0, color=NATURE_EDITORIAL.up, linestyle="--", label="RSD cutoff")
+            sns.histplot(rsd, bins=40, ax=ax, color=METRO_ATLAS.down)
+            ax.axvline(qc_rsd_cutoff * 100.0, color=METRO_ATLAS.up, linestyle="--", label="RSD cutoff")
             ax.set_xlabel("QC RSD (%)")
             ax.set_ylabel("Metabolites")
             ax.set_title(f"QC feature RSD - {tissue}")

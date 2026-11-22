@@ -87,9 +87,10 @@ class AbstractSpec:
 
 
 DEFAULT_AGGREGATION_RULES: str = (
-    "Quantification: Hub tier = max claim (Confirmed > Flux > Enz-pred); "
-    "Dir. priority: Flux (F sig./sug. majority) > Enzyme (C majority) > Pool (|median log2FC| ≥ 0.45); "
-    "hits = L2+ count (else L1); Track = higher-tier end."
+    "Quantification: Hub tier = max claim (Multi-tracer > MFA Flux > Enz-pred); "
+    "MFA value = Pooled IVW across identifiable tracers (unconstrained/low-n excluded; k=1 equals single tracer); "
+    "Dir. priority: Flux (F majority) > Enzyme (C majority) > Pool (|median log2FC| ≥ 0.45); "
+    "Linked flux = stoichiometric 1-DOF redundancy (not extra confidence)."
 )
 
 

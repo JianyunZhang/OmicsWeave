@@ -169,9 +169,11 @@ src/omicsweave/visualization/
   - `map_view.py` 为每条反应同时填充真实分层读数 `P_state`/`P_value`（蛋白）与 `R_layer_state`/`R_value`（mRNA），消除早期反应卡片中 `R = Regulation` 与聚合卡片 `R = mRNA` 的语义冲突；
   - 微条顶栏以 4 枚纯矢量微图标取代难懂缩写：`⇉`（Flux）、`◑` 活性口袋酶球（Protein）、`∿` 波形单链（mRNA）、`⬡` 苯环/六边形（Metab）。
 - **状态符号全面图标化**：所有格状态均由 `draw_status_cell` 纯矢量绘制并在总图/子图图例中给出实景色块对照：实心 `▲▼`（Sig. FDR<0.05）、空心 `△▽`（Suggestive p<0.05）、红蓝斜拼（Mixed）、横杠 `—`（Unchanged）、细斜线 `/`（Not measured）、圆圈斜杠 `⊘`（Unidentifiable flux）、虚线空圈 `◌`（Not detected）、琥珀三角叹号 `⚠`（QC / Low-n）。
-- **自解释证据徽章、串联通量徽章与净通量反转徽章**：
-  - 三点阶梯徽章直观呈现 `●●● Confirmed`、`●●○ Flux`、`●○○ Enz-pred`（取消裸代码 `L3`/`L2`/`L1`）；
-  - 共检链徽章以双扣链环图标 + `Linked flux`（多链时自动编号 `Linked #1`）取代晦涩的 `G1`，并在总图/子图/GA 图例中明示确切判别标准：`Stoichiometrically locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test, shown when F sig./sug.)`；
+- **自解释示踪剂证据徽章、串联通量徽章与净通量反转徽章**：
+  - 全库统一内置 16 种规范同位素示踪剂注册表（`mfa/tracers.py`）：现有 4 种明确标为 `U-13C-glucose`、`U-13C-glycerol`、`U-13C-alanine`、`U-13C-lactate`（向后兼容历史裸名），并完整预置 12 种后续示踪剂（`U-13C-palmitic acid`，以及 `alanine` / `glutamine` / `glycine` / `leucine` 的 `U-13C`、`U-15N` 与 `U-13C-15N` 双标记协议）；
+  - 三点阶梯徽章直接携带实际约束该反应的示踪剂短标：`●●● <多示踪剂名>`（如 `●●● U-13C-Glc+Ala` / `●●● U-13C-Gln+U-15N-Gln`，L3 多示踪剂一致确认）、`●●○ <示踪剂短标> Flux`（如 `●●○ U-13C-Glc Flux`，L2 MFA 通量支撑）、`●○○ Enz-pred`（L1 仅酶容量预测）；
+  - `map_view.py` 增补 `flux_tracers` 与 `flux_pooling_mode`（`single_tracer` / `multi_tracer_pooled` / `multi_tracer_conflict` / `unconstrained`），在静态总图/子图图例与交互 HTML 图例/Tooltip/抽屉中完整注明多示踪剂分层逆方差合并（Pooled IVW）与单示踪剂退化规则；
+  - `Linked flux` 徽章在静态 PDF/PNG 与交互 HTML 中均保留，并在图例与抽屉中明确界定其统计学性质：**共享 1 个独立自由度的化学计量冗余去重提示，而非更高置信度**（`v_fwd − v_rev` 在全部独立拟合中满足 `|r| ≥ 1−1e-6`，`grouped_bh` 校正中整组仅计 1 次检验；顶栏 KPI 同步报告独立通量链数）；
   - 组间净通量方向反转以纯矢量琥珀圆上下反向双箭头徽章 `draw_sign_reversal_badge`（`⇄`）标注，与无单一净方向的可逆反应轨道双向箭头（`< >`）在总图与子图图例中并列实景区分；
   - **酶容量推断空心柔彩双轨（`omics_edge_color="tinted"` 默认，支持 `--omics-edge-color grey` 切回保守灰）**：对于缺乏方向性 MFA 通量但达到 `Enz-pred (L1)` 酶容量证据的反应，采用空心白芯 + 饱和度封顶（≤72%）的柔和红/蓝双轨表示推断方向，绝不因代谢物池浓度给反应边上色，实现与 Graphical Abstract 的视觉语法统一；
   - Graphical Abstract 底栏新增量化图例与聚合细则卡片（`AbstractSpec.rules_note`），完整展示三点证据徽章、`Linked flux` 轨道以及自动聚合量化标准（枢纽等级取最高 claim；方向优先级 `Flux (F sig./sug. 多数) > Enzyme (C 多数) > Pool (|median log2FC| ≥ 0.45)`；`hits` 取 `L2+` 计数否则 `L1`；连线继承证据等级更高一端）。
@@ -181,19 +183,33 @@ src/omicsweave/visualization/
 
 ### 5.6 CLI 入口
 ```bash
-# 正文图 E 与分专题子图（默认 metro_atlas + semantic + 4-Omics 图标微条）
+# 正文图 E（默认输出 pdf + png + 单页交互 html，统一默认 metro_atlas 学术风格）与分专题子图
 omicsweave map --experiment all_tissues --tissue liver
 omicsweave map --experiment all_tissues --tissue liver --submap central_carbon --submap fatty_acid_ketone
-omicsweave map --experiment all_tissues --tissue liver --strip-mode axes --style nature_editorial --no-abstract
-omicsweave map --experiment all_tissues --tissue liver --style metro_atlas --color-mode pathway
+omicsweave map --experiment all_tissues --tissue liver --style economist --format pdf --format png --format html
+omicsweave map --experiment all_tissues --tissue liver --omics-edge-color grey --no-abstract
 
-# Graphical Abstract（默认 metro_atlas；可选 editorial_ink / pixel_abstract / nature_editorial）
-omicsweave abstract --experiment all_tissues --tissue liver --contrast HFD_vs_LFD --style metro_atlas
+# Graphical Abstract（默认 metro_atlas；可选 economist / editorial_ink / pixel_abstract / nature_editorial）
+omicsweave abstract --experiment all_tissues --tissue liver --contrast HFD_vs_LFD
+omicsweave abstract --experiment all_tissues --tissue liver --contrast HFD_vs_LFD --style economist
 omicsweave abstract --experiment all_tissues --tissue liver --contrast HFD_vs_LFD --style metro_atlas --color-mode pathway
 
 # 从任意自定义 YAML 概念草图生成（跨项目复用，不依赖整合包）
-omicsweave abstract --spec my_project_ga.yaml --style pixel_abstract --output ./ga_out
+omicsweave abstract --spec my_project_ga.yaml --style metro_atlas --output ./ga_out
 ```
+
+---
+
+## 7. 方案 A 单页交互式 HTML 与《经济学人》可选主题体系（M4）
+
+1. **统一学术默认 `metro_atlas` + 一级可选主题 `economist`（全库保留自由切换）**：
+   - 全库绘图（通路总图、分专题子图、Graphical Abstract、反应档案图 A–D、火山图、全部单组学绘图 `_config.py` 与交互 HTML）统一以 `metro_atlas` 为默认学术出版风格（`DEFAULT_PRESET = "metro_atlas"`）；
+   - 同时在 `palettes.py` / `theme.py` / `primitives.py` / `assets/glyphs/economist/*.svg`（全套 24 枚）完整内置《经济学人》（`economist`）编辑部视觉皮肤（淡黄暖灰纸底 `#EBEBDF`、左上角编辑部红标 `#E3120B`、实验组红 `#E3120B` / 对照组深蓝 `#006BA2` / London 暖灰渐变、细水平网格与炭黑底基线），命令行通过 `--style economist`、网页端通过顶部主题下拉框即可一键切换。
+2. **方案 A 单页离线可交互 HTML（`pathway_map_html.py`，默认 `formats: ["pdf", "png", "html"]`）**：
+   - 共享 `build_pathway_map_scene()` 的精确正交路由、空心柔色双轨与避让卡片坐标，并按 `em_units(pt, unit_in)` 1:1 精确换算 `metro_atlas` PDF 的精细边框线宽、圆角区室、圆点标题、聚卡片 `P/R/M` 色块与徽章字号；零外部 CDN 依赖、确定性逐字节可重现；
+   - 内置浏览器端 `getBBox()` 零溢出自校准守护（`fitSvgLabels`），自动适配 Windows/macOS/Linux 系统字体宽度差异，确保卡片、证据徽章、聚合卡标题与边界胶囊均无文本越界；
+   - 浏览器内支持无缝实时切换主题（`Metro Atlas` / `Economist` / `Nature Editorial` / `Slide Dark`）、分专题一键缩放聚焦、按反应/基因/蛋白/代谢物/EC 瞬时搜索、证据层级过滤、`Enz-pred` 柔色/灰轨切换、悬停 `Linked flux` 整链脉冲高亮与当前视图 SVG/PNG 导出；
+   - 右侧 Reaction Dossier 抽屉内置 **逐只动物/样本散点小图**（读取 `dossier_samples.parquet` 与 `dossier_sample_contrasts.parquet`，含实验组红点、对照组蓝点、其他组灰点、中位线、MFA 拟合 IQR 误差棒、盒约束空心菱形与 0 基线）及可排序全量成员明细表；交付模块 `delivery.py` 同步复制 `map_<比较>.html` 至交付目录。
 
 ---
 

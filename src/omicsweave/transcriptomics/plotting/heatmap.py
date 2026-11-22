@@ -111,10 +111,10 @@ def generate_all():
             sample_groups.sort(key=lambda x: (x[0] != denom, x[0], x[1]))
             sorted_samples = [s for _, s in sample_groups]
 
-            from omicsweave.visualization.palettes import NATURE_EDITORIAL
+            from omicsweave.visualization.palettes import METRO_ATLAS
             # Column annotation colors (only the two groups in this comparison)
-            comp_colors = {num: cfg.GROUP_COLORS.get(num, NATURE_EDITORIAL.up),
-                           denom: cfg.GROUP_COLORS.get(denom, NATURE_EDITORIAL.down)}
+            comp_colors = {num: cfg.GROUP_COLORS.get(num, METRO_ATLAS.up),
+                           denom: cfg.GROUP_COLORS.get(denom, METRO_ATLAS.down)}
             col_colors = [comp_colors.get(grp, '#999999') for grp, _ in sample_groups]
 
             # Reorder data columns

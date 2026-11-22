@@ -20,9 +20,44 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Ellipse, FancyBboxPatch, PathPatch, Polygon, Rectangle, Wedge
 from matplotlib.path import Path as MplPath
 
-from .palettes import NATURE_EDITORIAL, SemanticPalette, tier_tokens, tint_color
+from .palettes import ECONOMIST, ECONOMIST_RED, NATURE_EDITORIAL, SemanticPalette, tier_tokens, tint_color
 
 Point = tuple[float, float]
+
+
+def draw_economist_masthead(
+    ax,
+    x0: float,
+    y_top: float,
+    width: float,
+    *,
+    tag_w: float = 5.4,
+    tag_h: float = 1.15,
+    color: str = ECONOMIST_RED,
+    rule_color: str = "#B8B8AF",
+    y_up: bool = False,
+    zorder: float = 8.0,
+) -> None:
+    """在数据坐标系顶部绘制《经济学人》标志性左上角红标与横贯细顶线。"""
+    ax.plot(
+        [x0, x0 + width],
+        [y_top, y_top],
+        color=rule_color,
+        lw=0.85,
+        solid_capstyle="butt",
+        zorder=zorder,
+    )
+    rect_y = (y_top - tag_h) if y_up else y_top
+    ax.add_patch(
+        Rectangle(
+            (x0, rect_y),
+            tag_w,
+            tag_h,
+            facecolor=color,
+            edgecolor="none",
+            zorder=zorder + 0.1,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +273,11 @@ TIER_DISPLAY_LABELS: dict[str, str] = {
 }
 
 
-def tier_badge_text(level: str, *, label_style: str = "descriptive") -> str:
+def tier_badge_text(level: str, *, label_style: str = "descriptive", label: str | None = None) -> str:
     if level not in ("L1", "L2", "L3"):
         return ""
+    if label is not None and str(label).strip():
+        return str(label).strip()
     if label_style == "code":
         return level
     return TIER_DISPLAY_LABELS[level]
@@ -254,12 +291,13 @@ def tier_badge_width(
     unit_in: float = 0.108,
     label_style: str = "descriptive",
     fontsize: float | None = None,
+    label: str | None = None,
 ) -> float:
     if level not in ("L1", "L2", "L3"):
         return 0.0
     if not show_code:
         return 1.92 * scale
-    text = tier_badge_text(level, label_style=label_style)
+    text = tier_badge_text(level, label_style=label_style, label=label)
     fs = float(fontsize) if fontsize is not None else 3.40 * scale
     dots_w = 1.64 * scale
     txt_w = estimate_text_width(text, fs, unit_in, bold=True) * 0.88
@@ -280,24 +318,28 @@ def draw_tier_badge(
     label_style: str = "descriptive",
     fontsize: float | None = None,
     y_scale: float = 1.0,
+    label: str | None = None,
 ) -> float:
-    """绘制无彩色三点证据阶梯徽章（``●●● Confirmed`` / ``●●○ Flux`` / ``●○○ Enz-pred``）。
+    """绘制无彩色三点证据阶梯徽章（``●●● <多示踪剂>`` / ``●●○ <示踪剂> Flux`` / ``●○○ Enz-pred``）。
 
-    采用纯黑白灰材质编码证据强度，绝不与红/蓝涨跌方向冲突。支持通过 ``y_scale`` 适配非等比坐标轴，返回消耗的 x 宽度。
+    采用纯黑白灰材质编码证据强度，绝不与红/蓝涨跌方向冲突。支持通过 ``label`` 覆盖文字（如显示实际约束示踪剂短标）
+    及通过 ``y_scale`` 适配非等比坐标轴，返回消耗的 x 宽度。
     """
     if level not in ("L1", "L2", "L3"):
         return 0.0
     tok = tier_tokens(preset)[level]
-    text = tier_badge_text(level, label_style=label_style)
+    text = tier_badge_text(level, label_style=label_style, label=label)
     fs = float(fontsize) if fontsize is not None else 3.40 * scale
     bw = tier_badge_width(
-        level, scale=scale, show_code=show_code, unit_in=unit_in, label_style=label_style, fontsize=fs,
+        level, scale=scale, show_code=show_code, unit_in=unit_in, label_style=label_style, fontsize=fs, label=label,
     )
     bh = 1.14 * scale * y_scale
     lw_scale = (fs / 3.40) if fontsize is not None else scale
+    is_econ = preset == "economist"
+    rad = (0.12 if is_econ else 0.38) * scale
     ax.add_patch(FancyBboxPatch(
         (x, y - bh / 2), bw, bh,
-        boxstyle=f"round,pad=0,rounding_size={0.38 * scale}",
+        boxstyle=f"round,pad=0,rounding_size={rad}",
         mutation_aspect=y_scale,
         facecolor=tok["bg"], edgecolor=tok["ec"],
         lw=float(tok["lw"]) * lw_scale, linestyle=tok["ls"], zorder=zorder,
@@ -354,14 +396,15 @@ def draw_rank_tab(
     bw = rank_tab_width(rank, scale)
     bh = 0.92 * scale
     top3 = rank <= 3
-    bg = palette.ink if top3 else palette.card_bg
-    ec = palette.ink if top3 else palette.ink2
-    fg = palette.surface if top3 else palette.ink
+    is_econ = palette.name == "economist"
+    bg = (ECONOMIST_RED if is_econ else palette.ink) if top3 else palette.card_bg
+    ec = (ECONOMIST_RED if is_econ else palette.ink) if top3 else palette.ink2
+    fg = "#FFFFFF" if (top3 and is_econ) else (palette.surface if top3 else palette.ink)
     y0 = card_top - bh * 0.62
     x0 = card_left - 0.05 * scale
     ax.add_patch(FancyBboxPatch(
         (x0, y0), bw, bh,
-        boxstyle=f"round,pad=0,rounding_size={0.28 * scale}",
+        boxstyle=f"round,pad=0,rounding_size={(0.10 if is_econ else 0.28) * scale}",
         facecolor=bg, edgecolor=ec, lw=(0.55 if top3 else 0.45) * scale, zorder=zorder,
     ))
     ax.text(
@@ -414,9 +457,10 @@ def draw_coupled_badge(
     txt = coupled_badge_label(group_num, total_groups=total_groups, label=label)
     bw = coupled_badge_width(group_num, scale=scale, total_groups=total_groups, label=label, unit_in=unit_in)
     bh = 1.14 * scale
+    is_econ = palette.name == "economist"
     ax.add_patch(FancyBboxPatch(
         (x, y - bh / 2), bw, bh,
-        boxstyle=f"round,pad=0,rounding_size={0.36 * scale}",
+        boxstyle=f"round,pad=0,rounding_size={(0.12 if is_econ else 0.36) * scale}",
         facecolor=palette.coupled_fill, edgecolor=palette.coupled_edge,
         lw=0.48 * scale, zorder=zorder,
     ))
@@ -768,13 +812,16 @@ def draw_axis_strip(
     cells_y = top_y + hdr_h
 
     # 外框容器
+    is_econ = palette.name == "economist"
+    strip_bg = palette.card_bg if is_econ else palette.surface
     ax.add_patch(FancyBboxPatch(
         (x0, top_y), total_w, total_h,
-        boxstyle=f"round,pad=0,rounding_size={0.18 * (cell / 0.98)}",
-        facecolor=palette.surface, edgecolor=palette.card_edge, lw=0.40, zorder=zorder,
+        boxstyle=f"round,pad=0,rounding_size={(0.08 if is_econ else 0.18) * (cell / 0.98)}",
+        facecolor=strip_bg, edgecolor=palette.ink2 if is_econ else palette.card_edge,
+        lw=0.45 if is_econ else 0.40, zorder=zorder,
     ))
     # 中性表头底带（纯灰阶，不抢占红蓝语义）
-    hdr_bg = tint_color(palette.ink2, 0.08, base=palette.surface)
+    hdr_bg = tint_color(palette.ink2, 0.11 if is_econ else 0.08, base=strip_bg)
     ax.add_patch(Rectangle(
         (x0 + 0.03, top_y + 0.03), total_w - 0.06, hdr_h - 0.03,
         facecolor=hdr_bg, edgecolor="none", zorder=zorder + 0.05,
@@ -829,6 +876,18 @@ def draw_zone_card(
 ) -> None:
     x0, y0, x1, y1 = box
     is_dark = palette.name == "slide_dark"
+    is_econ = palette.name == "economist"
+    if is_econ:
+        face = tint_color(accent, max(0.025, tint_fill * 0.55), base=palette.card_bg)
+        edge = palette.card_edge
+        ax.add_patch(FancyBboxPatch(
+            (x0, y0), x1 - x0, y1 - y0,
+            boxstyle="round,pad=0,rounding_size=0.22",
+            facecolor=face, edgecolor=edge, lw=0.55, zorder=zorder,
+        ))
+        # 《经济学人》多栏图表顶部分隔细黑线
+        ax.plot([x0, x1], [y0, y0], color=palette.ink, lw=0.85, solid_capstyle="butt", zorder=zorder + 0.12)
+        return
     face = tint_color(accent, tint_fill * (2.2 if is_dark else 1.0), base=palette.surface)
     edge = tint_color(accent, tint_edge * (1.3 if is_dark else 1.0), base=palette.surface)
     ax.add_patch(FancyBboxPatch(
@@ -849,6 +908,19 @@ def draw_zone_header(
     zorder: float = 0.9,
 ) -> None:
     lx, ly = xy
+    if palette.name == "economist":
+        # 经济学人锐利方角编辑部短标 + 黑色无衬线粗体分区标题（克制用色，不抢占红/蓝数据焦点）
+        bar_col = accent or palette.ink
+        ax.add_patch(Rectangle(
+            (lx - 0.15, ly - 0.54), 0.36, 1.08,
+            facecolor=bar_col, edgecolor="none", zorder=zorder,
+        ))
+        ax.text(
+            lx + 0.58, ly, label,
+            fontsize=fontsize, fontweight="bold", color=palette.ink,
+            va="center", ha="left", zorder=zorder + 0.05,
+        )
+        return
     bar_col = accent or palette.ink2
     ax.add_patch(FancyBboxPatch(
         (lx - 0.15, ly - 0.62), 0.42, 1.24,
@@ -923,6 +995,7 @@ __all__ = [
     "draw_axis_strip",
     "draw_coupled_badge",
     "draw_coupled_track",
+    "draw_economist_masthead",
     "draw_layer_icon",
     "draw_organelle_box",
     "draw_quad_arrow",

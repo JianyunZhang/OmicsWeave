@@ -23,8 +23,8 @@ from ..experiment_config import (
     get_comp_labels,
 )
 
-# 统一采用 nature_editorial 出版主题（纯白底、开放式坐标轴、300 dpi）
-apply_theme(preset="nature_editorial", save_dpi=300)
+# 统一采用 metro_atlas 出版主题（纯白底、学术高对比、300 dpi）
+apply_theme(preset="metro_atlas", save_dpi=300)
 
 # ============================================================================
 # Module-level globals (populated by apply_config)

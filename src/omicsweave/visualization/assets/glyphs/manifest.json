@@ -9,6 +9,7 @@
   "provenance": "OmicsWeave schematic vector assets, created in project. Pixel hub motifs adapt the original OmicsWeave graphical abstract sprites.",
   "license": "BSD-3-Clause",
   "styles": {
+    "economist": "《经济学人》几何编辑部风",
     "nature_editorial": "纯白极简机制图",
     "editorial_ink": "科学手绘插画风",
     "pixel_abstract": "现代像素概念风"
@@ -20,7 +21,8 @@
       "files": {
         "nature_editorial": "nature_editorial/blood.svg",
         "editorial_ink": "editorial_ink/blood.svg",
-        "pixel_abstract": "pixel_abstract/blood.svg"
+        "pixel_abstract": "pixel_abstract/blood.svg",
+        "economist": "economist/blood.svg"
       }
     },
     "glucose": {
@@ -29,7 +31,8 @@
       "files": {
         "nature_editorial": "nature_editorial/glucose.svg",
         "editorial_ink": "editorial_ink/glucose.svg",
-        "pixel_abstract": "pixel_abstract/glucose.svg"
+        "pixel_abstract": "pixel_abstract/glucose.svg",
+        "economist": "economist/glucose.svg"
       }
     },
     "ppp": {
@@ -38,7 +41,8 @@
       "files": {
         "nature_editorial": "nature_editorial/ppp.svg",
         "editorial_ink": "editorial_ink/ppp.svg",
-        "pixel_abstract": "pixel_abstract/ppp.svg"
+        "pixel_abstract": "pixel_abstract/ppp.svg",
+        "economist": "economist/ppp.svg"
       }
     },
     "pyruvate": {
@@ -47,7 +51,8 @@
       "files": {
         "nature_editorial": "nature_editorial/pyruvate.svg",
         "editorial_ink": "editorial_ink/pyruvate.svg",
-        "pixel_abstract": "pixel_abstract/pyruvate.svg"
+        "pixel_abstract": "pixel_abstract/pyruvate.svg",
+        "economist": "economist/pyruvate.svg"
       }
     },
     "tca": {
@@ -56,7 +61,8 @@
       "files": {
         "nature_editorial": "nature_editorial/tca.svg",
         "editorial_ink": "editorial_ink/tca.svg",
-        "pixel_abstract": "pixel_abstract/tca.svg"
+        "pixel_abstract": "pixel_abstract/tca.svg",
+        "economist": "economist/tca.svg"
       }
     },
     "ketone": {
@@ -65,7 +71,8 @@
       "files": {
         "nature_editorial": "nature_editorial/ketone.svg",
         "editorial_ink": "editorial_ink/ketone.svg",
-        "pixel_abstract": "pixel_abstract/ketone.svg"
+        "pixel_abstract": "pixel_abstract/ketone.svg",
+        "economist": "economist/ketone.svg"
       }
     },
     "lipid": {
@@ -74,7 +81,8 @@
       "files": {
         "nature_editorial": "nature_editorial/lipid.svg",
         "editorial_ink": "editorial_ink/lipid.svg",
-        "pixel_abstract": "pixel_abstract/lipid.svg"
+        "pixel_abstract": "pixel_abstract/lipid.svg",
+        "economist": "economist/lipid.svg"
       }
     },
     "glycerolipid": {
@@ -83,7 +91,8 @@
       "files": {
         "nature_editorial": "nature_editorial/glycerolipid.svg",
         "editorial_ink": "editorial_ink/glycerolipid.svg",
-        "pixel_abstract": "pixel_abstract/glycerolipid.svg"
+        "pixel_abstract": "pixel_abstract/glycerolipid.svg",
+        "economist": "economist/glycerolipid.svg"
       }
     },
     "amino": {
@@ -92,7 +101,8 @@
       "files": {
         "nature_editorial": "nature_editorial/amino.svg",
         "editorial_ink": "editorial_ink/amino.svg",
-        "pixel_abstract": "pixel_abstract/amino.svg"
+        "pixel_abstract": "pixel_abstract/amino.svg",
+        "economist": "economist/amino.svg"
       }
     },
     "atp": {
@@ -101,7 +111,8 @@
       "files": {
         "nature_editorial": "nature_editorial/atp.svg",
         "editorial_ink": "editorial_ink/atp.svg",
-        "pixel_abstract": "pixel_abstract/atp.svg"
+        "pixel_abstract": "pixel_abstract/atp.svg",
+        "economist": "economist/atp.svg"
       }
     },
     "redox": {
@@ -110,7 +121,8 @@
       "files": {
         "nature_editorial": "nature_editorial/redox.svg",
         "editorial_ink": "editorial_ink/redox.svg",
-        "pixel_abstract": "pixel_abstract/redox.svg"
+        "pixel_abstract": "pixel_abstract/redox.svg",
+        "economist": "economist/redox.svg"
       }
     },
     "nucleotide": {
@@ -119,7 +131,8 @@
       "files": {
         "nature_editorial": "nature_editorial/nucleotide.svg",
         "editorial_ink": "editorial_ink/nucleotide.svg",
-        "pixel_abstract": "pixel_abstract/nucleotide.svg"
+        "pixel_abstract": "pixel_abstract/nucleotide.svg",
+        "economist": "economist/nucleotide.svg"
       }
     },
     "generic": {
@@ -128,7 +141,8 @@
       "files": {
         "nature_editorial": "nature_editorial/generic.svg",
         "editorial_ink": "editorial_ink/generic.svg",
-        "pixel_abstract": "pixel_abstract/generic.svg"
+        "pixel_abstract": "pixel_abstract/generic.svg",
+        "economist": "economist/generic.svg"
       }
     },
     "grid_square": {
@@ -137,7 +151,8 @@
       "files": {
         "nature_editorial": "nature_editorial/grid_square.svg",
         "editorial_ink": "editorial_ink/grid_square.svg",
-        "pixel_abstract": "pixel_abstract/grid_square.svg"
+        "pixel_abstract": "pixel_abstract/grid_square.svg",
+        "economist": "economist/grid_square.svg"
       }
     },
     "grid_dots": {
@@ -146,7 +161,8 @@
       "files": {
         "nature_editorial": "nature_editorial/grid_dots.svg",
         "editorial_ink": "editorial_ink/grid_dots.svg",
-        "pixel_abstract": "pixel_abstract/grid_dots.svg"
+        "pixel_abstract": "pixel_abstract/grid_dots.svg",
+        "economist": "economist/grid_dots.svg"
       }
     },
     "node_metabolite": {
@@ -155,7 +171,8 @@
       "files": {
         "nature_editorial": "nature_editorial/node_metabolite.svg",
         "editorial_ink": "editorial_ink/node_metabolite.svg",
-        "pixel_abstract": "pixel_abstract/node_metabolite.svg"
+        "pixel_abstract": "pixel_abstract/node_metabolite.svg",
+        "economist": "economist/node_metabolite.svg"
       }
     },
     "node_significant": {
@@ -164,7 +181,8 @@
       "files": {
         "nature_editorial": "nature_editorial/node_significant.svg",
         "editorial_ink": "editorial_ink/node_significant.svg",
-        "pixel_abstract": "pixel_abstract/node_significant.svg"
+        "pixel_abstract": "pixel_abstract/node_significant.svg",
+        "economist": "economist/node_significant.svg"
       }
     },
     "node_missing": {
@@ -173,7 +191,8 @@
       "files": {
         "nature_editorial": "nature_editorial/node_missing.svg",
         "editorial_ink": "editorial_ink/node_missing.svg",
-        "pixel_abstract": "pixel_abstract/node_missing.svg"
+        "pixel_abstract": "pixel_abstract/node_missing.svg",
+        "economist": "economist/node_missing.svg"
       }
     },
     "reaction_step": {
@@ -182,7 +201,8 @@
       "files": {
         "nature_editorial": "nature_editorial/reaction_step.svg",
         "editorial_ink": "editorial_ink/reaction_step.svg",
-        "pixel_abstract": "pixel_abstract/reaction_step.svg"
+        "pixel_abstract": "pixel_abstract/reaction_step.svg",
+        "economist": "economist/reaction_step.svg"
       }
     },
     "reaction_transport": {
@@ -191,7 +211,8 @@
       "files": {
         "nature_editorial": "nature_editorial/reaction_transport.svg",
         "editorial_ink": "editorial_ink/reaction_transport.svg",
-        "pixel_abstract": "pixel_abstract/reaction_transport.svg"
+        "pixel_abstract": "pixel_abstract/reaction_transport.svg",
+        "economist": "economist/reaction_transport.svg"
       }
     },
     "reaction_module": {
@@ -200,7 +221,8 @@
       "files": {
         "nature_editorial": "nature_editorial/reaction_module.svg",
         "editorial_ink": "editorial_ink/reaction_module.svg",
-        "pixel_abstract": "pixel_abstract/reaction_module.svg"
+        "pixel_abstract": "pixel_abstract/reaction_module.svg",
+        "economist": "economist/reaction_module.svg"
       }
     },
     "evidence_l1": {
@@ -209,7 +231,8 @@
       "files": {
         "nature_editorial": "nature_editorial/evidence_l1.svg",
         "editorial_ink": "editorial_ink/evidence_l1.svg",
-        "pixel_abstract": "pixel_abstract/evidence_l1.svg"
+        "pixel_abstract": "pixel_abstract/evidence_l1.svg",
+        "economist": "economist/evidence_l1.svg"
       }
     },
     "evidence_l2": {
@@ -218,7 +241,8 @@
       "files": {
         "nature_editorial": "nature_editorial/evidence_l2.svg",
         "editorial_ink": "editorial_ink/evidence_l2.svg",
-        "pixel_abstract": "pixel_abstract/evidence_l2.svg"
+        "pixel_abstract": "pixel_abstract/evidence_l2.svg",
+        "economist": "economist/evidence_l2.svg"
       }
     },
     "evidence_l3": {
@@ -227,7 +251,8 @@
       "files": {
         "nature_editorial": "nature_editorial/evidence_l3.svg",
         "editorial_ink": "editorial_ink/evidence_l3.svg",
-        "pixel_abstract": "pixel_abstract/evidence_l3.svg"
+        "pixel_abstract": "pixel_abstract/evidence_l3.svg",
+        "economist": "economist/evidence_l3.svg"
       }
     }
   }

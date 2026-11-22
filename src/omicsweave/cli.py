@@ -165,10 +165,10 @@ def build_parser() -> argparse.ArgumentParser:
     maps.add_argument("--contrast", action="append", default=None, help="只画这些比较，可重复")
     maps.add_argument("--mode", choices=["atlas", "publication"], default=None,
                       help="出图模式：atlas（完整诊断总图，默认）或 publication（双栏聚焦出版图）")
-    maps.add_argument("--style", choices=["metro_atlas", "nature_editorial", "slide_dark"], default=None,
-                      help="视觉主题预设：metro_atlas（默认，Beck 八向地铁轨道风格）/ nature_editorial / slide_dark")
+    maps.add_argument("--style", choices=["metro_atlas", "economist", "nature_editorial", "slide_dark"], default=None,
+                      help="视觉主题预设：metro_atlas（默认，Beck 学术出版风）/ economist（经济学人）/ nature_editorial / slide_dark")
     maps.add_argument("--color-mode", choices=["semantic", "pathway"], default=None,
-                      help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝涨跌色）/ pathway（低饱和莫兰迪通路分区色）")
+                      help="轨道着色语义：semantic（默认，正文统一红蓝涨跌色）/ pathway（低饱和莫兰迪通路分区色）")
     maps.add_argument("--strip-mode", choices=["omics", "axes"], default=None,
                       help="四格微条内容：omics（默认，Flux / Protein / mRNA / Metab 四层组学图标）/ axes（S3 四机制轴）")
     maps.add_argument("--omics-edge-color", choices=["tinted", "grey"], default=None,
@@ -182,13 +182,13 @@ def build_parser() -> argparse.ArgumentParser:
                       help="本次重画不生成分专题子通路图")
     maps.add_argument("--no-abstract", action="store_true", default=False,
                       help="本次重画不同步生成 Graphical Abstract")
-    maps.add_argument("--format", action="append", default=None, help="图件格式，可重复，默认同 experiment.yaml（pdf、png）")
+    maps.add_argument("--format", action="append", default=None, help="图件格式（pdf / png / html / svg），可重复，默认 pdf、png、html")
     maps.add_argument("--output", type=Path, default=None,
                       help="输出目录，默认 <结果根>/<实验>/_redraws/<运行 ID>/pathway_map_<时间>/")
 
     abstract = modules.add_parser(
         "abstract",
-        help="生成小规模 Graphical Abstract 概念摘要图（≤12 核心枢纽，支持地铁 metro_atlas / 手绘 / 像素 / nature_editorial）",
+        help="生成小规模 Graphical Abstract 概念摘要图（≤12 核心枢纽，支持经济学人 / 地铁 / 手绘 / 像素 / nature_editorial）",
     )
     abstract.add_argument("--spec", type=Path, default=None,
                           help="跨项目通用的自定义 YAML 摘要规格文件（提供时不依赖实验整合结果包）")
@@ -197,9 +197,9 @@ def build_parser() -> argparse.ArgumentParser:
     abstract.add_argument("--layout", default="", help="可选布局文件路径（仅配合 --experiment）")
     abstract.add_argument("--tissue", action="append", default=None, help="只生成这些组织，可重复")
     abstract.add_argument("--contrast", action="append", default=None, help="只生成这些比较，可重复")
-    abstract.add_argument("--style", choices=["metro_atlas", "editorial_ink", "pixel_abstract", "nature_editorial"],
+    abstract.add_argument("--style", choices=["metro_atlas", "economist", "editorial_ink", "pixel_abstract", "nature_editorial"],
                           default="metro_atlas",
-                          help="概念摘要渲染风格：metro_atlas（代谢地铁，默认）/ editorial_ink（手绘）/ pixel_abstract（像素）/ nature_editorial")
+                          help="概念摘要渲染风格：metro_atlas（代谢地铁，默认）/ economist（经济学人）/ editorial_ink（手绘）/ pixel_abstract（像素）/ nature_editorial")
     abstract.add_argument("--color-mode", choices=["semantic", "pathway"], default="semantic",
                           help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝方向色）/ pathway（低饱和莫兰迪通路分区色）")
     abstract.add_argument("--format", action="append", default=None, help="输出格式（pdf/png/svg），可重复，默认 pdf,png")

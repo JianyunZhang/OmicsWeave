@@ -112,7 +112,7 @@ def apply_config(
 # Matplotlib global settings
 # ============================================================================
 
-apply_theme(preset="nature_editorial", dpi=150, save_dpi=300)
+apply_theme(preset="metro_atlas", dpi=150, save_dpi=300)
 
 
 def flush_print(*args: Any, **kwargs: Any) -> None:

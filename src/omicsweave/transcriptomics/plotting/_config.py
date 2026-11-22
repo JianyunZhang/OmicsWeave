@@ -113,5 +113,5 @@ def load_de_results(tissue: str, comparison: str) -> pd.DataFrame | None:
     return None
 
 
-# 统一采用 nature_editorial 出版主题（300 dpi）
-apply_theme(preset="nature_editorial", dpi=150, save_dpi=300)
+# 统一采用 metro_atlas 出版主题（300 dpi）
+apply_theme(preset="metro_atlas", dpi=150, save_dpi=300)

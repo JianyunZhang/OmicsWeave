@@ -21,6 +21,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
@@ -28,12 +30,12 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
-from omicsweave.contract.tables import read_differential
-from omicsweave.core.model import Contrast
+if TYPE_CHECKING:
+    from omicsweave.core.model import Contrast
 
 from .figures import FIGURE_FORMATS, figure_stem, save_figure
-from .palettes import DIRECTIONAL
-from .theme import themed
+from .palettes import DIRECTIONAL, get_palette
+from .theme import DEFAULT_PRESET, add_economist_tag, style_economist_axes, themed
 
 KIND = "volcano"
 COLORS = {"up": DIRECTIONAL["up"], "down": DIRECTIONAL["down"], "ns": DIRECTIONAL["ns"]}
@@ -110,7 +112,7 @@ def _label_points(ax: Axes, x: np.ndarray, y: np.ndarray, names: list[str]) -> N
 
 def plot_volcano(panel: pd.DataFrame, *, title: str = "", metric: str = "padj",
                  thresholds: Thresholds = Thresholds(), x_cap: float | None = None, n_labels: int = 10,
-                 colors: dict[str, str] | None = None) -> Figure | None:
+                 colors: dict[str, str] | None = None, preset: str = DEFAULT_PRESET) -> Figure | None:
     """一个组织 × 比较的火山图；没有可画的点时返回 None。
 
     Parameters
@@ -155,10 +157,16 @@ def plot_volcano(panel: pd.DataFrame, *, title: str = "", metric: str = "padj",
     off = ~finite | (np.abs(x) > half)
     x_plot = np.where(off, np.sign(x) * half * 1.04, x)
 
-    fig = Figure(figsize=(6, 5))
+    pal = get_palette(preset)
+    fig = Figure(figsize=(6.2, 5.1), facecolor=pal.surface)
     FigureCanvasAgg(fig)
-    ax = fig.add_subplot()
-    colors = {**COLORS, **(colors or {})}
+    ax = fig.add_subplot(facecolor=pal.surface)
+    base_colors = {"up": pal.up, "down": pal.down, "ns": "#B6B8B3" if preset == "economist" else pal.faint}
+    colors = {**base_colors, **(colors or {})}
+    if preset == "economist":
+        style_economist_axes(ax, right_y=False, zero_line=False, horizontal_grid=True)
+        add_economist_tag(fig, x=0.08, y=0.985, width=0.072, height=0.016, rule=True, rule_right=0.96)
+        fig.subplots_adjust(top=0.88, bottom=0.17, left=0.12, right=0.77)
     size = 5 if len(x) > 2000 else 12 if len(x) > 300 else 22
     rasterized = len(x) > 500  # 点多时矢量图中只把散点栅格化，文字与坐标轴仍为矢量
     for cat in ("ns", "down", "up"):  # 未入选的点在最下层
@@ -225,7 +233,8 @@ def plot_volcano(panel: pd.DataFrame, *, title: str = "", metric: str = "padj",
 
 def write_volcanoes(table: pd.DataFrame, directory: Path, *, contrasts: Iterable[Contrast] = (),
                     metric: str = "padj", thresholds: Thresholds = Thresholds(), x_cap: float | None = None,
-                    n_labels: int = 10, formats: Sequence[str] = FIGURE_FORMATS) -> tuple[list[Path], list[str]]:
+                    n_labels: int = 10, formats: Sequence[str] = FIGURE_FORMATS,
+                    preset: str = DEFAULT_PRESET) -> tuple[list[Path], list[str]]:
     """为统一差异结果表中的每个组织 × 比较画一张火山图，写到 ``directory``；返回 (写出的文件, 提示)。
 
     ``contrasts`` 给出图题中的比较说明（如 ``HFD vs LFD``）与图的顺序；表中其余比较按比较 ID 排在后面。
@@ -236,14 +245,15 @@ def write_volcanoes(table: pd.DataFrame, directory: Path, *, contrasts: Iterable
     keys = sorted(panels, key=lambda k: (order.get(k[0], len(order)), str(k[0]), str(k[1])))
     paths: list[Path] = []
     skipped: list[str] = []
+    pal = get_palette(preset)
     for contrast_id, tissue in keys:
-        with themed(rc=_RC):
+        with themed(preset=preset, rc=_RC):
             fig = plot_volcano(panels[(contrast_id, tissue)], title=f"{tissue} · {labels.get(contrast_id, contrast_id)}",
-                               metric=metric, thresholds=thresholds, x_cap=x_cap, n_labels=n_labels)
+                               metric=metric, thresholds=thresholds, x_cap=x_cap, n_labels=n_labels, preset=preset)
             if fig is None:
                 skipped.append(f"{contrast_id} / {tissue}")
                 continue
-            paths += save_figure(fig, directory, figure_stem(KIND, tissue, contrast_id), formats)
+            paths += save_figure(fig, directory, figure_stem(KIND, tissue, contrast_id), formats, facecolor=pal.surface)
     notes = [f"以下比较 / 组织没有可画的 p 值或效应量，未画火山图：{'、'.join(skipped)}"] if skipped else []
     return paths, notes
 
@@ -253,6 +263,8 @@ def write_bundle_volcanoes(omics_dir: Path, contrasts: Iterable[Contrast] = (), 
 
     ``options`` 同 :func:`write_volcanoes`。各组学运行器的 ``figures`` 步骤调用它。
     """
+    from omicsweave.contract.tables import read_differential
+
     path = omics_dir / "tables" / "differential.parquet"
     if not path.is_file():
         return [f"{omics_dir.name}：没有差异结果表，未画火山图"]

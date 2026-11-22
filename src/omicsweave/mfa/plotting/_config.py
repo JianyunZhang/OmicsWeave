@@ -12,8 +12,8 @@ from pathlib import Path
 
 from omicsweave.visualization.theme import apply_theme
 
-# 统一主题（与全库一致采用 nature_editorial 300 dpi 出版标准）
-apply_theme(preset="nature_editorial", save_dpi=300)
+# 统一主题（与全库一致采用 metro_atlas 300 dpi 出版标准）
+apply_theme(preset="metro_atlas", save_dpi=300)
 
 # ── 模块级共享状态（由 apply_config 填充） ──────────────────────────
 

@@ -23,6 +23,7 @@ from .spec import AbstractSpec, validate_spec
 from .styles import GA_STYLES, STYLE_RENDERERS, ga_footer_height
 
 _STYLE_SURFACES = {
+    "economist": "#EBEBDF",
     "nature_editorial": "#FFFFFF",
     "editorial_ink": "#FAF8F2",
     "pixel_abstract": "#F4EFE4",
@@ -34,7 +35,7 @@ def render_graphical_abstract(
     spec: AbstractSpec,
     stem: Path | str,
     *,
-    style: str = "editorial_ink",
+    style: str = "metro_atlas",
     color_mode: str = "semantic",
     formats: Iterable[str] = FIGURE_FORMATS,
     width_in: float = DOUBLE_COL_IN * 1.18,
@@ -74,7 +75,7 @@ def render_graphical_abstract(
     unit_in = float(width_in) / float(w_units)
     surface = _STYLE_SURFACES[style]
 
-    preset = "metro_atlas" if style == "metro_atlas" else "nature_editorial"
+    preset = style if style in ("economist", "metro_atlas") else "nature_editorial"
     with themed(preset=preset, dpi=150, save_dpi=dpi):
         fig = plt.figure(figsize=(float(width_in), height_in), facecolor=surface)
         ax = fig.add_axes([0.0, 0.0, 1.0, 1.0], facecolor=surface)
@@ -83,7 +84,7 @@ def render_graphical_abstract(
         ax.set_aspect("equal")
         ax.axis("off")
 
-        if style == "metro_atlas":
+        if style in ("metro_atlas", "economist"):
             STYLE_RENDERERS[style](ax, spec, color_mode=color_mode, unit_in=unit_in)
         else:
             STYLE_RENDERERS[style](ax, spec, unit_in=unit_in)

@@ -29,11 +29,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from omicsweave.visualization.palettes import NATURE_EDITORIAL
+from omicsweave.visualization.palettes import METRO_ATLAS
 
 from . import _config as cfg
 
-_PALETTE = {"Up": NATURE_EDITORIAL.up, "Down": NATURE_EDITORIAL.down, "NS": NATURE_EDITORIAL.faint}
+_PALETTE = {"Up": METRO_ATLAS.up, "Down": METRO_ATLAS.down, "NS": METRO_ATLAS.faint}
 _DRAW_ORDER = ("NS", "Down", "Up")
 _MAX_LABELS = 10
 

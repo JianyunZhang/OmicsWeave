@@ -105,10 +105,12 @@ def draw_glyph(
     origin, unit = transform.transform(((0.0, 0.0), (1.0, 0.0)))
     points_per_unit = abs(unit[0] - origin[0]) * 72 / ax.figure.dpi
     patches = []
+    cap = "butt" if style == "economist" else "round"
+    join = "miter" if style == "economist" else "round"
     for path, fill, stroke, width in layers:
         patch = PathPatch(
             path, transform=transform, facecolor=fill, edgecolor=stroke,
-            linewidth=width * points_per_unit, capstyle="round", joinstyle="round",
+            linewidth=width * points_per_unit, capstyle=cap, joinstyle=join,
             antialiased=style != "pixel_abstract", zorder=zorder,
         )
         ax.add_patch(patch)

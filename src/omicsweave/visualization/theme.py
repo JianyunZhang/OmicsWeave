@@ -23,8 +23,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.style
 from matplotlib import font_manager
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 
-from .palettes import PALETTES, SemanticPalette, get_palette
+from .palettes import ECONOMIST_RED, PALETTES, SemanticPalette, get_palette
 
 LATIN_FONTS = ("Arial", "Helvetica", "Liberation Sans", "DejaVu Sans")
 CJK_FONTS = (
@@ -33,7 +37,7 @@ CJK_FONTS = (
     "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei",   # Linux
 )
 
-DEFAULT_PRESET = "nature_editorial"
+DEFAULT_PRESET = "metro_atlas"
 
 # 底层不可变出版基础设置（所有预设与旧式 style 调用均继承）
 BASE_RC: dict[str, Any] = {
@@ -91,6 +95,38 @@ def _preset_rc(palette: SemanticPalette, *, title_weight: str = "bold", grid: bo
 
 
 PRESETS: dict[str, StylePreset] = {
+    "economist": StylePreset(
+        name="economist",
+        description="《经济学人》编辑部出版风（淡黄暖灰纸底 #EBEBDF、红色实验组/主焦点、深蓝/青对照组、暖灰渐变与细水平参考线）",
+        palette=PALETTES["economist"],
+        rc={
+            **_preset_rc(PALETTES["economist"], grid=True),
+            "axes.edgecolor": PALETTES["economist"].ink,
+            "axes.linewidth": 0.90,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.spines.left": False,
+            "axes.spines.bottom": True,
+            "axes.grid": True,
+            "axes.grid.axis": "y",
+            "axes.axisbelow": True,
+            "grid.color": PALETTES["economist"].hairline,
+            "grid.linewidth": 0.60,
+            "grid.alpha": 0.95,
+            "axes.titlelocation": "left",
+            "axes.titlepad": 10,
+            "axes.titlecolor": PALETTES["economist"].ink,
+            "ytick.left": False,
+            "ytick.right": False,
+            "xtick.color": PALETTES["economist"].ink,
+            "ytick.color": PALETTES["economist"].ink2,
+            "xtick.major.width": 0.80,
+            "xtick.major.size": 3.2,
+            "lines.linewidth": 1.8,
+            "lines.markersize": 5.0,
+            "errorbar.capsize": 2.2,
+        },
+    ),
     "nature_editorial": StylePreset(
         name="nature_editorial",
         description="顶刊极简定量风（纯白底、无冗余网格、色盲安全、适合论文正文与主图）",
@@ -228,6 +264,75 @@ def themed(
         yield spec
 
 
+def add_economist_tag(
+    fig: Figure,
+    *,
+    x: float = 0.015,
+    y: float = 0.992,
+    width: float = 0.055,
+    height: float = 0.014,
+    rule: bool = True,
+    rule_right: float = 0.985,
+    color: str = ECONOMIST_RED,
+    rule_color: str = "#B8B8AF",
+) -> None:
+    """在标准 Matplotlib 图幅左上角添加《经济学人》标志性红色编辑标牌与细顶线。"""
+    if rule:
+        fig.add_artist(
+            Line2D(
+                [x, rule_right],
+                [y, y],
+                transform=fig.transFigure,
+                color=rule_color,
+                linewidth=0.75,
+                clip_on=False,
+                zorder=9,
+            )
+        )
+    fig.add_artist(
+        Rectangle(
+            (x, y - height),
+            width,
+            height,
+            transform=fig.transFigure,
+            facecolor=color,
+            edgecolor="none",
+            clip_on=False,
+            zorder=10,
+        )
+    )
+
+
+def style_economist_axes(
+    ax: Axes,
+    *,
+    right_y: bool = True,
+    zero_line: bool = False,
+    horizontal_grid: bool = True,
+) -> None:
+    """按《经济学人》官方图表版式细化坐标轴：细水平网格、炭黑底基线、无冗余左/上/右框线。"""
+    pal = PALETTES["economist"]
+    ax.set_facecolor(pal.surface)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_visible(True)
+    ax.spines["bottom"].set_color(pal.ink)
+    ax.spines["bottom"].set_linewidth(0.95)
+    ax.grid(horizontal_grid, axis="y", color=pal.hairline, linewidth=0.60, alpha=0.95)
+    ax.grid(False, axis="x")
+    ax.set_axisbelow(True)
+    if right_y:
+        ax.yaxis.tick_right()
+        ax.yaxis.set_label_position("right")
+        ax.tick_params(axis="y", which="both", length=0, pad=4, colors=pal.ink2)
+    else:
+        ax.tick_params(axis="y", which="both", length=0, pad=4, colors=pal.ink2)
+    ax.tick_params(axis="x", which="major", direction="out", length=3.2, width=0.80, colors=pal.ink)
+    if zero_line:
+        ax.axhline(0.0, color=pal.ink, linewidth=0.85, zorder=1.6)
+
+
 __all__ = [
     "BASE_RC",
     "CJK_FONTS",
@@ -235,12 +340,14 @@ __all__ = [
     "LATIN_FONTS",
     "PRESETS",
     "StylePreset",
+    "add_economist_tag",
     "apply_theme",
     "font_family",
     "get_palette",
     "get_preset",
     "has_cjk_font",
     "list_presets",
+    "style_economist_axes",
     "theme_rc",
     "themed",
 ]

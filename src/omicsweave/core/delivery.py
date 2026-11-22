@@ -217,11 +217,12 @@ class Delivery:
             # 1) 全景总图 map_<比较> 与概念摘要 abstract_<比较>：.../pathway_map/<组织>/<文件>
             if len(path.parts) >= 6 and path.parts[-6:-2] == prefix:
                 if path.name.startswith("map_"):
-                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tsv"):
+                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".html", ".tsv"):
                         continue
                     tissue = path.parts[-2]
+                    kind_label = "视图表" if path.suffix == ".tsv" else ("交互图件" if path.suffix == ".html" else "图件")
                     row = {"组织": tissue, "比较": path.stem.removeprefix("map_"),
-                           "内容": "视图表" if path.suffix == ".tsv" else "图件", "文件": path.name,
+                           "内容": kind_label, "文件": path.name,
                            "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
                 elif path.name.startswith("abstract_"):
                     if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png"):

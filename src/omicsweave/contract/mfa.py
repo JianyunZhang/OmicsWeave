@@ -86,7 +86,7 @@ INFO_FIELDS: dict[str, tuple[bool, str]] = {
     "model_id": (True, "代谢网络模型标识，如 central_carbon_v1"),
     "flux_units": (True, "通量单位，如 nmol/min/g tissue"),
     "software": (False, "求解软件及版本"),
-    "tracer": (False, "示踪剂，如 U-13C glucose"),
+    "tracer": (False, "规范同位素示踪剂（U-13C / U-15N / U-13C-15N，见 omicsweave.mfa.tracers），如 U-13C-glucose"),
     "notes": (False, "备注"),
 }
 TABLES = {"flux": FLUX_COLUMNS, "mid": MID_COLUMNS, "fits": FITS_COLUMNS}

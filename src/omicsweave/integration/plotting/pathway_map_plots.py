@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle
 
+from omicsweave.mfa.tracers import format_tracer_badge_label, format_tracer_display
 from omicsweave.visualization.figures import DOUBLE_COL_IN, ONE_HALF_COL_IN, save_stem
 from omicsweave.visualization.metro import (
     draw_metro_coupled_halo,
@@ -46,6 +47,7 @@ from omicsweave.visualization.metro import (
 from omicsweave.visualization.palettes import (
     DEFAULT_NORM,
     DEFAULT_VMAX,
+    ECONOMIST_RED,
     VALID_COLOR_MODES,
     SemanticPalette,
     get_palette,
@@ -60,6 +62,7 @@ from omicsweave.visualization.primitives import (
     draw_axis_strip,
     draw_coupled_badge,
     draw_coupled_track,
+    draw_economist_masthead,
     draw_layer_icon,
     draw_organelle_box,
     draw_quad_arrow,
@@ -83,7 +86,7 @@ from ..mappings.network_layout import Layout
 UNIT = 0.108                     # inches per canvas unit in atlas mode (~22.5 x 15.6 in)
 SIDEBAR = 44.0                   # right dashboard sidebar width (atlas mode)
 HEADER = 6.2                     # top header bar height
-FOOTER = 19.6                    # bottom 4-column legend + provenance caption height
+FOOTER = 23.2                    # bottom 4-column legend + statistical rules + provenance caption height
 NODE_R = 1.05                    # metabolite node radius
 CELL = 1.04                      # single cell width/height in the 4-layer omics micro-strip
 AXIS_HDR_H = 0.62                # icon header height on highlighted cards
@@ -447,6 +450,18 @@ def _flux_group_indices(view: pd.DataFrame) -> dict[str, int]:
     return {g: i + 1 for i, g in enumerate(groups)}
 
 
+def _independent_flux_chains(view: pd.DataFrame) -> int:
+    """统计 L2/L3 反应中的独立通量自由度（化学计量锁死的同一 flux_group 仅计 1 条独立链）。"""
+    rxns = view[(view["element_type"] == "reaction") & view["flux_claim"].isin(["L2", "L3"])]
+    if rxns.empty:
+        return 0
+    keys: set[str] = set()
+    for _, row in rxns.iterrows():
+        fg = str(row["flux_group"]).strip() if ("flux_group" in row.index and pd.notna(row["flux_group"])) else ""
+        keys.add(f"grp:{fg}" if fg else f"rxn:{row['element_id']}")
+    return len(keys)
+
+
 def _strip_badges(
     row: pd.Series,
     group_indices: dict[str, int],
@@ -454,11 +469,17 @@ def _strip_badges(
     top_rank: int = 10,
     show_rank: bool = True,
 ) -> dict:
-    """Return structured badge descriptors for a reaction card."""
+    """Return structured badge descriptors for a reaction card (including dynamic isotope-tracer badge labels)."""
     label = _short(row["element_id"])
     if row["draw_style"] == "not_assessed":
-        return {"label": label, "tier": "", "rank": None, "group": None}
+        return {"label": label, "tier": "", "tier_label": "", "rank": None, "group": None}
     tier = str(row["flux_claim"]) if row["flux_claim"] in ("L1", "L2", "L3") else ""
+    flux_tracers = (
+        str(row["flux_tracers"]).strip()
+        if ("flux_tracers" in row.index and pd.notna(row["flux_tracers"]))
+        else ""
+    )
+    tier_label = format_tracer_badge_label(flux_tracers, level=tier) if tier else ""
     rank = None
     if show_rank and pd.notna(row["rank"]):
         r_int = int(row["rank"])
@@ -467,7 +488,7 @@ def _strip_badges(
     group = None
     if row["flux_group"] and row["F_state"] in ("changed", "suggestive"):
         group = group_indices.get(str(row["flux_group"]).strip())
-    return {"label": label, "tier": tier, "rank": rank, "group": group}
+    return {"label": label, "tier": tier, "tier_label": tier_label, "rank": rank, "group": group}
 
 
 def _is_compact_label_only(row: pd.Series, mode: str) -> bool:
@@ -559,7 +580,7 @@ def _strip_size(
     w = 4 * CELL + 0.46 + _text_width(info["label"], lbl_fs, bold=bold, unit=unit_in) + 0.48
     gap = 0.34
     if info["tier"]:
-        w += gap + tier_badge_width(info["tier"], scale=badge_scale, unit_in=unit_in)
+        w += gap + tier_badge_width(info["tier"], scale=badge_scale, unit_in=unit_in, label=info.get("tier_label") or None)
     if info["group"] is not None:
         w += gap + coupled_badge_width(info["group"], scale=badge_scale, total_groups=total_groups, unit_in=unit_in)
     w += 0.38
@@ -881,6 +902,59 @@ def _draw_regions_and_compartments(
         or (cid != "p" and ({"pyruvate_tca", "ketone", "oxphos"} & active_regions))
     }
     if metro:
+        is_econ = palette.name == "economist"
+        if is_econ:
+            # 《经济学人》多栏编辑部版式：暖灰纸张底板 + 锐利方角 + 顶部细黑分隔线
+            for rid, region in layout.regions.items():
+                if rid not in active_regions:
+                    continue
+                if region.box is not None and rid != "oxphos":
+                    x0, y0, x1, y1 = region.box
+                    ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor="#E5E4D7", edgecolor=palette.card_edge, lw=0.45, zorder=0.2))
+                    ax.plot([x0, x1], [y0, y0], color=palette.ink, lw=0.80, solid_capstyle="butt", zorder=0.35)
+            for cid, box in boxes.items():
+                comp = layout.compartments[cid]
+                x0, y0, x1, y1 = box
+                if cid == "p":
+                    draw_metro_zone(
+                        ax, box, comp.get("label", ""),
+                        face=palette.perox_face, edge=palette.perox_edge, lw=0.75, inner_edge=palette.perox_inner,
+                        label_color=palette.perox_ink, label_pos="top_right", rounding=0.35,
+                        fontsize=5.0 * font_scale, zorder=0.5,
+                    )
+                    ax.plot([x0, x1], [y0, y0], color=palette.perox_edge, lw=1.15, solid_capstyle="butt", zorder=0.58)
+                else:
+                    if "oxphos" in active_regions:
+                        mito_pos = "top_center"
+                    elif not ({"pyruvate_tca", "ketone"} & active_regions):
+                        mito_pos = "top_left"
+                    else:
+                        mito_pos = "bottom_right"
+                    draw_metro_zone(
+                        ax, box, comp.get("label", ""),
+                        face=palette.mito_face, edge=palette.mito_edge, lw=0.75, inner_edge=palette.mito_inner,
+                        label_color=palette.mito_ink, label_pos=mito_pos, rounding=0.35,
+                        fontsize=5.0 * font_scale, zorder=0.5,
+                    )
+                    ax.plot([x0, x1], [y0, y0], color=palette.mito_edge, lw=1.15, solid_capstyle="butt", zorder=0.58)
+            if "oxphos" in active_regions and "oxphos" in layout.regions and layout.regions["oxphos"].box is not None:
+                reg = layout.regions["oxphos"]
+                x0, y0, x1, y1 = reg.box
+                ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor="#DDDCD0", edgecolor=palette.card_edge, lw=0.50, zorder=0.62))
+                ax.plot([x0, x1], [y0, y0], color=palette.ink2, lw=0.80, solid_capstyle="butt", zorder=0.68)
+            for rid, region in layout.regions.items():
+                if rid not in active_regions:
+                    continue
+                accent = pathway_family_color(rid, fallback_accent=region.accent) if color_mode == "pathway" else palette.ink
+                lx, ly = region.label_xy
+                plate_bg = palette.mito_face if rid in ("pyruvate_tca", "ketone", "oxphos") else "#E5E4D7"
+                ax.add_patch(Rectangle((lx + 0.15, ly - 0.48), 0.36, 0.96, facecolor=accent, edgecolor="none", zorder=3.85))
+                ax.text(
+                    lx + 0.90, ly, region.label, fontsize=5.4 * font_scale, fontweight="bold",
+                    color=accent if color_mode == "pathway" else palette.ink, ha="left", va="center", zorder=3.85,
+                    bbox=dict(boxstyle="square,pad=0.14", facecolor=plate_bg, edgecolor="none", alpha=0.90),
+                )
+            return
         # 地铁风格：区室退为极淡无抢戏的浅灰圆角底板（100% 视觉聚焦于八向轨道与换乘站）
         for rid, region in layout.regions.items():
             if rid not in active_regions:
@@ -1129,18 +1203,20 @@ def _draw_strip(
     is_hi = row["key"] in ("key", "l1", "top")
     z = 8.0 if is_key else (7.0 if is_l1 else 5.8)
 
+    is_econ = palette.name == "economist"
+    card_face = palette.card_bg if is_econ else palette.surface
     if is_key:
-        bg, ec, lw, ls = palette.surface, palette.ink, 1.25, "-"
+        bg, ec, lw, ls = card_face, palette.ink, 1.25, "-"
     elif is_l1:
-        bg, ec, lw, ls = palette.surface, palette.ink2, 0.88, (0, (2.4, 1.3))
+        bg, ec, lw, ls = card_face, palette.ink2, 0.88, (0, (2.4, 1.3))
     else:
-        bg, ec, lw, ls = palette.surface, palette.card_edge, 0.48, "-"
+        bg, ec, lw, ls = card_face, palette.card_edge, 0.48, "-"
 
     card_left = x0 - 0.12
     card_top = y0 - h / 2
     ax.add_patch(FancyBboxPatch(
         (card_left, card_top), w + 0.12, h,
-        boxstyle="round,pad=0,rounding_size=0.38",
+        boxstyle=f"round,pad=0,rounding_size={0.12 if is_econ else 0.38}",
         facecolor=bg, edgecolor=ec, lw=lw, linestyle=ls, alpha=0.98, zorder=z,
     ))
 
@@ -1177,6 +1253,7 @@ def _draw_strip(
     if info["tier"]:
         bx += draw_tier_badge(
             ax, bx, y0, info["tier"], zorder=z + 0.42, scale=b_scale, preset=preset, unit_in=unit_in,
+            label=info.get("tier_label") or None,
         ) + 0.34
     if info["group"] is not None:
         draw_coupled_badge(
@@ -1325,13 +1402,14 @@ def _draw_aggregate(
     is_key = row["key"] == "key"
     is_l1 = row["key"] == "l1"
 
+    is_econ = palette.name == "economist"
     ec = palette.ink if is_key else (palette.ink2 if is_l1 else (palette.faint if faint else palette.card_edge))
     lw = 1.25 if is_key else (0.88 if is_l1 else 0.58)
     ls = "-" if is_key else ((0, (2.4, 1.3)) if is_l1 else "-")
     ax.add_patch(FancyBboxPatch(
         (x - w / 2, y - h / 2), w, h,
-        boxstyle="round,pad=0,rounding_size=0.55",
-        facecolor=palette.surface, edgecolor=ec, lw=lw, linestyle=ls, zorder=3.5,
+        boxstyle=f"round,pad=0,rounding_size={0.16 if is_econ else 0.55}",
+        facecolor=palette.card_bg if is_econ else palette.surface, edgecolor=ec, lw=lw, linestyle=ls, zorder=3.5,
     ))
 
     title = str(row["label"])
@@ -1462,11 +1540,14 @@ def _sidebar(
     signed_modules: pd.DataFrame | None = None,
 ) -> None:
     panel_w = SIDEBAR - 2.2
+    is_econ = palette.name == "economist"
     ax.add_patch(FancyBboxPatch(
         (x0 - 0.8, y0), panel_w + 0.8, layout.height,
-        boxstyle="round,pad=0,rounding_size=1.8",
+        boxstyle=f"round,pad=0,rounding_size={0.22 if is_econ else 1.8}",
         facecolor=palette.card_bg, edgecolor=palette.card_edge, lw=0.7, zorder=0.5,
     ))
+    if is_econ:
+        ax.plot([x0 - 0.8, x0 + panel_w], [y0, y0], color=palette.ink, lw=1.05, solid_capstyle="butt", zorder=0.8)
     ax.text(x0 + 0.6, y0 + 1.15, "Pathway Coverage & Multi-Omics Fusion", fontsize=5.6, fontweight="bold",
             color=palette.ink, va="top")
     ax.text(x0 + 0.6, y0 + 2.85, "Coverage tracks evidence completeness; Fusion FDR is exploratory",
@@ -1633,19 +1714,25 @@ def _legend_atlas(
     unit_in: float = UNIT,
 ) -> None:
     panel_w = total_width - 2.0
-    legend_h = 13.8
+    legend_h = 17.4
+    main_h = 13.4
+    is_econ = palette.name == "economist"
     ax.add_patch(FancyBboxPatch(
         (1.0, y0), panel_w, legend_h,
-        boxstyle="round,pad=0,rounding_size=1.4",
+        boxstyle=f"round,pad=0,rounding_size={0.22 if is_econ else 1.4}",
         facecolor=palette.card_bg, edgecolor=palette.card_edge, lw=0.7, zorder=1,
     ))
+    if is_econ:
+        ax.plot([1.0, 1.0 + panel_w], [y0, y0], color=palette.ink, lw=1.05, solid_capstyle="butt", zorder=1.3)
 
     c1 = 2.6
     c2 = 1.0 + panel_w * 0.175
     c3 = 1.0 + panel_w * 0.410
     c4 = 1.0 + panel_w * 0.775
     for cx in (c2 - 1.5, c3 - 1.5, c4 - 1.5):
-        ax.plot([cx, cx], [y0 + 1.0, y0 + legend_h - 1.0], color=palette.card_edge, lw=0.55, zorder=1.5)
+        ax.plot([cx, cx], [y0 + 1.0, y0 + main_h - 0.5], color=palette.card_edge, lw=0.55, zorder=1.5)
+    # Bottom hairline separating visual legend from statistical methodology bar
+    ax.plot([2.2, 1.0 + panel_w - 1.2], [y0 + main_h, y0 + main_h], color=palette.card_edge, lw=0.55, zorder=1.5)
 
     # Col 1: Color Scale
     ax.text(c1, y0 + 1.0, "1. Color Scale (log2FC)", fontsize=4.7, fontweight="bold", color=palette.ink, va="top")
@@ -1668,16 +1755,17 @@ def _legend_atlas(
     elif omics_edge_color == "tinted":
         col1_note = (
             "Node fill: tissue metabolite / lipid-class total\n"
-            "Solid rail: MFA flux (full scale; min ±0.8)\n"
-            "Hollow rail: Enz-pred dir. (capped ≤72% sat.)"
+            "Solid rail: MFA Pooled IVW flux (min ±0.8)\n"
+            "Hollow rail: Enz-pred dir. (capped ≤72% sat.)\n"
+            "Tracers: U-13C / U-15N / U-13C-15N (see rules)"
         )
     else:
         col1_note = (
             "Node fill: tissue metabolite or lipid-class total\n"
-            "Edge color: MFA flux effect along net flow\n"
+            "Edge color: MFA Pooled IVW flux along net flow\n"
             "(directional |log2FC| < 0.8 floored at ±0.8)"
         )
-    ax.text(c1, y0 + 7.2, col1_note, fontsize=3.65, color=palette.ink2, va="top", linespacing=1.45)
+    ax.text(c1, y0 + 7.0, col1_note, fontsize=3.55, color=palette.ink2, va="top", linespacing=1.40)
 
     # Col 2: Edges & Linked Flux Conduit
     ax.text(c2, y0 + 1.0, "2. Reaction Tracks & Net Flow" if metro else "2. Reaction Edges & Net Flow",
@@ -1727,8 +1815,8 @@ def _legend_atlas(
             chevrons=True, chevron_spacing=10.0, unit_in=unit_in,
             corner_radius=0.0, halo=False, zorder=2.6,
         )
-        ax.text(c2 + 7.4, y0 + 12.22, "Linked flux conduit: MFA-locked steps (|r| ≥ 1−1e-6 across fits; 1 grouped BH test)",
-                fontsize=3.5, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.05, "Linked flux conduit: locked chain (shared 1 DOF; NOT higher conf.)",
+                fontsize=3.45, color=palette.coupled_ink, va="center")
     else:
         edge_samples = [
             (y0 + 3.05, "-", palette.edge_grey, 1.2, False, True, "MFA flux fitted (grey = undecided / unident.)"),
@@ -1752,8 +1840,8 @@ def _legend_atlas(
                            color=palette.coupled_track, edge_color=palette.coupled_edge, width=6.4, zorder=2.2)
         draw_quad_arrow(ax, (c2, y0 + 12.22), (c2 + 3.2, y0 + 12.22), (c2 + 6.4, y0 + 12.22), palette.up, 1.6, "-", False, True, 0.0, 0.0,
                         zorder=2.6, surface=palette.card_bg)
-        ax.text(c2 + 7.4, y0 + 12.22, "Linked flux conduit: MFA-locked steps (|r| ≥ 1−1e-6 across fits; 1 grouped BH test)",
-                fontsize=3.5, color=palette.coupled_ink, va="center")
+        ax.text(c2 + 7.4, y0 + 12.05, "Linked flux conduit: locked chain (shared 1 DOF; NOT higher conf.)",
+                fontsize=3.45, color=palette.coupled_ink, va="center")
 
     # Col 3: 4-Layer Icon Strip, Real Visual State Swatches & Self-Explanatory Badges
     layer_defs = (
@@ -1804,29 +1892,29 @@ def _legend_atlas(
     ax.text(ix + 1.85, ry2, "Net flux reversal (group sign flip)", fontsize=3.55, color=palette.sign_change_ink,
             fontweight="medium", va="center")
 
-    # Row 3c: Self-explanatory 3-dot tier badges (●●● Confirmed / ●●○ Flux / ●○○ Enz-pred)
-    by1 = y0 + 9.15
+    # Row 3c: Self-explanatory 3-dot tracer-aware tier badges
+    by1 = y0 + 9.05
     bx = c3 + 0.3
-    for lvl, txt in (
-        ("L3", "Multi-tracer confirmed"),
-        ("L2", "MFA flux supported"),
-        ("L1", "Enzyme-predicted (dashed; verify decoy)"),
+    for lvl, blbl, txt in (
+        ("L3", "U-13C-Glc+Ala", "L3 Multi-tracer confirmed"),
+        ("L2", "U-13C-Glc Flux", "L2 MFA flux (shows active tracer)"),
+        ("L1", "Enz-pred", "L1 Enzyme only (dashed)"),
     ):
-        bx += draw_tier_badge(ax, bx, by1, lvl, zorder=2.5, scale=1.08, preset=preset, unit_in=unit_in) + 0.65
-        ax.text(bx, by1, txt, fontsize=3.6, color=palette.ink2, va="center")
-        bx += _text_width(txt, 3.6, unit=unit_in) + 2.0
+        bx += draw_tier_badge(ax, bx, by1, lvl, zorder=2.5, scale=1.02, preset=preset, unit_in=unit_in, label=blbl) + 0.55
+        ax.text(bx, by1, txt, fontsize=3.45, color=palette.ink2, va="center")
+        bx += _text_width(txt, 3.45, unit=unit_in) + 1.45
 
-    # Row 3d: Corner rank tab + Linked flux badge with clear statistical meaning
-    by2 = y0 + 11.70
+    # Row 3d: Corner rank tab + Linked flux badge (explicitly clarifying 1 DOF redundancy, NOT extra confidence)
+    by2 = y0 + 11.65
     bx = c3 + 0.3
-    draw_rank_tab(ax, bx + 0.1, by2 + 0.25, 1, zorder=2.5, scale=1.12, palette=palette)
-    ax.text(bx + 2.55, by2, "Corner #n: Top-N rank", fontsize=3.6, color=palette.ink2, va="center")
-    bx2 = bx + 2.55 + _text_width("Corner #n: Top-N rank", 3.6, unit=unit_in) + 2.8
-    bx2 += draw_coupled_badge(ax, bx2, by2, 1, zorder=2.5, scale=1.06, palette=palette, total_groups=1, unit_in=unit_in) + 0.7
+    draw_rank_tab(ax, bx + 0.1, by2 + 0.25, 1, zorder=2.5, scale=1.08, palette=palette)
+    ax.text(bx + 2.45, by2, "Corner #n: Top-N rank", fontsize=3.5, color=palette.ink2, va="center")
+    bx2 = bx + 2.45 + _text_width("Corner #n: Top-N rank", 3.5, unit=unit_in) + 2.4
+    bx2 += draw_coupled_badge(ax, bx2, by2, 1, zorder=2.5, scale=1.02, palette=palette, total_groups=1, unit_in=unit_in) + 0.65
     ax.text(
         bx2, by2,
-        "Stoichiometrically locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test, shown when F sig./sug.)",
-        fontsize=3.45, color=palette.ink2, va="center",
+        "Stoichiometric redundancy (shared 1 DOF, NOT extra confidence — see statistical rules below)",
+        fontsize=3.45, color=palette.coupled_ink, va="center",
     )
 
     # Col 4: Nodes, Organelles & Modules
@@ -1865,12 +1953,41 @@ def _legend_atlas(
         ax.add_patch(Rectangle((cx, y0 + 11.12), 0.76, 0.76, facecolor=col, edgecolor=palette.card_edge, lw=0.3, zorder=2.3))
     ax.text(c4 + 11.8, y0 + 11.10, "Isolated module (4-icon strip + Prot / mRNA / Metab)", fontsize=3.55, color=palette.ink2, va="center")
 
+    # Full-width Statistical Rules Bar (Multi-Tracer Pooled IVW + Linked Flux Grouped BH-FDR)
+    stat_y1 = y0 + main_h + 1.05
+    stat_y2 = y0 + main_h + 2.60
+    ax.text(
+        c1, stat_y1,
+        "Multi-Tracer MFA Pooling (Pooled IVW):",
+        fontsize=3.55, fontweight="bold", color=palette.ink, va="center",
+    )
+    ax.text(
+        c1 + _text_width("Multi-Tracer MFA Pooling (Pooled IVW):", 3.55, bold=True, unit=unit_in) + 0.7, stat_y1,
+        "Unconstrained (poorly_constrained / bound_pinned) & low-n (<2/group) tracers are excluded; identifiable tracers are combined via "
+        "tracer-stratified inverse-variance fixed-effects pooling (w = 1/[(s²_animal + f̄_fit)/n], stratified permutation p). "
+        "When k=1 tracer constrains a step, Pooled = that single tracer (badge shows ●●○ <Tracer> Flux); k≥2 concordant + FDR<0.05 → ●●● <Tracers>; "
+        "opposing clear tracers (|g|≥1) → grey/mixed (no pooling).",
+        fontsize=3.35, color=palette.ink2, va="center",
+    )
+    ax.text(
+        c1, stat_y2,
+        "Linked Flux Statistical Rule (Shared 1 DOF):",
+        fontsize=3.55, fontweight="bold", color=palette.coupled_ink, va="center",
+    )
+    ax.text(
+        c1 + _text_width("Linked Flux Statistical Rule (Shared 1 DOF):", 3.55, bold=True, unit=unit_in) + 0.7, stat_y2,
+        "Net fluxes (v_fwd − v_rev) with |r| ≥ 1−1e-6 across all independent fits in every informative tracer model reflect steady-state mass balance "
+        "on unbranched segments. Grouped BH-FDR counts each locked chain as 1 single hypothesis (min group p adjusted & shared across members) to prevent "
+        "multiple-testing inflation and duplicate discovery counting — it flags stoichiometric redundancy, NOT increased confidence.",
+        fontsize=3.35, color=palette.ink2, va="center",
+    )
+
     # Compact Provenance & Decoy Calibration Caption
-    y = y0 + legend_h + 1.05
+    y = y0 + legend_h + 0.95
     for line in caption:
         for wrapped in textwrap.wrap(line, 275):
-            ax.text(1.4, y, wrapped, fontsize=3.95, va="top", color=palette.ink2)
-            y += 1.48
+            ax.text(1.4, y, wrapped, fontsize=3.9, va="top", color=palette.ink2)
+            y += 1.42
 
 
 def _flow_rows(widths: Sequence[float], max_w: float, gap: float) -> tuple[list[tuple[int, float]], int]:
@@ -1891,11 +2008,13 @@ def _header_pills(view: pd.DataFrame, palette: SemanticPalette, preset: str) -> 
     rxns = view[view["element_type"] == "reaction"]
     n_flux = int((rxns["draw_style"] == "flux").sum())
     n_l2 = int(view["flux_claim"].isin(["L2", "L3"]).sum())
+    n_indep = _independent_flux_chains(view)
     n_l1 = int((view["flux_claim"] == "L1").sum())
     n_agg = int((view["element_type"] == "aggregate").sum())
     tok = tier_tokens(preset)
+    flux_lbl = f"Flux: {n_l2} ({n_indep} indep.)" if (n_l2 > 0 and n_indep < n_l2) else f"Flux: {n_l2}"
     pills = [
-        (f"Flux: {n_l2}", tok["L2"]["bg"], tok["L2"]["fg"], "L2"),
+        (flux_lbl, tok["L2"]["bg"], tok["L2"]["fg"], "L2"),
         (f"Enz-pred: {n_l1}", tok["L1"]["bg"], tok["L1"]["fg"], "L1"),
     ]
     edge_txt = f"MFA Flux: {n_flux}/{len(rxns)}" + (f" | Mod: {n_agg}" if n_agg else "")
@@ -1927,15 +2046,16 @@ def _header_geometry(
 
     tw = _text_width(title, title_fs, bold=True, unit=unit_in)
     pw = _pills_total_w(pill_fs)
+    econ_pad = 2.0 if preset == "economist" else 0.0
     if tw + pw + 4.0 <= avail_w:
-        return HEADER, False, title_fs, pill_fs
+        return HEADER + econ_pad, False, title_fs, pill_fs
 
     # 窄/中幅子图自动切换为清爽两行顶栏，避免主标题与统计药丸碰撞
     while title_fs > 5.2 and _text_width(title, title_fs, bold=True, unit=unit_in) > avail_w - 2.0:
         title_fs -= 0.35
     while pill_fs > 3.2 and _pills_total_w(pill_fs) > avail_w - 2.0:
         pill_fs -= 0.20
-    return 9.2, True, title_fs, pill_fs
+    return 9.2 + econ_pad, True, title_fs, pill_fs
 
 
 def _pub_legend_plan(
@@ -2008,25 +2128,33 @@ def _pub_legend_plan(
     ])
     b_pos, b_rows = _flow_rows([w for _, _, w in b_items], inner_w, gap=1.8)
 
-    # Row-group C: Self-explanatory Tier Badges + Linked Flux Badge (with exact |r| criterion)
-    c_scale = 1.02 * font_scale
-    linked_desc = "Locked MFA chain (|r| ≥ 1−1e-6 across fits; 1 shared BH test)"
+    # Row-group C: Self-explanatory Tracer-Aware Tier Badges + Linked Flux Badge (1 DOF redundancy, NOT extra conf.)
+    c_scale = 0.98 * font_scale
+    l3_ex = "U-13C-Glc+Ala"
+    l2_ex = "U-13C-Glc Flux"
+    linked_desc = "Locked chain (|r|≥1−1e-6; 1 grouped BH test = 1 DOF, NOT extra conf.)"
     c_items = [
-        ("L3", "Multi-tracer", tier_badge_width("L3", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("Multi-tracer", fs, unit=unit_in)),
-        ("L2", "MFA supported", tier_badge_width("L2", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("MFA supported", fs, unit=unit_in)),
-        ("L1", "Enzyme only", tier_badge_width("L1", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("Enzyme only", fs, unit=unit_in)),
+        ("L3", "L3 Multi-tracer", tier_badge_width("L3", scale=c_scale, unit_in=unit_in, label=l3_ex) + 0.55 + _text_width("L3 Multi-tracer", fs, unit=unit_in)),
+        ("L2", "L2 MFA tracer", tier_badge_width("L2", scale=c_scale, unit_in=unit_in, label=l2_ex) + 0.55 + _text_width("L2 MFA tracer", fs, unit=unit_in)),
+        ("L1", "L1 Enzyme only", tier_badge_width("L1", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("L1 Enzyme only", fs, unit=unit_in)),
         ("LINK", linked_desc, coupled_badge_width(1, scale=c_scale, total_groups=1, unit_in=unit_in) + 0.55 + _text_width(linked_desc, fs, unit=unit_in)),
     ]
-    c_pos, c_rows = _flow_rows([w for _, _, w in c_items], inner_w, gap=2.0)
+    c_pos, c_rows = _flow_rows([w for _, _, w in c_items], inner_w, gap=1.8)
 
-    # Disclosure note (submap scope or folded regions)
+    # Statistical pooling rule + disclosure note (submap scope or folded regions)
     char_w = max(em_units(fs * 0.88, unit_in) * 0.56, 0.18)
     wrap_cols = max(36, int(inner_w / char_w))
-    note_text = panel_note or (
+    method_text = (
+        "MFA Pooled IVW: Unconstrained/low-n tracers gated out; identifiable tracers combined by inverse-variance pooling "
+        "(k=1 equals single tracer; opposing |g|≥1 → grey/mixed). Linked flux = stoichiometric 1-DOF redundancy, not higher confidence."
+    )
+    note_extra = panel_note or (
         ("Inactive / unassessed regions folded from print view: " + " · ".join(folded_regions))
         if folded_regions else ""
     )
-    note_lines = textwrap.wrap(note_text, wrap_cols)[:2] if note_text else []
+    note_lines = textwrap.wrap(method_text, wrap_cols)[:3]
+    if note_extra:
+        note_lines.extend(textwrap.wrap(note_extra, wrap_cols)[:2])
 
     cap_wrap_cols = max(40, int((vw - 2.0) / max(em_units(fs * 0.86, unit_in) * 0.56, 0.18)))
     cap_lines: list[str] = []
@@ -2076,11 +2204,14 @@ def _legend_publication(
     sw = plan["sw"]
     row_a, row_b, row_c = plan["row_a"], plan["row_b"], plan["row_c"]
 
+    is_econ = palette.name == "economist"
     ax.add_patch(FancyBboxPatch(
         (vx0 + 0.5, y0), vw - 1.0, legend_h,
-        boxstyle="round,pad=0,rounding_size=1.2",
+        boxstyle=f"round,pad=0,rounding_size={0.22 if is_econ else 1.2}",
         facecolor=palette.card_bg, edgecolor=palette.card_edge, lw=0.7, zorder=1,
     ))
+    if is_econ:
+        ax.plot([vx0 + 0.5, vx0 + vw - 0.5], [y0, y0], color=palette.ink, lw=1.05, solid_capstyle="butt", zorder=1.3)
 
     # Row-group A: Colorbar + Tracks + Metabolite station
     y_a0 = y0 + 2.45
@@ -2206,18 +2337,19 @@ def _legend_publication(
             draw_status_cell(ax, x, y - sw / 2, sw, st_map[kind], 0, palette=palette, font_scale=font_scale, zorder=2.5, draw_box=True)
             ax.text(x + sw + 0.45, y, lbl, fontsize=fs, color=palette.ink2, va="center")
 
-    # Row-group C: Self-explanatory Tier Badges + Linked Flux Badge
+    # Row-group C: Self-explanatory Tracer-Aware Tier Badges + Linked Flux Badge
     y_c0 = y0 + 1.5 + plan["a_rows"] * row_a + 0.45 + plan["b_rows"] * row_b + 1.65
-    c_scale = 1.02 * font_scale
+    c_scale = 0.98 * font_scale
+    ex_labels = {"L3": "U-13C-Glc+Ala", "L2": "U-13C-Glc Flux", "L1": "Enz-pred"}
     for (kind, lbl, _), (r_idx, x_off) in zip(plan["c_items"], plan["c_pos"]):
         x = vx0 + 2.0 + x_off
         y = y_c0 + r_idx * row_c
         if kind in ("L3", "L2", "L1"):
-            bw = draw_tier_badge(ax, x, y, kind, zorder=2.5, scale=c_scale, preset=preset, unit_in=unit_in)
+            bw = draw_tier_badge(ax, x, y, kind, zorder=2.5, scale=c_scale, preset=preset, unit_in=unit_in, label=ex_labels[kind])
             ax.text(x + bw + 0.55, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "LINK":
             bw = draw_coupled_badge(ax, x, y, 1, zorder=2.5, scale=c_scale, palette=palette, total_groups=1, unit_in=unit_in)
-            ax.text(x + bw + 0.55, y, lbl, fontsize=fs, color=palette.ink2, va="center")
+            ax.text(x + bw + 0.55, y, lbl, fontsize=fs, color=palette.coupled_ink, va="center")
 
     # Disclosure note
     if plan["note_lines"]:
@@ -2253,6 +2385,16 @@ def _draw_header(
     p_fs = pill_fs if pill_fs is not None else 4.15 * font_scale
     pills = _header_pills(view, palette, preset)
     tok = tier_tokens(preset)
+    is_econ = preset == "economist"
+    pill_rad = 0.16 if is_econ else 0.85
+
+    if is_econ:
+        top_y = y_base - (10.7 if stacked else 7.6)
+        tag_w = max(5.2, min(11.5, (x_right - x_left) * 0.055))
+        draw_economist_masthead(
+            ax, x_left + 1.0, top_y, (x_right - x_left) - 2.0,
+            tag_w=tag_w, tag_h=1.25, color=ECONOMIST_RED, rule_color="#B8B8AF", y_up=False, zorder=8.0,
+        )
 
     if stacked:
         ax.text(x_left + 1.0, y_base - 6.7, title, fontsize=t_fs, fontweight="bold",
@@ -2265,7 +2407,7 @@ def _draw_header(
             tw = _text_width(text, p_fs, bold=True, unit=unit_in)
             pw = tw + 1.8 + icon_pad
             ax.add_patch(FancyBboxPatch(
-                (px, py - 1.12), pw, 2.24, boxstyle="round,pad=0,rounding_size=0.85",
+                (px, py - 1.12), pw, 2.24, boxstyle=f"round,pad=0,rounding_size={pill_rad}",
                 facecolor=bg, edgecolor=palette.card_edge if icon != "L2" else "none",
                 lw=0.6 if icon != "L2" else 0.0,
                 linestyle=(0, (2.0, 1.2)) if icon == "L1" else "-",
@@ -2293,7 +2435,7 @@ def _draw_header(
             tw = _text_width(text, p_fs, bold=True, unit=unit_in)
             pw = tw + 1.8 + icon_pad
             ax.add_patch(FancyBboxPatch(
-                (px - pw, y_base - 4.70), pw, 2.30, boxstyle="round,pad=0,rounding_size=0.9",
+                (px - pw, y_base - 4.70), pw, 2.30, boxstyle=f"round,pad=0,rounding_size={0.16 if is_econ else 0.9}",
                 facecolor=bg, edgecolor=palette.card_edge if icon != "L2" else "none",
                 lw=0.6 if icon != "L2" else 0.0,
                 linestyle=(0, (2.0, 1.2)) if icon == "L1" else "-",
@@ -2311,7 +2453,119 @@ def _draw_header(
             ax.text(px - pw + 0.78 + icon_pad, y_base - 3.55, text, fontsize=p_fs, fontweight="bold", color=fg,
                     ha="left", va="center", zorder=2.2)
             px -= pw + 1.0
-    ax.plot([x_left + 1.0, x_right - 1.0], [y_base - 1.05, y_base - 1.05], color=palette.card_edge, lw=0.85, zorder=1)
+    ax.plot([x_left + 1.0, x_right - 1.0], [y_base - 1.05, y_base - 1.05],
+            color=palette.ink if is_econ else palette.card_edge, lw=1.05 if is_econ else 0.85, zorder=1)
+
+
+# ---------------------------------------------------------------------------
+# Shared Scene Geometry Builder (Consumed by Matplotlib & Plan-A HTML/SVG)
+# ---------------------------------------------------------------------------
+
+def build_pathway_map_scene(
+    view: pd.DataFrame,
+    layout: Layout,
+    *,
+    mode: str = "atlas",
+    style: str = "metro_atlas",
+    top_rank: int = 10,
+    focus_regions: Sequence[str] | None = None,
+    include_reactions: Sequence[str] | None = None,
+    exclude_reactions: Sequence[str] | None = None,
+) -> dict:
+    """计算图 E / 子图与交互式 HTML/SVG 共用的完整场景几何、避让卡片坐标与锁死通量分组。"""
+    metro = style in ("metro_atlas", "economist")
+    all_reactions = view[view["element_type"] == "reaction"]
+    all_aggs = view[view["element_type"] == "aggregate"]
+    nodes_df = view[view["element_type"] == "metabolite"].set_index("element_id")
+
+    if mode == "publication":
+        active_regions, folded_regions = _select_active_regions(view, layout, focus_regions)
+        rxn_mask = all_reactions["region"].isin(active_regions)
+        if include_reactions:
+            rxn_mask = rxn_mask | all_reactions["element_id"].isin(include_reactions)
+        if exclude_reactions:
+            rxn_mask = rxn_mask & ~all_reactions["element_id"].isin(exclude_reactions)
+        reactions = all_reactions[rxn_mask]
+        aggs = all_aggs[all_aggs["region"].isin(active_regions)]
+        active_aggs = set(aggs["element_id"])
+        geometries = {fid: _edge_geometry(layout, fid, metro=metro) for fid in reactions["element_id"]}
+        active_species: set[str] = set()
+        active_node_positions: set[tuple[str, int]] | None = set()
+        for fid in reactions["element_id"]:
+            geom = layout.geometry(pathway_reactions()[fid])
+            for sp, pt in geom["substrates"] + geom["products"]:
+                active_species.add(sp)
+                node = layout.nodes[sp]
+                idx = min(range(len(node.at)), key=lambda i: math.dist(node.at[i], pt))
+                active_node_positions.add((sp, idx))
+        comp_boxes = _compute_clipped_compartments(
+            layout, active_regions, active_node_positions, active_aggs, mode="publication",
+        )
+        vx0, vy0, vx1, vy1 = _compute_publication_viewport(
+            layout, active_regions, active_node_positions, active_aggs, comp_boxes,
+        )
+        vw, vh = vx1 - vx0, vy1 - vy0
+        if vw >= 95.0:
+            fig_w = max(DOUBLE_COL_IN * 1.48, vw * 0.092)
+        elif vw >= 58.0:
+            fig_w = max(DOUBLE_COL_IN * 1.15, vw * 0.116)
+        else:
+            fig_w = max(ONE_HALF_COL_IN * 1.24, vw * 0.145)
+        unit_in = fig_w / (vw + 1.0)
+        font_scale = max(1.04, min(1.26, 1.16 * (unit_in / 0.105)))
+        bounds = (vx0, vy0, vx1, vy1)
+    else:
+        active_regions = set(layout.regions)
+        folded_regions = []
+        reactions = all_reactions
+        aggs = all_aggs
+        active_aggs = set(aggs["element_id"])
+        active_species = set(layout.nodes)
+        active_node_positions = None
+        comp_boxes = _compute_clipped_compartments(layout, active_regions, None, active_aggs, mode="atlas")
+        geometries = {fid: _edge_geometry(layout, fid, metro=metro) for fid in reactions["element_id"]}
+        font_scale = 1.0
+        unit_in = UNIT
+        fig_w = (layout.width + SIDEBAR) * UNIT
+        bounds = (0.0, 0.0, layout.width, layout.height)
+
+    group_indices = _flux_group_indices(reactions)
+    grp_counts: dict[int, int] = {}
+    for _, r in reactions.iterrows():
+        if r["flux_group"] and r["F_state"] in ("changed", "suggestive"):
+            gi = group_indices.get(str(r["flux_group"]).strip())
+            if gi is not None:
+                grp_counts[gi] = grp_counts.get(gi, 0) + 1
+    multi_groups = {gi for gi, cnt in grp_counts.items() if cnt >= 2}
+
+    node_labels = _node_label_placements(layout, geometries, bounds, font_scale=font_scale, unit_in=unit_in)
+    positions = _place_strips(
+        reactions, layout, geometries, node_labels, group_indices,
+        active_species=active_species, active_aggs=active_aggs, active_regions=active_regions,
+        bounds=bounds, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
+        metro=metro, comp_boxes=comp_boxes,
+    )
+    return {
+        "metro": metro,
+        "reactions": reactions,
+        "aggs": aggs,
+        "nodes_df": nodes_df,
+        "active_regions": active_regions,
+        "folded_regions": folded_regions,
+        "active_species": active_species,
+        "active_node_positions": active_node_positions,
+        "active_aggs": active_aggs,
+        "comp_boxes": comp_boxes,
+        "geometries": geometries,
+        "group_indices": group_indices,
+        "multi_groups": multi_groups,
+        "node_labels": node_labels,
+        "positions": positions,
+        "bounds": bounds,
+        "font_scale": font_scale,
+        "unit_in": unit_in,
+        "fig_w": fig_w,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2325,7 +2579,7 @@ def plot_pathway_map(
     title: str,
     caption: list[str],
     stem: Path,
-    formats: Iterable[str] = ("pdf", "png"),
+    formats: Iterable[str] = ("pdf", "png", "html"),
     extra_fusion: pd.DataFrame | None = None,
     signed_modules: pd.DataFrame | None = None,
     top_rank: int = 10,
@@ -2339,6 +2593,12 @@ def plot_pathway_map(
     include_reactions: Sequence[str] | None = None,
     exclude_reactions: Sequence[str] | None = None,
     panel_note: str = "",
+    members: pd.DataFrame | None = None,
+    samples: pd.DataFrame | None = None,
+    sample_contrasts: pd.DataFrame | None = None,
+    tissue: str = "",
+    contrast_id: str = "",
+    source: str = "",
 ) -> list[Path]:
     """Render Figure E (Per-Tissue Multi-Omics Pathway Atlas or Focused Sub-Pathway Panel).
 
@@ -2348,10 +2608,10 @@ def plot_pathway_map(
         ``"atlas"`` renders the full 13-region network + right dashboard sidebar;
         ``"publication"`` crops to active regions (or ``focus_regions``) with responsive single-/double-column
         typography, smart organelle clipping, and hides non-key micro-strips and exploratory rank tabs.
-    style : ``"metro_atlas"`` | ``"nature_editorial"`` | ``"slide_dark"``
-        Theme preset name from :mod:`omicsweave.visualization.theme` (default ``"metro_atlas"``).
+    style : ``"economist"`` | ``"metro_atlas"`` | ``"nature_editorial"`` | ``"slide_dark"`` | ``"poster_editorial"``
+        Theme preset name from :mod:`omicsweave.visualization.theme` (default ``"economist"``).
     color_mode : ``"semantic"`` | ``"pathway"``
-        Color encoding for ``style="metro_atlas"``: ``"semantic"`` (default) keeps the unified main-text
+        Color encoding for ``economist`` / ``metro_atlas``: ``"semantic"`` (default) keeps the unified main-text
         red/blue directional scale; ``"pathway"`` uses muted Morandi pathway-family colors.
     omics_edge_color : ``"tinted"`` | ``"grey"``
         Visual encoding for enzyme-predicted (``Enz-pred`` / L1) edges without directional MFA flux:
@@ -2374,184 +2634,170 @@ def plot_pathway_map(
         )
     palette = get_palette(style)
     cmap = palette.diverging_cmap()
-    metro = style == "metro_atlas"
 
-    all_reactions = view[view["element_type"] == "reaction"]
-    all_aggs = view[view["element_type"] == "aggregate"]
-    nodes_df = view[view["element_type"] == "metabolite"].set_index("element_id")
+    fmt_list = [str(f).lstrip(".").lower() for f in formats]
+    static_formats = [f for f in fmt_list if f != "html"]
+    want_html = "html" in fmt_list
 
-    if mode == "publication":
-        active_regions, folded_regions = _select_active_regions(view, layout, focus_regions)
-        rxn_mask = all_reactions["region"].isin(active_regions)
-        if include_reactions:
-            rxn_mask = rxn_mask | all_reactions["element_id"].isin(include_reactions)
-        if exclude_reactions:
-            rxn_mask = rxn_mask & ~all_reactions["element_id"].isin(exclude_reactions)
-        reactions = all_reactions[rxn_mask]
-        aggs = all_aggs[all_aggs["region"].isin(active_regions)]
-        active_aggs = set(aggs["element_id"])
-        geometries = {fid: _edge_geometry(layout, fid, metro=metro) for fid in reactions["element_id"]}
-        active_species: set[str] = set()
-        active_node_positions: set[tuple[str, int]] = set()
-        for fid in reactions["element_id"]:
-            geom = layout.geometry(pathway_reactions()[fid])
-            for sp, pt in geom["substrates"] + geom["products"]:
-                active_species.add(sp)
-                node = layout.nodes[sp]
-                idx = min(range(len(node.at)), key=lambda i: math.dist(node.at[i], pt))
-                active_node_positions.add((sp, idx))
-        comp_boxes = _compute_clipped_compartments(
-            layout, active_regions, active_node_positions, active_aggs, mode="publication",
-        )
-        vx0, vy0, vx1, vy1 = _compute_publication_viewport(
-            layout, active_regions, active_node_positions, active_aggs, comp_boxes,
-        )
-        vw, vh = vx1 - vx0, vy1 - vy0
-        # 按子图跨度自适应单栏 / 1.5 栏 / 双栏物理幅面，保持文字、节点与四轴微条比例和谐
-        if vw >= 95.0:
-            fig_w = max(DOUBLE_COL_IN * 1.48, vw * 0.092)
-        elif vw >= 58.0:
-            fig_w = max(DOUBLE_COL_IN * 1.15, vw * 0.116)
+    scene = build_pathway_map_scene(
+        view, layout,
+        mode=mode, style=style, top_rank=top_rank,
+        focus_regions=focus_regions, include_reactions=include_reactions, exclude_reactions=exclude_reactions,
+    )
+    metro = scene["metro"]
+    reactions = scene["reactions"]
+    aggs = scene["aggs"]
+    nodes_df = scene["nodes_df"]
+    active_regions = scene["active_regions"]
+    folded_regions = scene["folded_regions"]
+    active_species = scene["active_species"]
+    active_node_positions = scene["active_node_positions"]
+    comp_boxes = scene["comp_boxes"]
+    geometries = scene["geometries"]
+    group_indices = scene["group_indices"]
+    multi_groups = scene["multi_groups"]
+    node_labels = scene["node_labels"]
+    positions = scene["positions"]
+    bounds = scene["bounds"]
+    font_scale = scene["font_scale"]
+    unit_in = scene["unit_in"]
+    fig_w = scene["fig_w"]
+
+    written: list[Path] = []
+    if static_formats:
+        if mode == "publication":
+            vx0, vy0, vx1, vy1 = bounds
+            vw, vh = vx1 - vx0, vy1 - vy0
+            header_view = pd.concat([reactions, aggs], ignore_index=True)
+            header_h, hdr_stacked, hdr_title_fs, hdr_pill_fs = _header_geometry(
+                title, header_view, vw,
+                palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
+            )
+            legend_plan = _pub_legend_plan(
+                vw, caption, folded_regions, panel_note,
+                font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode,
+                strip_mode=strip_mode, omics_edge_color=omics_edge_color,
+            )
+            pub_footer = legend_plan["footer_h"]
+            fig_h = fig_w * ((vh + header_h + pub_footer) / (vw + 1.0))
+            x_lim = (vx0 - 0.5, vx1 + 0.5)
+            y_lim = (vy1 + pub_footer + 0.5, vy0 - header_h)
+            y_base = vy0
         else:
-            fig_w = max(ONE_HALF_COL_IN * 1.24, vw * 0.145)
-        unit_in = fig_w / (vw + 1.0)
-        font_scale = max(1.04, min(1.26, 1.16 * (unit_in / 0.105)))
+            total_w = layout.width + SIDEBAR
+            total_h = layout.height + FOOTER
+            header_view = view
+            header_h = HEADER + (2.0 if style == "economist" else 0.0)
+            hdr_stacked, hdr_title_fs, hdr_pill_fs = False, 8.4, 4.15
+            legend_plan = None
+            fig_h = (total_h + header_h) * UNIT
+            x_lim = (-0.5, total_w + 0.5)
+            y_lim = (total_h + 0.5, -header_h)
+            y_base = 0.0
 
-        header_view = pd.concat([reactions, aggs], ignore_index=True)
-        header_h, hdr_stacked, hdr_title_fs, hdr_pill_fs = _header_geometry(
-            title, header_view, vw,
-            palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
+        with themed(preset=style, dpi=150, save_dpi=300):
+            fig = plt.figure(figsize=(fig_w, fig_h), facecolor=palette.surface)
+            ax = fig.add_axes([0, 0, 1, 1], facecolor=palette.surface)
+            ax.set_xlim(*x_lim)
+            ax.set_ylim(*y_lim)
+            ax.set_aspect("equal")
+            ax.axis("off")
+
+            _draw_header(
+                ax, title, header_view,
+                x_lim[0] + 0.5, x_lim[1] - 0.5,
+                y_base=y_base, palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
+                stacked=hdr_stacked, title_fs=hdr_title_fs, pill_fs=hdr_pill_fs,
+            )
+            _draw_regions_and_compartments(
+                ax, layout, active_regions,
+                palette=palette, font_scale=font_scale, metro=metro, color_mode=color_mode, comp_boxes=comp_boxes,
+            )
+
+            draw_order = (
+                reactions["draw_style"].map({"not_assessed": 0, "omics_only": 1, "flux": 2}).fillna(0)
+                + reactions["key"].eq("l1").astype(int)
+                + reactions["value"].notna().astype(int) * 2
+                + reactions["key"].eq("key").astype(int) * 2
+            )
+            for _, row in reactions.assign(_z=draw_order).sort_values("_z", kind="stable").iterrows():
+                gi = group_indices.get(str(row["flux_group"]).strip()) if (row["flux_group"] and row["F_state"] in ("changed", "suggestive")) else None
+                _draw_edge(
+                    ax, row, geometries[row["element_id"]],
+                    palette=palette, cmap=cmap, layout=layout,
+                    is_coupled_member=(gi in multi_groups),
+                    font_scale=font_scale, metro=metro, color_mode=color_mode,
+                    omics_edge_color=omics_edge_color, unit_in=unit_in,
+                )
+
+            for _, row in aggs.iterrows():
+                _draw_aggregate(
+                    ax, layout, row, palette=palette, cmap=cmap, preset=style,
+                    strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
+                )
+
+            for species in layout.nodes:
+                if species not in active_species:
+                    continue
+                _draw_node(
+                    ax, layout, species,
+                    nodes_df.loc[species] if species in nodes_df.index else None,
+                    node_labels, palette=palette, cmap=cmap, font_scale=font_scale,
+                    unit_in=unit_in, active_positions=active_node_positions, metro=metro,
+                )
+
+            for _, row in reactions.iterrows():
+                _draw_leader(
+                    ax, geometries[row["element_id"]]["hub"], positions[row["element_id"]], row, group_indices,
+                    palette=palette, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
+                )
+                _draw_strip(
+                    ax, positions[row["element_id"]], row, group_indices,
+                    palette=palette, preset=style, top_rank=top_rank, mode=mode,
+                    strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
+                )
+
+            if mode == "atlas":
+                _sidebar(
+                    ax, regions, layout, layout.width + 2.4, 1.0,
+                    palette=palette, extra_fusion=extra_fusion, signed_modules=signed_modules,
+                )
+                _legend_atlas(
+                    ax, layout.height + 1.8, layout.width + SIDEBAR, caption,
+                    palette=palette, cmap=cmap, preset=style, metro=metro,
+                    color_mode=color_mode, strip_mode=strip_mode,
+                    omics_edge_color=omics_edge_color, unit_in=unit_in,
+                )
+            else:
+                _legend_publication(
+                    ax, bounds[0], bounds[3] + 1.6, bounds[2] - bounds[0], legend_plan,
+                    palette=palette, cmap=cmap, preset=style, font_scale=font_scale, unit_in=unit_in,
+                )
+
+            written.extend(save_stem(fig, stem, formats=tuple(static_formats), dpi=300, facecolor=palette.surface, close=True))
+
+    if want_html:
+        from .pathway_map_html import write_pathway_map_html
+
+        written.append(
+            write_pathway_map_html(
+                view, layout, regions, title, caption, Path(stem).with_suffix(".html"),
+                scene=scene,
+                extra_fusion=extra_fusion,
+                signed_modules=signed_modules,
+                top_rank=top_rank,
+                mode=mode,
+                style=style,
+                color_mode=color_mode,
+                strip_mode=strip_mode,
+                omics_edge_color=omics_edge_color,
+                members=members,
+                samples=samples,
+                sample_contrasts=sample_contrasts,
+                tissue=tissue,
+                contrast_id=contrast_id,
+                source=source,
+            )
         )
-        legend_plan = _pub_legend_plan(
-            vw, caption, folded_regions, panel_note,
-            font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode,
-            strip_mode=strip_mode, omics_edge_color=omics_edge_color,
-        )
-        pub_footer = legend_plan["footer_h"]
-        fig_h = fig_w * ((vh + header_h + pub_footer) / (vw + 1.0))
-        x_lim = (vx0 - 0.5, vx1 + 0.5)
-        y_lim = (vy1 + pub_footer + 0.5, vy0 - header_h)
-        y_base = vy0
-        bounds = (vx0, vy0, vx1, vy1)
-    else:
-        active_regions = set(layout.regions)
-        folded_regions = []
-        reactions = all_reactions
-        aggs = all_aggs
-        active_aggs = set(aggs["element_id"])
-        active_species = set(layout.nodes)
-        active_node_positions = None
-        comp_boxes = _compute_clipped_compartments(layout, active_regions, None, active_aggs, mode="atlas")
-        geometries = {fid: _edge_geometry(layout, fid, metro=metro) for fid in reactions["element_id"]}
-        font_scale = 1.0
-        unit_in = UNIT
-        total_w = layout.width + SIDEBAR
-        total_h = layout.height + FOOTER
-        header_view = view
-        header_h, hdr_stacked, hdr_title_fs, hdr_pill_fs = HEADER, False, 8.4, 4.15
-        legend_plan = None
-        fig_w = total_w * UNIT
-        fig_h = (total_h + header_h) * UNIT
-        x_lim = (-0.5, total_w + 0.5)
-        y_lim = (total_h + 0.5, -header_h)
-        y_base = 0.0
-        bounds = (0.0, 0.0, layout.width, layout.height)
 
-    with themed(preset=style, dpi=150, save_dpi=300):
-        fig = plt.figure(figsize=(fig_w, fig_h), facecolor=palette.surface)
-        ax = fig.add_axes([0, 0, 1, 1], facecolor=palette.surface)
-        ax.set_xlim(*x_lim)
-        ax.set_ylim(*y_lim)
-        ax.set_aspect("equal")
-        ax.axis("off")
-
-        _draw_header(
-            ax, title, header_view,
-            x_lim[0] + 0.5, x_lim[1] - 0.5,
-            y_base=y_base, palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
-            stacked=hdr_stacked, title_fs=hdr_title_fs, pill_fs=hdr_pill_fs,
-        )
-        _draw_regions_and_compartments(
-            ax, layout, active_regions,
-            palette=palette, font_scale=font_scale, metro=metro, color_mode=color_mode, comp_boxes=comp_boxes,
-        )
-
-        group_indices = _flux_group_indices(reactions)
-        # 仅当同一 flux_group 至少有 2 条方向性边时才画轨道包络（单边无需耦合轨道）
-        grp_counts: dict[int, int] = {}
-        for _, r in reactions.iterrows():
-            if r["flux_group"] and r["F_state"] in ("changed", "suggestive"):
-                gi = group_indices.get(str(r["flux_group"]).strip())
-                if gi is not None:
-                    grp_counts[gi] = grp_counts.get(gi, 0) + 1
-        multi_groups = {gi for gi, cnt in grp_counts.items() if cnt >= 2}
-
-        node_labels = _node_label_placements(layout, geometries, bounds, font_scale=font_scale, unit_in=unit_in)
-        positions = _place_strips(
-            reactions, layout, geometries, node_labels, group_indices,
-            active_species=active_species, active_aggs=active_aggs, active_regions=active_regions,
-            bounds=bounds, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
-            metro=metro, comp_boxes=comp_boxes,
-        )
-
-        draw_order = (
-            reactions["draw_style"].map({"not_assessed": 0, "omics_only": 1, "flux": 2}).fillna(0)
-            + reactions["key"].eq("l1").astype(int)
-            + reactions["value"].notna().astype(int) * 2
-            + reactions["key"].eq("key").astype(int) * 2
-        )
-        for _, row in reactions.assign(_z=draw_order).sort_values("_z", kind="stable").iterrows():
-            gi = group_indices.get(str(row["flux_group"]).strip()) if (row["flux_group"] and row["F_state"] in ("changed", "suggestive")) else None
-            _draw_edge(
-                ax, row, geometries[row["element_id"]],
-                palette=palette, cmap=cmap, layout=layout,
-                is_coupled_member=(gi in multi_groups),
-                font_scale=font_scale, metro=metro, color_mode=color_mode,
-                omics_edge_color=omics_edge_color, unit_in=unit_in,
-            )
-
-        for _, row in aggs.iterrows():
-            _draw_aggregate(
-                ax, layout, row, palette=palette, cmap=cmap, preset=style,
-                strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
-            )
-
-        for species in layout.nodes:
-            if species not in active_species:
-                continue
-            _draw_node(
-                ax, layout, species,
-                nodes_df.loc[species] if species in nodes_df.index else None,
-                node_labels, palette=palette, cmap=cmap, font_scale=font_scale,
-                unit_in=unit_in, active_positions=active_node_positions, metro=metro,
-            )
-
-        for _, row in reactions.iterrows():
-            _draw_leader(
-                ax, geometries[row["element_id"]]["hub"], positions[row["element_id"]], row, group_indices,
-                palette=palette, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
-            )
-            _draw_strip(
-                ax, positions[row["element_id"]], row, group_indices,
-                palette=palette, preset=style, top_rank=top_rank, mode=mode,
-                strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
-            )
-
-        if mode == "atlas":
-            _sidebar(
-                ax, regions, layout, layout.width + 2.4, 1.0,
-                palette=palette, extra_fusion=extra_fusion, signed_modules=signed_modules,
-            )
-            _legend_atlas(
-                ax, layout.height + 1.8, layout.width + SIDEBAR, caption,
-                palette=palette, cmap=cmap, preset=style, metro=metro,
-                color_mode=color_mode, strip_mode=strip_mode,
-                omics_edge_color=omics_edge_color, unit_in=unit_in,
-            )
-        else:
-            _legend_publication(
-                ax, vx0, vy1 + 1.6, vw, legend_plan,
-                palette=palette, cmap=cmap, preset=style, font_scale=font_scale, unit_in=unit_in,
-            )
-
-        return save_stem(fig, stem, formats=tuple(formats), dpi=300, facecolor=palette.surface, close=True)
+    return written

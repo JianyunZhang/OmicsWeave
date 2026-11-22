@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>node_missing</title>
+  <desc>斜线节点，表示未测或缺测，具体状态由图例注明</desc>
+  <path d="M 16 6 C 21.523 6 26 10.477 26 16 C 26 21.523 21.523 26 16 26 C 10.477 26 6 21.523 6 16 C 6 10.477 10.477 6 16 6 Z" fill="#DDDCD2" stroke="#5C6063" stroke-width="1.75" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M 6 26 L 26 6" fill="none" stroke="#5C6063" stroke-width="1.85" stroke-linecap="square" stroke-linejoin="miter"/>
+</svg>

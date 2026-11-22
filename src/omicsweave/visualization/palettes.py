@@ -211,19 +211,71 @@ SLIDE_DARK = SemanticPalette(
     categorical=("#38BDF8", "#FB923C", "#34D399", "#A78BFA", "#F472B6", "#A3E635", "#FBBF24", "#9CA3AF"),
 )
 
+# 《经济学人》（The Economist Design System）经典编辑部配色：
+# - 淡黄偏灰纸张底色 (#EBEBDF)，卡片内衬更浅暖纸 (#F3F2E8)；
+# - 经济学人红 (#E3120B) 专用于实验组 / 上调主焦点与左上角编辑部红标；
+# - 深蓝/青色 (#006BA2 / #1F4E9E / #3EBCD2) 用于对照组 / 下调对比通道；
+# - London 暖灰渐变阶 (#5C6063 -> #8F9498 -> #C6C7BF) 承接背景、非对比组与结构线条。
+ECONOMIST_RED = "#E3120B"
+
+ECONOMIST = SemanticPalette(
+    name="economist",
+    surface="#EBEBDF",
+    card_bg="#F3F2E8",
+    card_edge="#C9C8BE",
+    ink="#121212",
+    ink2="#3D3E3B",
+    muted="#6D6E6A",
+    hairline="#CECEC4",
+    up="#E3120B",
+    down="#006BA2",
+    neutral="#8F9396",
+    diverging_stops=("#004A73", "#006BA2", "#7CB5D2", "#ECEBE2", "#F5A38C", "#E84A3C", "#A80D08"),
+    numerator="#E3120B",
+    denominator="#006BA2",
+    edge_grey="#6D7175",
+    omics_grey="#9B9E9F",
+    faint="#CDCDC4",
+    missing_fill="#E4E3D7",
+    missing_hatch="#C4C3B9",
+    coupled_track="#D8E5EE",
+    coupled_fill="#E7EFF4",
+    coupled_edge="#1F4E9E",
+    coupled_ink="#16356B",
+    sign_change_bg="#FBF3E0",
+    sign_change_edge="#B86B11",
+    sign_change_ink="#7A4406",
+    mito_face="#E3E1D3",
+    mito_edge="#7E7D74",
+    mito_inner="#C4C3B6",
+    mito_ink="#3E3D37",
+    perox_face="#E1E8E4",
+    perox_edge="#4C7A73",
+    perox_inner="#B9CEC8",
+    perox_ink="#26544E",
+    boundary_face="#E2E9EE",
+    boundary_edge="#4C7C9B",
+    boundary_ink="#164561",
+    store_face="#E5E3D8",
+    store_edge="#8C8B82",
+    store_ink="#3F3E38",
+    categorical=("#E3120B", "#006BA2", "#3EBCD2", "#5C6063", "#F07A65", "#8F9498", "#1F4E9E", "#B6B8B3"),
+)
+
 PALETTES: dict[str, SemanticPalette] = {
-    "nature_editorial": NATURE_EDITORIAL,
     "metro_atlas": METRO_ATLAS,
+    "economist": ECONOMIST,
+    "nature_editorial": NATURE_EDITORIAL,
     "slide_dark": SLIDE_DARK,
     "poster_editorial": NATURE_EDITORIAL,
 }
 
-# 默认全局常量（对应 nature_editorial，供所有模块统一导入）
+# 默认全局常量（对应 metro_atlas 学术出版色板，供所有模块统一导入）
 DIRECTIONAL: dict[str, str] = {
-    "up": NATURE_EDITORIAL.up,
-    "down": NATURE_EDITORIAL.down,
-    "ns": "#BDBDBD",
-    "neutral": NATURE_EDITORIAL.neutral,
+    "up": METRO_ATLAS.up,
+    "down": METRO_ATLAS.down,
+    "ns": "#CBD5E1",
+    "neutral": METRO_ATLAS.neutral,
 }
 
 # 证据等级无彩色材质令牌（彻底剥离色相冲突）
@@ -300,26 +352,63 @@ TIER_TOKENS_DARK: dict[str, dict[str, object]] = {
     },
 }
 
-# 色盲安全的多组学证据等级色板（替换旧版 scoring_plots 的红绿配色）
+# 经济学人暖纸底无彩色证据等级令牌（高对比炭黑/石板灰/暖纸框）
+TIER_TOKENS_ECONOMIST: dict[str, dict[str, object]] = {
+    "L3": {
+        "dots": 3,
+        "bg": "#121212",
+        "ec": "#121212",
+        "fg": "#F3F2E8",
+        "dot_on": "#F3F2E8",
+        "dot_off": "#5C6063",
+        "lw": 0.60,
+        "ls": "-",
+        "label": "Confirmed Flux",
+    },
+    "L2": {
+        "dots": 2,
+        "bg": "#4A4E52",
+        "ec": "#4A4E52",
+        "fg": "#F3F2E8",
+        "dot_on": "#F3F2E8",
+        "dot_off": "#8F9498",
+        "lw": 0.60,
+        "ls": "-",
+        "label": "Flux-Supported",
+    },
+    "L1": {
+        "dots": 1,
+        "bg": "#F3F2E8",
+        "ec": "#5C6063",
+        "fg": "#2A2B29",
+        "dot_on": "#2A2B29",
+        "dot_off": "#C4C4BC",
+        "lw": 0.65,
+        "ls": (0, (2.0, 1.0)),
+        "label": "Enzyme-Predicted",
+    },
+}
+
+# 色盲安全的多组学证据等级色板（经济学人深青/蓝/红/暖灰调和，无红绿撞色）
 EVIDENCE_GRADE_COLORS: dict[str, str] = {
-    "Replicated": "#0F5C6E",
-    "Convergent": "#2A8C96",
-    "Single-layer": "#7EC4C8",
-    "Exploratory": "#E6A266",
-    "Conflicting": "#C83E37",
-    "Omics-concordant": "#2166AC",
-    "Omics-single-layer": "#6BAED6",
-    "Omics-discordant": "#D95F02",
-    "No-signal": "#D1D5DB",
-    "Not-assessable": "#ECEFF3",
+    "Replicated": "#005582",
+    "Convergent": "#007BA7",
+    "Single-layer": "#5DA8C4",
+    "Exploratory": "#E8876F",
+    "Conflicting": "#E3120B",
+    "Omics-concordant": "#1F4E9E",
+    "Omics-single-layer": "#6BA5CC",
+    "Omics-discordant": "#C84B31",
+    "No-signal": "#C6C7BF",
+    "Not-assessable": "#E2E1D6",
 }
 
 # 示踪剂可辨识性单色序列（清晰区分 4 档）
 IDENTIFIABILITY_COLORS: dict[str, str] = {
-    "well_constrained": "#1B4F8A",
-    "moderate": "#4A89C7",
-    "poorly_constrained": "#B9D4EE",
-    "bound_pinned": "#E5E7EB",
+    "well_constrained": "#004A73",
+    "moderate": "#006BA2",
+    "poorly_constrained": "#7CB5D2",
+    "bound_pinned": "#DCDCD1",
 }
 
 # 地铁模式（metro_atlas）颜色语义开关：
@@ -389,16 +478,20 @@ DEFAULT_VMAX = 2.0
 DEFAULT_NORM = Normalize(-DEFAULT_VMAX, DEFAULT_VMAX, clip=True)
 
 
-def get_palette(name: str = "nature_editorial") -> SemanticPalette:
+def get_palette(name: str = "metro_atlas") -> SemanticPalette:
     """按预设名返回对应的语义配色对象；未知名称抛出 ValueError。"""
     if name not in PALETTES:
         raise ValueError(f"未知的配色预设 {name!r}（可用：{', '.join(PALETTES)}）")
     return PALETTES[name]
 
 
-def tier_tokens(preset: str = "nature_editorial") -> dict[str, dict[str, object]]:
-    """按背景明暗返回无彩色证据等级令牌。"""
-    return TIER_TOKENS_DARK if preset == "slide_dark" else TIER_TOKENS
+def tier_tokens(preset: str = "metro_atlas") -> dict[str, dict[str, object]]:
+    """按预设返回无彩色证据等级令牌。"""
+    if preset == "slide_dark":
+        return TIER_TOKENS_DARK
+    if preset == "economist":
+        return TIER_TOKENS_ECONOMIST
+    return TIER_TOKENS
 
 
 def tint_color(hex_color: str, amount: float = 0.08, *, base: str = "#FFFFFF") -> tuple[float, float, float]:

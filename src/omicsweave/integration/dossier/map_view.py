@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from omicsweave.core.idmap.reaction_pathway_mapping import REACTION_REGISTRY
+from omicsweave.mfa.tracers import format_tracer_display
 
 from ..mappings.network_annotation import NetworkReaction, pathway_reactions
 from ..mappings.network_layout import Layout, unplaced_ids
@@ -36,7 +37,8 @@ from .view import _enzyme_value, _plain_value, node_members, summarize
 AXES = ("flux", "capacity", "regulation", "pool")
 POINTING = ("changed", "suggestive")
 MAP_COLUMNS = ["tissue", "contrast_id", "element_type", "element_id", "region", "label", "draw_style", "reversible",
-               "physio_sign", "sign_change", "flux_group", "kegg_pathway", "kegg_reaction", "ec_number",
+               "physio_sign", "sign_change", "flux_group", "flux_tracers", "flux_pooling_mode",
+               "kegg_pathway", "kegg_reaction", "ec_number",
                "F_state", "F_direction", "C_state", "C_direction", "R_state", "R_direction", "M_state", "M_direction",
                "flux_claim", "claim_direction", "n_concordant_axes", "rank", "key",
                "value", "certainty", "display_state", "ring", "n_changed", "n_quantified",
@@ -71,6 +73,41 @@ def _flux_group(flux_rows: pd.DataFrame) -> str:
             if str(flag).startswith("flux_group:"):
                 return str(flag).split(":", 1)[1]
     return ""
+
+
+def _flux_tracer_provenance(flux_rows: pd.DataFrame, f_state: str) -> tuple[str, str]:
+    """返回该反应 MFA 通量实际贡献的规范同位素示踪剂及合并模式 ``(flux_tracers, flux_pooling_mode)``。
+
+    - ``flux_tracers``：分号分隔的规范同位素名（如 ``U-13C-glucose`` 或 ``U-13C-glucose;U-13C-alanine``），
+      仅包含通过可辨识性门控且样本量足够的示踪剂（剔除 ``not_identifiable`` / ``insufficient_n`` / ``not_infused`` / ``not_measured``）；
+    - ``flux_pooling_mode``：``multi_tracer_conflict``（F 轴为 mixed）、``multi_tracer_pooled``（≥2 种示踪剂逆方差合并）、
+      ``single_tracer``（仅 1 种示踪剂可辨识，pooled 等于该单示踪剂）、``unconstrained``（有输注但均不可辨识或低 n）或 ``""``。
+    """
+    if flux_rows.empty:
+        return "", ""
+    non_pool = flux_rows[flux_rows["tracer"].astype(str).str.lower() != "pooled"]
+    measured = non_pool[~non_pool["cell_state"].astype(str).isin(["not_infused", "not_measured"])]
+    ident = measured[~measured["cell_state"].astype(str).isin(["not_identifiable", "insufficient_n"])]
+    if not ident.empty:
+        # 优先按可辨识性（well_constrained > moderate）和效应量排序，保持展示顺序稳定
+        rank_id = {"well_constrained": 0, "moderate": 1}
+        ordered = ident.assign(
+            _r=ident["identifiability"].astype(str).map(rank_id).fillna(5),
+            _g=pd.to_numeric(ident.get("effect"), errors="coerce").abs().fillna(-1.0),
+        ).sort_values(["_r", "_g", "tracer"], ascending=[True, False, True], kind="stable")
+        names = list(dict.fromkeys(format_tracer_display(str(t)) for t in ordered["tracer"] if str(t).strip()))
+        joined = ";".join(names)
+        if f_state == "mixed":
+            return joined, "multi_tracer_conflict"
+        if len(names) >= 2:
+            return joined, "multi_tracer_pooled"
+        return joined, "single_tracer"
+    pooled = flux_rows[flux_rows["tracer"].astype(str).str.lower() == "pooled"]
+    if not pooled.empty and str(pooled["cell_state"].iloc[0]) not in ("not_measured", "not_infused", "not_identifiable", "insufficient_n"):
+        return "Pooled (IVW)", "multi_tracer_pooled"
+    if not measured.empty or not pooled.empty:
+        return "", "unconstrained"
+    return "", ""
 
 
 def _registry(flux_id: str) -> dict[str, Any]:
@@ -239,6 +276,7 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
         physio, change = physiological_sign(flux_rows) if has_flux else (0, False)
         ax = _axis(here_axes, flux_id)
         f_state, f_dir, f_effect, f_rule = ax["flux"]
+        f_tracers, f_pool_mode = _flux_tracer_provenance(flux_rows, f_state) if has_flux else ("", "")
         f_phys = f_dir * physio if physio else f_dir
         value = abs(f_effect) * f_phys if f_state in POINTING and pd.notna(f_effect) else np.nan
         m_dir = ax["pool"][1] * physio if physio else ax["pool"][1]
@@ -250,6 +288,7 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
         records.append({"tissue": tissue, "contrast_id": contrast, "element_type": "reaction", "element_id": flux_id,
                         "region": edge.region, "label": flux_id, "draw_style": style, "reversible": reaction.reversible,
                         "physio_sign": physio, "sign_change": change, "flux_group": _flux_group(flux_rows),
+                        "flux_tracers": f_tracers, "flux_pooling_mode": f_pool_mode,
                         **_registry(flux_id),
                         "F_state": f_state, "F_direction": f_phys, "C_state": ax["capacity"][0],
                         "C_direction": ax["capacity"][1], "R_state": ax["regulation"][0],

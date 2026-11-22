@@ -18,7 +18,9 @@ from omicsweave.visualization.figures import (
     save_stem,
 )
 from omicsweave.visualization.palettes import (
+    ECONOMIST,
     EVIDENCE_GRADE_COLORS,
+    METRO_ATLAS,
     NATURE_EDITORIAL,
     get_palette,
     tier_tokens,
@@ -34,14 +36,35 @@ from omicsweave.visualization.theme import (
 
 
 class ThemePresetsTest(unittest.TestCase):
-    def test_default_preset_is_nature_editorial(self) -> None:
-        self.assertEqual(DEFAULT_PRESET, "nature_editorial")
-        self.assertEqual(set(list_presets()), {"nature_editorial", "metro_atlas", "slide_dark", "poster_editorial"})
+    def test_default_preset_is_metro_atlas_and_economist_available(self) -> None:
+        self.assertEqual(DEFAULT_PRESET, "metro_atlas")
+        self.assertEqual(
+            set(list_presets()),
+            {"economist", "nature_editorial", "metro_atlas", "slide_dark", "poster_editorial"},
+        )
         preset = get_preset()
+        self.assertEqual(preset.name, "metro_atlas")
         self.assertEqual(preset.palette.surface, "#FFFFFF")
+        self.assertEqual(preset.palette.up, METRO_ATLAS.up)
+        self.assertEqual(preset.palette.down, METRO_ATLAS.down)
         self.assertFalse(preset.rc["axes.spines.top"])
         self.assertFalse(preset.rc["axes.spines.right"])
         self.assertFalse(preset.rc["axes.grid"])
+
+        econ = get_preset("economist")
+        self.assertEqual(econ.palette.surface, "#EBEBDF")
+        self.assertEqual(econ.palette.up, "#E3120B")
+        self.assertEqual(econ.palette.down, "#006BA2")
+        self.assertEqual(econ.palette.numerator, "#E3120B")
+        self.assertEqual(econ.palette.denominator, "#006BA2")
+        self.assertFalse(econ.rc["axes.spines.left"])
+        self.assertTrue(econ.rc["axes.spines.bottom"])
+        self.assertTrue(econ.rc["axes.grid"])
+        self.assertEqual(econ.rc["axes.grid.axis"], "y")
+
+        nat = get_preset("nature_editorial")
+        self.assertEqual(nat.palette.surface, "#FFFFFF")
+        self.assertFalse(nat.rc["axes.grid"])
         with self.assertRaises(ValueError):
             get_preset("unknown_style")
 
@@ -68,22 +91,33 @@ class ThemePresetsTest(unittest.TestCase):
             self.assertTrue(plt.rcParams["axes.grid"])
             self.assertEqual(plt.rcParams["axes.grid.axis"], "y")
             self.assertEqual(plt.rcParams["axes.titlelocation"], "left")
+        with themed(preset="nature_editorial"):
+            self.assertFalse(plt.rcParams["axes.grid"])
+        with themed(preset="economist"):
+            self.assertTrue(plt.rcParams["axes.grid"])
+            self.assertEqual(plt.rcParams["figure.facecolor"], ECONOMIST.surface)
         with themed():
             self.assertFalse(plt.rcParams["axes.grid"])
+            self.assertEqual(plt.rcParams["figure.facecolor"], METRO_ATLAS.surface)
 
     def test_monochrome_tier_tokens_and_colorblind_safe_grades(self) -> None:
+        tok_econ = tier_tokens("economist")
         tok_light = tier_tokens("nature_editorial")
         tok_dark = tier_tokens("slide_dark")
+        self.assertEqual([tok_econ[k]["dots"] for k in ("L3", "L2", "L1")], [3, 2, 1])
         self.assertEqual([tok_light[k]["dots"] for k in ("L3", "L2", "L1")], [3, 2, 1])
         self.assertEqual([tok_dark[k]["dots"] for k in ("L3", "L2", "L1")], [3, 2, 1])
         # 证据等级不包含高饱和红/蓝方向色，避免色相冲突
         for k in ("L3", "L2", "L1"):
+            self.assertNotIn(tok_econ[k]["bg"], (ECONOMIST.up, ECONOMIST.down))
             self.assertNotIn(tok_light[k]["bg"], (NATURE_EDITORIAL.up, NATURE_EDITORIAL.down))
         # scoring_plots 不再使用红绿对比色 (#1B7837)
         self.assertNotEqual(EVIDENCE_GRADE_COLORS["Replicated"], "#1B7837")
+        self.assertEqual(get_palette().up, METRO_ATLAS.up)
+        self.assertEqual(get_palette("economist").up, ECONOMIST.up)
         self.assertEqual(get_palette("nature_editorial").up, NATURE_EDITORIAL.up)
         self.assertEqual(get_palette("poster_editorial"), get_preset("poster_editorial").palette)
-        self.assertEqual(len(tint_color("#2166AC", 0.1)), 3)
+        self.assertEqual(len(tint_color("#006BA2", 0.1)), 3)
 
     def test_journal_figsize_and_deterministic_save_stem(self) -> None:
         w1, h1 = journal_figsize(1, aspect=0.8)

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>glucose</title>
+  <desc>葡萄糖或糖代谢枢纽</desc>
+  <path d="M 16 3 L 27 9 L 27 23 L 16 29 L 5 23 L 5 9 Z" fill="#F3F2E8" stroke="#121212" stroke-width="1.9" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M 16 9 L 22 12.5 L 22 19.5 L 16 23 L 10 19.5 L 10 12.5 Z" fill="#DDDCD2"/>
+  <path d="M 13 16 C 13 12.5 19 12.5 19 16 C 19 19.5 13 19.5 13 16 Z" fill="#E3120B"/>
+</svg>

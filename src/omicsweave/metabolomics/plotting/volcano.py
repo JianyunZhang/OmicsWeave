@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from omicsweave.visualization.palettes import NATURE_EDITORIAL
+from omicsweave.visualization.palettes import METRO_ATLAS
 
 from . import _config  # noqa: F401
 
@@ -43,9 +43,9 @@ def plot_volcano(
         print(f"    跳过火山图 {comp_name}: 缺少列 {p_col} 或 {fc_col}")
         return
 
-    c_up = (colors or {}).get("volcano_up", NATURE_EDITORIAL.up)
-    c_down = (colors or {}).get("volcano_down", NATURE_EDITORIAL.down)
-    c_ns = (colors or {}).get("volcano_ns", NATURE_EDITORIAL.faint)
+    c_up = (colors or {}).get("volcano_up", METRO_ATLAS.up)
+    c_down = (colors or {}).get("volcano_down", METRO_ATLAS.down)
+    c_ns = (colors or {}).get("volcano_ns", METRO_ATLAS.faint)
 
     x = df[fc_col]
     significance_metric = fdr_col if fdr_col in df.columns else p_col

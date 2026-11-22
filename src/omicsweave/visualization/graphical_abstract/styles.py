@@ -33,6 +33,8 @@ from ..metro import (
     sample_polyline_at,
 )
 from ..palettes import (
+    ECONOMIST,
+    ECONOMIST_RED,
     METRO_ATLAS,
     NATURE_EDITORIAL,
     VALID_COLOR_MODES,
@@ -40,6 +42,7 @@ from ..palettes import (
     tint_color,
 )
 from ..primitives import (
+    draw_economist_masthead,
     draw_quad_arrow,
     draw_stealth_head,
     draw_tier_badge,
@@ -128,7 +131,8 @@ def _draw_ga_bottom_panels(
 ) -> None:
     """绘制所有 Graphical Abstract 共用的量化细则与徽章图例卡 + Takeaway + Provenance。"""
     W, H = spec.canvas
-    pal = METRO_ATLAS if metro_mode else NATURE_EDITORIAL
+    is_econ = preset == "economist"
+    pal = ECONOMIST if is_econ else (METRO_ATLAS if metro_mode else NATURE_EDITORIAL)
     foot_y = H + 2.0
 
     # 1. 徽章、Linked flux 与聚合量化细则图例卡
@@ -136,6 +140,9 @@ def _draw_ga_bottom_panels(
     legend_h = (3.8 + len(rules_lines) * 2.15 + 0.6) if rules_lines else 4.2
     if pixel_mode:
         ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, legend_h, facecolor=card_bg, edgecolor=ink, lw=1.2, zorder=2))
+    elif is_econ:
+        ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, legend_h, facecolor=card_bg, edgecolor=card_edge, lw=0.65, zorder=2))
+        ax.plot([2.2, W - 2.2], [foot_y, foot_y], color=ink, lw=0.95, solid_capstyle="butt", zorder=2.2)
     else:
         ax.add_patch(FancyBboxPatch(
             (2.2, foot_y), W - 4.4, legend_h,
@@ -165,9 +172,9 @@ def _draw_ga_bottom_panels(
         ax.text(cx + bw + 0.75, ry, desc, fontsize=lbl_fs, color=ink2, ha="left", va="center", zorder=3.2)
         cx += bw + 0.75 + estimate_text_width(desc, lbl_fs, unit_in) + 2.5
 
-    # Indigo linked-flux conduit sample (with exact |r| criterion)
+    # Indigo linked-flux conduit sample (explicitly clarifying shared 1 DOF, NOT extra confidence)
     seg_w = 4.2
-    linked_txt = "Linked flux (|r| ≥ 1−1e-6; 1 BH test)"
+    linked_txt = "Linked flux (|r|≥1−1e-6; 1 BH DOF, not extra conf.)"
     if cx + seg_w + 1.0 + estimate_text_width(linked_txt, lbl_fs, unit_in) <= W - 3.6:
         if metro_mode:
             draw_metro_coupled_halo(
@@ -204,6 +211,9 @@ def _draw_ga_bottom_panels(
     if spec.takeaway:
         if pixel_mode:
             ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, 5.0, facecolor=card_bg, edgecolor=ink, lw=1.3, zorder=2))
+        elif is_econ:
+            ax.add_patch(Rectangle((2.2, foot_y), W - 4.4, 5.0, facecolor=card_bg, edgecolor=card_edge, lw=0.65, zorder=2))
+            ax.add_patch(Rectangle((2.2, foot_y), 0.75, 5.0, facecolor=ECONOMIST_RED, edgecolor="none", zorder=2.3))
         else:
             ax.add_patch(FancyBboxPatch(
                 (2.2, foot_y), W - 4.4, 5.0,
@@ -1098,7 +1108,162 @@ def render_metro_atlas(
     _draw_metro_header_and_footer(ax, spec, pal=pal, color_mode=color_mode, unit_in=unit_in)
 
 
+# ---------------------------------------------------------------------------
+# 皮肤 5：economist（《经济学人》编辑部几何图表风 — 默认主风格）
+# ---------------------------------------------------------------------------
+
+def render_economist(ax, spec: AbstractSpec, *, color_mode: str = "semantic", unit_in: float = 0.062) -> None:
+    """《经济学人》编辑部视觉风格的 Graphical Abstract（暖灰黄纸底、红标页眉、锐利方卡与红/蓝/灰克制语义）。"""
+    pal = ECONOMIST
+    W, _H = spec.canvas
+    ax.set_facecolor(pal.surface)
+
+    # 1. 标志性左上角红标与编辑部页眉
+    draw_economist_masthead(
+        ax, 2.2, -10.5, W - 4.4, tag_w=8.8, tag_h=1.45,
+        color=ECONOMIST_RED, rule_color="#B8B8AF", y_up=False, zorder=8.0,
+    )
+    ax.text(2.2, -6.9, spec.title, fontsize=11.4, fontweight="bold", color=pal.ink, ha="left", va="center")
+    if spec.subtitle:
+        ax.text(2.2, -3.1, spec.subtitle, fontsize=7.3, color=pal.ink2, ha="left", va="center")
+
+    # 右上角编辑部极简方向图例
+    lx = W - 2.4
+    for label, col, shape in reversed([
+        ("Up (Flux)", pal.up, "up"),
+        ("Down", pal.down, "down"),
+        ("Enz-pred", pal.up, "hollow"),
+        ("Stable", pal.edge_grey, "flat"),
+    ]):
+        tw = len(label) * 1.05 + 3.8
+        lx -= tw
+        if shape == "up":
+            ax.add_patch(Polygon([(lx + 1.0, -7.2), (lx + 1.9, -5.6), (lx + 0.1, -5.6)], closed=True,
+                                 facecolor=col, edgecolor="none", zorder=5))
+        elif shape == "down":
+            ax.add_patch(Polygon([(lx + 1.0, -5.6), (lx + 1.9, -7.2), (lx + 0.1, -7.2)], closed=True,
+                                 facecolor=col, edgecolor="none", zorder=5))
+        elif shape == "hollow":
+            soft_up = tint_color(pal.up, 0.65, base=pal.card_bg)
+            draw_metro_track(
+                ax, [(lx - 0.15, -6.4), (lx + 2.15, -6.4)], soft_up,
+                width=2.1, hollow=True, surface=pal.card_bg, chevrons=False, halo=False, zorder=5.0,
+            )
+        else:
+            ax.add_line(Line2D([lx + 0.1, lx + 2.1], [-6.4, -6.4], color=col, lw=1.8, zorder=5))
+        ax.text(lx + 2.85, -6.4, label, fontsize=6.2, color=pal.ink2, ha="left", va="center")
+        lx -= 1.2
+    ax.plot([2.2, W - 2.2], [-1.0, -1.0], color=pal.ink, lw=0.95, solid_capstyle="butt", zorder=2)
+
+    # 2. 区室容器（方角锐利编辑部面板 + 顶部细黑线）
+    for comp in spec.compartments:
+        x0, y0, x1, y1 = comp.box
+        if comp.kind == "blood":
+            face, edge, ink = pal.boundary_face, pal.boundary_edge, pal.boundary_ink
+        else:
+            face, edge, ink = pal.mito_face, pal.mito_edge, pal.mito_ink
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, facecolor=face, edgecolor=pal.card_edge, lw=0.65, zorder=0.5))
+        ax.plot([x0, x1], [y0, y0], color=edge, lw=1.25, solid_capstyle="butt", zorder=0.7)
+        if comp.kind == "mitochondria":
+            ax.add_patch(Rectangle(
+                (x0 + 0.8, y0 + 0.8), (x1 - x0) - 1.6, (y1 - y0) - 1.6,
+                facecolor="none", edgecolor=pal.mito_inner, lw=0.55, linestyle=(0, (3.0, 2.0)), zorder=0.6,
+            ))
+            ax.text(x0 + 1.6, y1 - 2.0, comp.label.upper(), fontsize=6.4, fontweight="bold", color=ink,
+                    ha="left", va="center", zorder=0.9)
+        else:
+            ax.text(x0 + 1.6, y0 + 2.0, comp.label.upper(), fontsize=6.4, fontweight="bold", color=ink,
+                    ha="left", va="center", zorder=0.9)
+
+    hub_by_id = {h.id: h for h in spec.hubs}
+
+    # 3. 轨道流向（正交 Metro 路线 + Economist 红/蓝/柔色空心/石板灰）
+    for fl in spec.flows:
+        sh, dh = hub_by_id[fl.source], hub_by_id[fl.target]
+        p0, p1 = sh.xy, dh.xy
+        raw_pts = route_octilinear(p0, p1, bend=fl.curve * 0.45)
+        pts = fillet_polyline(raw_pts, radius=2.0)
+        t0 = _box_exit_trim(pts[1][0] - p0[0], pts[1][1] - p0[1], HUB_W / 2, HUB_H / 2, pad=0.65)
+        t1 = _box_exit_trim(p1[0] - pts[-2][0], p1[1] - pts[-2][1], HUB_W / 2, HUB_H / 2, pad=0.85)
+
+        strong = fl.evidence_tier in ("L3", "L2")
+        hollow = (fl.evidence_tier == "L1") and (fl.direction != 0)
+        base_col = _flow_color(fl.direction, fl.evidence_tier, pal.up, pal.down, pal.edge_grey)
+        if color_mode == "pathway" and fl.direction == 0:
+            base_col = pathway_family_color(sh.icon, fallback_accent=pal.edge_grey)
+        col = tint_color(base_col, 0.65, base=pal.card_bg) if hollow else base_col
+        width = 3.2 if strong else (2.4 if hollow else (2.0 if fl.direction else 1.35))
+
+        if fl.coupled:
+            from ..metro import trim_polyline as _trim_pl
+            draw_metro_coupled_halo(
+                ax, [_trim_pl(pts, t0, t1)], color=pal.coupled_track, edge_color=pal.coupled_edge,
+                width=7.4, zorder=1.8,
+            )
+
+        draw_metro_track(
+            ax, pts, col,
+            width=width, hollow=hollow, surface=pal.card_bg if hollow else pal.surface,
+            chevrons=True, chevron_spacing=18.0, chevron_direction=1,
+            unit_in=unit_in, trim0=t0, trim1=t1, corner_radius=0.0,
+            halo=True, zorder=3.2 if strong else (2.7 if hollow else 2.2),
+        )
+        if fl.label:
+            mid, _ = sample_polyline_at(pts, polyline_length(pts) * 0.5)
+            ax.text(
+                mid[0], mid[1] - 0.85, fl.label, fontsize=5.8, color=pal.ink2,
+                ha="center", va="center", zorder=4.2,
+                bbox=dict(boxstyle="square,pad=0.14", facecolor=pal.surface, edgecolor="none", alpha=0.92),
+            )
+
+    # 4. 锐利编辑部枢纽卡片（顶部粗色条 + Economist 几何矢量图标）
+    for hub in spec.hubs:
+        cx, cy = hub.xy
+        x0, y0 = cx - HUB_W / 2, cy - HUB_H / 2
+        col, _tint_bg, strong, dashed = _hub_border_and_tint(hub, pal.up, pal.down, pal.edge_grey, pal.card_bg)
+        card_face = pal.card_bg
+        card_ec = pal.ink if strong else (pal.ink2 if dashed else pal.card_edge)
+        ax.add_patch(Rectangle(
+            (x0, y0), HUB_W, HUB_H,
+            facecolor=card_face, edgecolor=card_ec,
+            lw=1.15 if strong else (0.90 if dashed else 0.65),
+            linestyle=(0, (3.0, 1.8)) if dashed else "-",
+            zorder=4.0,
+        ))
+        # 顶部经济学人粗语义色带（L2+ 实心高饱和；L1 柔色）
+        top_bar_col = tint_color(col, 0.65, base=pal.card_bg) if dashed else col
+        ax.add_patch(Rectangle(
+            (x0, y0), HUB_W, 1.05 if strong else 0.78,
+            facecolor=top_bar_col, edgecolor="none", zorder=4.25,
+        ))
+
+        draw_glyph(ax, hub.icon, (x0 + 3.4, cy + 0.35), style="economist", size=4.5, zorder=4.6)
+        lbl_fs = 6.9 if len(hub.label) <= 15 else (6.3 if len(hub.label) <= 18 else 5.8)
+        ax.text(x0 + 6.3, cy - 1.35, hub.label, fontsize=lbl_fs, fontweight="bold", color=pal.ink,
+                ha="left", va="center", zorder=4.8)
+        if hub.subtitle:
+            sub_col = pal.up if hub.direction > 0 else (pal.down if hub.direction < 0 else pal.muted)
+            ax.text(x0 + 6.4, cy + 1.55, hub.subtitle, fontsize=5.8, color=sub_col,
+                    fontweight="medium" if hub.direction else "normal",
+                    ha="left", va="center", zorder=4.8)
+        if hub.evidence_tier in ("L1", "L2", "L3"):
+            b_sc = 1.24
+            bw = tier_badge_width(hub.evidence_tier, scale=b_sc, unit_in=unit_in)
+            draw_tier_badge(
+                ax, x0 + HUB_W - bw - 0.5, y0 + HUB_H - 0.1, hub.evidence_tier,
+                zorder=5.2, scale=b_sc, preset="economist", unit_in=unit_in,
+            )
+
+    _draw_ga_bottom_panels(
+        ax, spec,
+        surface=pal.surface, ink=pal.ink, ink2=pal.ink2, muted=pal.muted,
+        card_bg=pal.card_bg, card_edge=pal.card_edge, up=pal.up,
+        preset="economist", unit_in=unit_in, pixel_mode=False, metro_mode=True,
+    )
+
+
 STYLE_RENDERERS: dict[str, Callable[..., None]] = {
+    "economist": render_economist,
     "nature_editorial": render_nature_editorial,
     "editorial_ink": render_editorial_ink,
     "pixel_abstract": render_pixel_abstract,
@@ -1109,6 +1274,7 @@ __all__ = [
     "GA_STYLES",
     "STYLE_RENDERERS",
     "ga_footer_height",
+    "render_economist",
     "render_editorial_ink",
     "render_metro_atlas",
     "render_nature_editorial",

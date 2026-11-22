@@ -20,6 +20,7 @@ from typing import Any
 import pandas as pd
 
 from omicsweave.contract.export import write_excel_tsv
+from omicsweave.mfa.tracers import format_tracer_display
 from omicsweave.visualization.graphical_abstract import GA_STYLES
 from omicsweave.visualization.palettes import VALID_COLOR_MODES
 from omicsweave.visualization.theme import list_presets
@@ -41,7 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "tissues": [],
     "contrasts": [],
     "highlight": {"min_claim": "L2", "top_rank": 10},
-    "formats": ["pdf", "png"],
+    "formats": ["pdf", "png", "html"],
     "mode": "atlas",
     "style": "metro_atlas",
     "color_mode": "semantic",
@@ -139,7 +140,8 @@ def _sample_sizes(rows: pd.DataFrame) -> str:
             parts.append(f"{label} {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
     flux = rows[(rows["layer"] == "mfa") & rows["n_numerator"].notna() & (rows["tracer"] != "pooled")]
     for tracer, part in flux.groupby("tracer"):
-        parts.append(f"MFA ({tracer}) {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
+        t_disp = format_tracer_display(str(tracer))
+        parts.append(f"MFA ({t_disp}) {int(part['n_numerator'].max())} vs {int(part['n_denominator'].max())}")
     return "; ".join(parts) or "N/A"
 
 
@@ -179,6 +181,10 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
     members = pd.read_parquet(tables / "dossier_members.parquet") if members is None else members
     axes = pd.read_parquet(tables / "axis_assessment.parquet") if axes is None else axes
     assessed = pd.read_parquet(tables / "reaction_assessment.parquet") if assessed is None else assessed
+    samples_path = tables / "dossier_samples.parquet"
+    samples = pd.read_parquet(samples_path) if samples_path.is_file() else None
+    sc_path = tables / "dossier_sample_contrasts.parquet"
+    sample_contrasts = pd.read_parquet(sc_path) if sc_path.is_file() else None
     if calibration is None:
         path = dossier_dir / "evaluation" / "assessment_calibration.parquet"
         calibration = pd.read_parquet(path) if path.is_file() else pd.DataFrame()
@@ -196,6 +202,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
     if conf["contrasts"]:
         pairs = pairs[pairs["contrast_id"].isin([str(c) for c in conf["contrasts"]])]
     formats = [str(f) for f in conf["formats"]]
+    static_formats = [f for f in formats if f.lstrip(".").lower() != "html"]
     unplaced = coverage[coverage["placement"] == "unplaced"]
     covered = coverage[coverage["placement"] == "covered_by_steps"]
     views = []
@@ -211,11 +218,15 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
         views.append(view)
         here = members[(members["tissue"] == row.tissue) & (members["contrast_id"] == row.contrast_id)
                        & (members["source"] == source)]
+        from .plotting.pathway_map_plots import _independent_flux_chains
         claims = view.loc[view["flux_claim"].isin(CLAIM_LEVELS), "flux_claim"].value_counts()
+        n_l23 = int(claims.get("L2", 0)) + int(claims.get("L3", 0))
+        n_indep = _independent_flux_chains(view)
+        indep_note = f" ({n_indep} indep. chains)" if (n_l23 > 0 and n_indep < n_l23) else ""
         caption = [
             f"Run: {run_text}  |  Sample sizes (num vs den): {_sample_sizes(here)}",
             (cal.caption(calibration, row.tissue, row.contrast_id) or "Calibration: not available")
-            + f"  |  On-map claims: Confirmed={claims.get('L3', 0)}, Flux={claims.get('L2', 0)}, Enz-pred={claims.get('L1', 0)}"
+            + f"  |  On-map claims: Multi-tracer={claims.get('L3', 0)}, Flux={claims.get('L2', 0)}{indep_note}, Enz-pred={claims.get('L1', 0)}"
             + "  (Enz-pred = enzyme-only; verify against decoy baseline before citing).",
             f"Layout: {layout.path.name} (sha256 {layout.sha256[:12]})  |  Unplaced assessed IDs: {len(unplaced)}"
             + (f" ({', '.join(unplaced['flux_id'][:6])}{', ...' if len(unplaced) > 6 else ''})" if len(unplaced) else "")
@@ -237,10 +248,16 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                          color_mode=str(conf["color_mode"]),
                          strip_mode=str(conf["strip_mode"]),
                          omics_edge_color=str(conf["omics_edge_color"]),
-                         focus_regions=list(conf["regions"]) or None)
+                         focus_regions=list(conf["regions"]) or None,
+                         members=members,
+                         samples=samples,
+                         sample_contrasts=sample_contrasts,
+                         tissue=str(row.tissue),
+                         contrast_id=str(row.contrast_id),
+                         source=str(source))
 
-        # 默认生成正文分专题代谢子通路图（沿用与图 E 相同的风格与色彩语义，无数据时自动跳过）
-        if sub_conf["enabled"]:
+        # 默认生成正文分专题代谢子通路图（沿用与图 E 相同的风格与色彩语义，无数据时自动跳过；静态格式）
+        if sub_conf["enabled"] and static_formats:
             selected_subs, skipped = select_submaps_for_view(
                 view, layout,
                 panels=list(sub_conf["panels"] or ()),
@@ -256,7 +273,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 sub_note = f"Sub-pathway panel ({sub.subtitle}) · Cross-pathway links attach at boundary stations; full network in Figure E Atlas."
                 plot_pathway_map(
                     view, layout, regions,
-                    sub_title, caption[:2], sub_stem, formats,
+                    sub_title, caption[:2], sub_stem, static_formats,
                     top_rank=int(conf["highlight"]["top_rank"]),
                     mode="publication",
                     style=str(conf["style"]),
@@ -273,8 +290,8 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 if reason != "optional_inactive":
                     skipped_submaps.append(f"{row.tissue}/{row.contrast_id}:{sid}({reason})")
 
-        # 默认同步生成小规模 Graphical Abstract（继承图 E 风格；slide_dark 回退到 metro_atlas）
-        if abs_conf["enabled"]:
+        # 默认同步生成小规模 Graphical Abstract（继承图 E 风格；slide_dark 回退到 economist）
+        if abs_conf["enabled"] and static_formats:
             from omicsweave.visualization.graphical_abstract import (
                 build_abstract_from_pathway_view,
                 render_graphical_abstract,
@@ -289,7 +306,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 provenance=f"Run: {run_text}  |  Style: {ga_style} ({ga_color_mode})  |  Auto-aggregated from Figure E view (<=10 hubs)",
             )
             ga_stem = stem.parent / f"abstract_{row.contrast_id}"
-            render_graphical_abstract(ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode, formats=formats)
+            render_graphical_abstract(ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode, formats=static_formats)
             n_abstracts_rendered += 1
 
     (out_dir / "tables").mkdir(parents=True, exist_ok=True)
