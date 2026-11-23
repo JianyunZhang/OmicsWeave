@@ -28,6 +28,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
+from .journal import DEFAULT_JOURNAL_PROFILE, JournalProfile, get_journal_profile
 from .palettes import ECONOMIST_RED, PALETTES, SemanticPalette, get_palette
 
 LATIN_FONTS = ("Arial", "Helvetica", "Liberation Sans", "DejaVu Sans")
@@ -39,17 +40,20 @@ CJK_FONTS = (
 
 DEFAULT_PRESET = "metro_atlas"
 
-# 底层不可变出版基础设置（所有预设与旧式 style 调用均继承）
+# 底层不可变出版基础设置（默认对齐 Cell Press：Arial/Helvetica 无衬线体、stixsans 数学字体、嵌入式矢量字体）
 BASE_RC: dict[str, Any] = {
     "axes.unicode_minus": False,
-    "font.size": 9,
-    "axes.titlesize": 10.5,
-    "axes.labelsize": 9.5,
-    "xtick.labelsize": 8.5,
-    "ytick.labelsize": 8.5,
-    "legend.fontsize": 8,
+    "font.size": 8.0,
+    "axes.titlesize": 9.0,
+    "axes.labelsize": 8.0,
+    "xtick.labelsize": 7.0,
+    "ytick.labelsize": 7.0,
+    "legend.fontsize": 7.0,
+    "mathtext.fontset": "stixsans",
+    "mathtext.default": "regular",
     "savefig.bbox": "tight",
     "pdf.fonttype": 42,
+    "ps.fonttype": 42,
     "svg.fonttype": "none",
 }
 
@@ -177,10 +181,13 @@ def get_preset(name: str = DEFAULT_PRESET) -> StylePreset:
     return PRESETS[name]
 
 
-def font_family() -> list[str]:
-    """已安装字体中的 ``font.family``：一个西文字体在前，随后是全部已安装的中文字体。"""
+def font_family(*, journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE) -> list[str]:
+    """已安装字体中的 ``font.family``：遵循期刊规范的首选西文字体在前（Arial/Helvetica），随后是已安装中文字体。"""
+    spec = get_journal_profile(journal)
     installed = {f.name for f in font_manager.fontManager.ttflist}
-    latin = next((name for name in LATIN_FONTS if name in installed), "DejaVu Sans")
+    latin = next((name for name in spec.font_families if name in installed), None)
+    if latin is None:
+        latin = next((name for name in LATIN_FONTS if name in installed), "DejaVu Sans")
     return [latin, *(name for name in CJK_FONTS if name in installed)]
 
 
@@ -192,19 +199,27 @@ def has_cjk_font() -> bool:
 def theme_rc(
     *,
     preset: str = DEFAULT_PRESET,
+    journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE,
     dpi: int = 150,
-    save_dpi: int = 300,
+    save_dpi: int | None = None,
     rc: dict[str, Any] | None = None,
     include_preset_rc: bool = True,
 ) -> dict[str, Any]:
-    """构建主题 ``rcParams``；``include_preset_rc=False`` 用于兼容显式指定 matplotlib ``style`` 的旧调用。"""
+    """构建主题 ``rcParams``；叠加 ``journal`` 出版规格与 ``preset`` 视觉皮肤。"""
     spec = get_preset(preset)
-    base = {**BASE_RC, **(spec.rc if include_preset_rc else {})}
+    jprof = get_journal_profile(journal)
+    fams = font_family(journal=jprof)
+    base = {
+        **BASE_RC,
+        **jprof.rc_overrides(),
+        **(spec.rc if include_preset_rc else {}),
+    }
     return {
         **base,
-        "font.family": font_family(),
+        "font.family": fams,
+        "font.sans-serif": fams,
         "figure.dpi": dpi,
-        "savefig.dpi": save_dpi,
+        "savefig.dpi": jprof.default_dpi if save_dpi is None else int(save_dpi),
         **(rc or {}),
     }
 
@@ -213,29 +228,21 @@ def apply_theme(
     *,
     style: str | None = None,
     preset: str = DEFAULT_PRESET,
+    journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE,
     dpi: int = 150,
-    save_dpi: int = 300,
+    save_dpi: int | None = None,
     rc: dict[str, Any] | None = None,
 ) -> None:
-    """应用统一主题到进程级 ``plt.rcParams``。
-
-    Parameters
-    ----------
-    style : str, optional
-        显式传入 matplotlib 内置样式（如 ``seaborn-v0_8-whitegrid``）时先套用该样式，再叠加字体/矢量/DPI
-        基础设置，不覆写该样式的网格与框线；省略时默认套用 ``preset``（默认 ``nature_editorial``）。
-    preset : str, default "nature_editorial"
-        OmicsWeave 主题预设名，见 :func:`list_presets`。
-    dpi, save_dpi : int
-        屏幕显示与保存分辨率（默认保存 300 dpi）。
-    rc : dict, optional
-        额外的 rcParams，最后覆写。
-    """
+    """应用统一主题与期刊出版规格到进程级 ``plt.rcParams``。"""
     if style:
         plt.style.use(style)
-        plt.rcParams.update(theme_rc(preset=preset, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=False))
+        plt.rcParams.update(
+            theme_rc(preset=preset, journal=journal, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=False)
+        )
     else:
-        plt.rcParams.update(theme_rc(preset=preset, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=True))
+        plt.rcParams.update(
+            theme_rc(preset=preset, journal=journal, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=True)
+        )
 
 
 # 可重入：通用图之间可以嵌套调用
@@ -246,20 +253,23 @@ _DRAW_LOCK = threading.RLock()
 def themed(
     *,
     preset: str = DEFAULT_PRESET,
+    journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE,
     dpi: int = 150,
-    save_dpi: int = 300,
+    save_dpi: int | None = None,
     rc: dict[str, Any] | None = None,
 ) -> Iterator[StylePreset]:
-    """在统一主题预设下绘图并保存，退出时恢复 ``rcParams``；线程安全且可重入。
+    """在统一主题预设 + 期刊规格下绘图并保存，退出时恢复 ``rcParams``；线程安全且可重入。
 
-    进入时先复位为 matplotlib ``default`` 样式再应用 ``preset``，彻底隔离旧模块的全局样式污染。
+    进入时先复位为 matplotlib ``default`` 样式再应用 ``journal`` + ``preset``，彻底隔离旧模块的全局样式污染。
     上下文返回值 ``as style`` 为当前 :class:`StylePreset`，方便直接读取 ``style.palette``。
     """
     spec = get_preset(preset)
     with (
         _DRAW_LOCK,
         matplotlib.style.context("default"),
-        matplotlib.rc_context(theme_rc(preset=preset, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=True)),
+        matplotlib.rc_context(
+            theme_rc(preset=preset, journal=journal, dpi=dpi, save_dpi=save_dpi, rc=rc, include_preset_rc=True)
+        ),
     ):
         yield spec
 

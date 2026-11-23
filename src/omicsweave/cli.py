@@ -167,6 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="出图模式：atlas（完整诊断总图，默认）或 publication（双栏聚焦出版图）")
     maps.add_argument("--style", choices=["metro_atlas", "economist", "nature_editorial", "slide_dark"], default=None,
                       help="视觉主题预设：metro_atlas（默认，Beck 学术出版风）/ economist（经济学人）/ nature_editorial / slide_dark")
+    maps.add_argument("--journal", choices=["cell_press", "nature"], default=None,
+                      help="期刊出版规格：cell_press（默认，85/114/174 mm + Arial ≥6pt + 净版子图 + 1200×1200 方形 GA）/ nature（89/120/183 mm）")
     maps.add_argument("--color-mode", choices=["semantic", "pathway"], default=None,
                       help="轨道着色语义：semantic（默认，正文统一红蓝涨跌色）/ pathway（低饱和莫兰迪通路分区色）")
     maps.add_argument("--strip-mode", choices=["omics", "axes"], default=None,
@@ -182,13 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
                       help="本次重画不生成分专题子通路图")
     maps.add_argument("--no-abstract", action="store_true", default=False,
                       help="本次重画不同步生成 Graphical Abstract")
-    maps.add_argument("--format", action="append", default=None, help="图件格式（pdf / png / html / svg），可重复，默认 pdf、png、html")
+    maps.add_argument("--ga-layout", choices=["cell_press_square", "widescreen"], default=None,
+                      help="Graphical Abstract 版式：cell_press_square（默认，1200×1200 px 方形）/ widescreen（宽屏）")
+    maps.add_argument("--format", action="append", default=None, help="图件格式（pdf / png / html / tiff / eps / svg），可重复，默认 pdf、png、html")
     maps.add_argument("--output", type=Path, default=None,
                       help="输出目录，默认 <结果根>/<实验>/_redraws/<运行 ID>/pathway_map_<时间>/")
 
     abstract = modules.add_parser(
         "abstract",
-        help="生成小规模 Graphical Abstract 概念摘要图（≤12 核心枢纽，支持经济学人 / 地铁 / 手绘 / 像素 / nature_editorial）",
+        help="生成小规模 Graphical Abstract 概念摘要图（默认 Cell Press 1200×1200 方形，支持地铁 / 经济学人 / 手绘 / 像素 / nature_editorial）",
     )
     abstract.add_argument("--spec", type=Path, default=None,
                           help="跨项目通用的自定义 YAML 摘要规格文件（提供时不依赖实验整合结果包）")
@@ -200,9 +204,13 @@ def build_parser() -> argparse.ArgumentParser:
     abstract.add_argument("--style", choices=["metro_atlas", "economist", "editorial_ink", "pixel_abstract", "nature_editorial"],
                           default="metro_atlas",
                           help="概念摘要渲染风格：metro_atlas（代谢地铁，默认）/ economist（经济学人）/ editorial_ink（手绘）/ pixel_abstract（像素）/ nature_editorial")
+    abstract.add_argument("--journal", choices=["cell_press", "nature"], default="cell_press",
+                          help="期刊出版规格：cell_press（默认，1200×1200 方形 + Arial 12–16 pt）/ nature（宽屏）")
+    abstract.add_argument("--ga-layout", choices=["cell_press_square", "widescreen"], default=None,
+                          help="显式指定版式：cell_press_square（1200×1200 方形）/ widescreen（16:10 宽屏）；默认跟随 --journal")
     abstract.add_argument("--color-mode", choices=["semantic", "pathway"], default="semantic",
                           help="metro_atlas 轨道着色语义：semantic（默认，正文统一红蓝方向色）/ pathway（低饱和莫兰迪通路分区色）")
-    abstract.add_argument("--format", action="append", default=None, help="输出格式（pdf/png/svg），可重复，默认 pdf,png")
+    abstract.add_argument("--format", action="append", default=None, help="输出格式（pdf / png / tiff / jpg / eps / svg），可重复，默认 pdf,png")
     abstract.add_argument("--output", type=Path, default=None, help="输出目录或不含扩展名的输出路径前缀")
 
     pipeline = modules.add_parser("pipeline", help="标准流程：validate → run → integrate → 课题脚本"
@@ -487,6 +495,7 @@ def _run_map(args: argparse.Namespace) -> int:
             "formats": args.format,
             "mode": args.mode,
             "style": args.style,
+            "journal": args.journal,
             "color_mode": args.color_mode,
             "strip_mode": args.strip_mode,
             "omics_edge_color": args.omics_edge_color,
@@ -501,6 +510,10 @@ def _run_map(args: argparse.Namespace) -> int:
             configured["submaps"] = cur_sub
         if args.no_abstract:
             configured["abstract"] = {"enabled": False}
+        elif args.ga_layout:
+            cur_abs = dict(configured.get("abstract") or {}) if isinstance(configured.get("abstract"), dict) else {}
+            cur_abs.update({"enabled": True, "layout": args.ga_layout})
+            configured["abstract"] = cur_abs
         configured["enabled"] = True
         out_dir, notes = redraw(bundle, args.output, configured, experiment.root)
     except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
@@ -526,7 +539,8 @@ def _run_abstract(args: argparse.Namespace) -> int:
             else:
                 stem = args.output.with_suffix("")
             written = render_graphical_abstract(
-                spec, stem, style=args.style, color_mode=args.color_mode, formats=fmts,
+                spec, stem, style=args.style, color_mode=args.color_mode,
+                journal=args.journal, layout=args.ga_layout, formats=fmts,
             )
         except (FileNotFoundError, ValueError) as exc:
             print(f"错误：{exc}", file=sys.stderr)
@@ -560,7 +574,8 @@ def _run_abstract(args: argparse.Namespace) -> int:
         out_dir, written = render_abstracts(
             bundle, args.output,
             tissues=args.tissue, contrasts=args.contrast,
-            style=args.style, color_mode=args.color_mode, formats=fmts,
+            style=args.style, color_mode=args.color_mode,
+            journal=args.journal, ga_layout=args.ga_layout, formats=fmts,
             layout_path=args.layout, root=experiment.root,
         )
     except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:

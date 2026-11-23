@@ -32,6 +32,13 @@ from matplotlib.patches import Circle, FancyBboxPatch, Polygon, Rectangle
 
 from omicsweave.mfa.tracers import format_tracer_badge_label, format_tracer_display
 from omicsweave.visualization.figures import DOUBLE_COL_IN, ONE_HALF_COL_IN, save_stem
+from omicsweave.visualization.journal import (
+    DEFAULT_JOURNAL_PROFILE,
+    JournalProfile,
+    add_panel_label,
+    get_journal_profile,
+    write_caption_sidecar,
+)
 from omicsweave.visualization.metro import (
     draw_metro_coupled_halo,
     draw_metro_station,
@@ -150,6 +157,15 @@ def _species_short(species: str, fallback: str = "") -> str:
 
 def _text_width(text: str, fontsize: float, bold: bool = False, unit: float = UNIT) -> float:
     return estimate_text_width(text, fontsize, unit, bold=bold)
+
+
+def _scaled_fs(base_pt: float, font_scale: float = 1.0, min_font_pt: float | None = None) -> float:
+    """计算画布文字的最终印刷字号（pt）；出版模式下严格遵循期刊最小字号底线（如 Cell Press ≥ 6.0 pt）。"""
+    raw = float(base_pt) * float(font_scale)
+    if min_font_pt is None:
+        return raw
+    floor = float(min_font_pt)
+    return max(floor, min(floor + 1.8, floor + max(0.0, float(base_pt) - 3.85) * 0.95))
 
 
 def _node_clearance(layout: Layout, species: str) -> float:
@@ -393,6 +409,7 @@ def _node_label_placements(
     bounds: tuple[float, float, float, float],
     font_scale: float = 1.0,
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> dict[tuple[str, int], tuple[float, float, str, str, tuple]]:
     angles_by_pos: dict[tuple[str, int], list[float]] = {}
     for geom in geometries.values():
@@ -412,7 +429,7 @@ def _node_label_placements(
         (-3 * math.pi / 4, -(NODE_R * 0.90 + 0.3), -(NODE_R * 0.90 + 0.25), "right", "bottom", 0.18),
     ]
     bx_min, by_min, bx_max, by_max = bounds
-    fs = 4.6 * font_scale
+    fs = _scaled_fs(4.6, font_scale, min_font_pt)
     out: dict[tuple[str, int], tuple[float, float, str, str, tuple]] = {}
     for sp, node in layout.nodes.items():
         if node.kind != "metabolite":
@@ -468,6 +485,7 @@ def _strip_badges(
     *,
     top_rank: int = 10,
     show_rank: bool = True,
+    compact_l1: bool = False,
 ) -> dict:
     """Return structured badge descriptors for a reaction card (including dynamic isotope-tracer badge labels)."""
     label = _short(row["element_id"])
@@ -479,7 +497,10 @@ def _strip_badges(
         if ("flux_tracers" in row.index and pd.notna(row["flux_tracers"]))
         else ""
     )
-    tier_label = format_tracer_badge_label(flux_tracers, level=tier) if tier else ""
+    if tier == "L1" and compact_l1:
+        tier_label = "L1"
+    else:
+        tier_label = format_tracer_badge_label(flux_tracers, level=tier) if tier else ""
     rank = None
     if show_rank and pd.notna(row["rank"]):
         r_int = int(row["rank"])
@@ -566,25 +587,33 @@ def _strip_size(
     mode: str = "atlas",
     font_scale: float = 1.0,
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> tuple[float, float]:
     show_rank = mode != "publication"
-    info = _strip_badges(row, group_indices, top_rank=top_rank, show_rank=show_rank)
+    compact_l1 = (mode == "publication") and (min_font_pt is not None)
+    info = _strip_badges(row, group_indices, top_rank=top_rank, show_rank=show_rank, compact_l1=compact_l1)
     if _is_compact_label_only(row, mode):
-        fs = 3.9 * font_scale
-        return _text_width(info["label"], fs, unit=unit_in) + 0.55, 0.98 * font_scale
+        fs = _scaled_fs(3.85, font_scale, min_font_pt)
+        return _text_width(info["label"], fs, unit=unit_in) + 0.55, max(0.98 * font_scale, em_units(fs, unit_in) * 1.32)
     is_hi = row["key"] in ("key", "l1", "top")
     bold = row["key"] in ("key", "l1")
-    lbl_fs = 4.35 * font_scale
+    lbl_fs = _scaled_fs(4.35, font_scale, min_font_pt)
     badge_scale = 1.02 * font_scale
+    badge_fs = _scaled_fs(3.40, badge_scale, min_font_pt) if min_font_pt is not None else None
     total_groups = max(len(group_indices), 1)
     w = 4 * CELL + 0.46 + _text_width(info["label"], lbl_fs, bold=bold, unit=unit_in) + 0.48
     gap = 0.34
     if info["tier"]:
-        w += gap + tier_badge_width(info["tier"], scale=badge_scale, unit_in=unit_in, label=info.get("tier_label") or None)
+        w += gap + tier_badge_width(
+            info["tier"], scale=badge_scale, unit_in=unit_in, fontsize=badge_fs, label=info.get("tier_label") or None,
+        )
     if info["group"] is not None:
-        w += gap + coupled_badge_width(info["group"], scale=badge_scale, total_groups=total_groups, unit_in=unit_in)
+        w += gap + coupled_badge_width(
+            info["group"], scale=badge_scale, total_groups=total_groups, unit_in=unit_in, fontsize=badge_fs,
+        )
     w += 0.38
-    h = CELL + (AXIS_HDR_H + 0.44 if is_hi else AXIS_BAR_H + 0.42)
+    base_h = CELL + (AXIS_HDR_H + 0.44 if is_hi else AXIS_BAR_H + 0.42)
+    h = max(base_h, em_units(lbl_fs, unit_in) * 1.80) if min_font_pt is not None else base_h
     return w, h
 
 
@@ -599,12 +628,14 @@ def _points_inside(points: list[tuple[float, float]], rect: tuple) -> int:
     return sum(1 for px, py in points if x0 <= px <= x1 and y0 <= py <= y1)
 
 
-def _note_rect(geometry: dict) -> tuple | None:
+def _note_rect(geometry: dict, *, font_scale: float = 1.0, unit_in: float = UNIT, min_font_pt: float | None = None) -> tuple | None:
     if not geometry["note"]:
         return None
     hx, hy = geometry["hub"]
-    w = _text_width(geometry["note"], NOTE_SIZE) + 0.35
-    return (hx - w / 2, hy + 0.4, hx + w / 2, hy + 1.25)
+    fs = _scaled_fs(NOTE_SIZE, font_scale, min_font_pt)
+    w = _text_width(geometry["note"], fs, unit=unit_in) + 0.35
+    h = max(0.85, em_units(fs, unit_in) * 1.35)
+    return (hx - w / 2, hy + 0.4, hx + w / 2, hy + 0.4 + h)
 
 
 def _obstacles(
@@ -678,11 +709,12 @@ def _place_strips(
     unit_in: float = UNIT,
     metro: bool = False,
     comp_boxes: dict[str, tuple[float, float, float, float]] | None = None,
+    min_font_pt: float | None = None,
 ) -> dict[str, tuple[float, float]]:
     obstacles = _obstacles(
         layout, node_labels, active_species, active_aggs, active_regions,
         metro=metro, comp_boxes=comp_boxes,
-    ) + [(r, 2.4) for g in geometries.values() if (r := _note_rect(g))]
+    ) + [(r, 2.4) for g in geometries.values() if (r := _note_rect(g, font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt))]
     all_samples = [pt for g in geometries.values() for pt in g["samples"]]
     placed: list[tuple] = []
     out: dict[str, tuple[float, float]] = {}
@@ -697,7 +729,10 @@ def _place_strips(
     for _, row in rows.sort_values("order", kind="stable").iterrows():
         flux_id = row["element_id"]
         hx, hy = geometries[flux_id]["hub"]
-        w, h = _strip_size(row, group_indices, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in)
+        w, h = _strip_size(
+            row, group_indices, top_rank=top_rank, mode=mode,
+            font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
+        )
         explicit = layout.edges[flux_id].strip
         if explicit is not None:
             candidates = [explicit]
@@ -895,12 +930,15 @@ def _draw_regions_and_compartments(
     metro: bool = False,
     color_mode: str = "semantic",
     comp_boxes: dict[str, tuple[float, float, float, float]] | None = None,
+    min_font_pt: float | None = None,
 ) -> None:
     boxes = comp_boxes if comp_boxes is not None else {
         cid: tuple(comp["box"]) for cid, comp in layout.compartments.items()
         if (cid == "p" and "peroxisome" in active_regions)
         or (cid != "p" and ({"pyruvate_tca", "ketone", "oxphos"} & active_regions))
     }
+    comp_fs = _scaled_fs(5.0, font_scale, min_font_pt)
+    reg_fs = _scaled_fs(5.4, font_scale, min_font_pt)
     if metro:
         is_econ = palette.name == "economist"
         if is_econ:
@@ -920,7 +958,7 @@ def _draw_regions_and_compartments(
                         ax, box, comp.get("label", ""),
                         face=palette.perox_face, edge=palette.perox_edge, lw=0.75, inner_edge=palette.perox_inner,
                         label_color=palette.perox_ink, label_pos="top_right", rounding=0.35,
-                        fontsize=5.0 * font_scale, zorder=0.5,
+                        fontsize=comp_fs, zorder=0.5,
                     )
                     ax.plot([x0, x1], [y0, y0], color=palette.perox_edge, lw=1.15, solid_capstyle="butt", zorder=0.58)
                 else:
@@ -934,7 +972,7 @@ def _draw_regions_and_compartments(
                         ax, box, comp.get("label", ""),
                         face=palette.mito_face, edge=palette.mito_edge, lw=0.75, inner_edge=palette.mito_inner,
                         label_color=palette.mito_ink, label_pos=mito_pos, rounding=0.35,
-                        fontsize=5.0 * font_scale, zorder=0.5,
+                        fontsize=comp_fs, zorder=0.5,
                     )
                     ax.plot([x0, x1], [y0, y0], color=palette.mito_edge, lw=1.15, solid_capstyle="butt", zorder=0.58)
             if "oxphos" in active_regions and "oxphos" in layout.regions and layout.regions["oxphos"].box is not None:
@@ -950,7 +988,7 @@ def _draw_regions_and_compartments(
                 plate_bg = palette.mito_face if rid in ("pyruvate_tca", "ketone", "oxphos") else "#E5E4D7"
                 ax.add_patch(Rectangle((lx + 0.15, ly - 0.48), 0.36, 0.96, facecolor=accent, edgecolor="none", zorder=3.85))
                 ax.text(
-                    lx + 0.90, ly, region.label, fontsize=5.4 * font_scale, fontweight="bold",
+                    lx + 0.90, ly, region.label, fontsize=reg_fs, fontweight="bold",
                     color=accent if color_mode == "pathway" else palette.ink, ha="left", va="center", zorder=3.85,
                     bbox=dict(boxstyle="square,pad=0.14", facecolor=plate_bg, edgecolor="none", alpha=0.90),
                 )
@@ -971,7 +1009,7 @@ def _draw_regions_and_compartments(
                     ax, box, comp.get("label", ""),
                     face="#EBF4F2", edge="#B4D7CF", lw=0.75, inner_edge="#9CCDC2",
                     label_color="#336D65", label_pos="top_right", rounding=2.4,
-                    fontsize=5.0 * font_scale, zorder=0.5,
+                    fontsize=comp_fs, zorder=0.5,
                 )
             else:
                 if "oxphos" in active_regions:
@@ -984,7 +1022,7 @@ def _draw_regions_and_compartments(
                     ax, box, comp.get("label", ""),
                     face="#ECEEF2", edge="#CFD6E0", lw=0.80, inner_edge="#C5CDD8",
                     label_color="#64748B", label_pos=mito_pos, rounding=2.6,
-                    fontsize=5.0 * font_scale, zorder=0.5,
+                    fontsize=comp_fs, zorder=0.5,
                 )
         if "oxphos" in active_regions and "oxphos" in layout.regions and layout.regions["oxphos"].box is not None:
             reg = layout.regions["oxphos"]
@@ -998,7 +1036,7 @@ def _draw_regions_and_compartments(
             plate_bg = "#ECEEF2" if rid in ("pyruvate_tca", "ketone", "oxphos") else "#F3F5F8"
             ax.add_patch(Circle((lx + 0.55, ly), 0.52, facecolor=accent, edgecolor=palette.surface, lw=0.45, zorder=3.85))
             ax.text(
-                lx + 1.45, ly, region.label, fontsize=5.4 * font_scale, fontweight="bold",
+                lx + 1.45, ly, region.label, fontsize=reg_fs, fontweight="bold",
                 color=accent if color_mode == "pathway" else palette.ink, ha="left", va="center", zorder=3.85,
                 bbox=dict(boxstyle="round,pad=0.14", facecolor=plate_bg, edgecolor="none", alpha=0.88),
             )
@@ -1021,7 +1059,7 @@ def _draw_regions_and_compartments(
             kind=cid,
             palette=palette,
             label_pos="top_right" if cid == "p" else "bottom_left",
-            fontsize=5.0 * font_scale,
+            fontsize=comp_fs,
             zorder=0.5,
         )
 
@@ -1034,7 +1072,7 @@ def _draw_regions_and_compartments(
     for rid, region in layout.regions.items():
         if rid not in active_regions:
             continue
-        draw_zone_header(ax, region.label_xy, region.label, region.accent, palette=palette, fontsize=5.4 * font_scale, zorder=0.9)
+        draw_zone_header(ax, region.label_xy, region.label, region.accent, palette=palette, fontsize=reg_fs, zorder=0.9)
 
 
 def _draw_edge(
@@ -1051,6 +1089,7 @@ def _draw_edge(
     color_mode: str = "semantic",
     omics_edge_color: str = "tinted",
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> None:
     draw_style = row["draw_style"]
     strong = row["key"] == "key"
@@ -1139,7 +1178,8 @@ def _draw_edge(
         draw_sign_reversal_badge(ax, hub[0], hub[1], radius=0.78, palette=palette, lw=0.68, zorder=4.5)
     if geometry["note"]:
         ax.text(
-            hub[0], hub[1] + 0.45, geometry["note"], fontsize=NOTE_SIZE * font_scale, ha="center", va="top",
+            hub[0], hub[1] + 0.45, geometry["note"],
+            fontsize=_scaled_fs(NOTE_SIZE, font_scale, min_font_pt), ha="center", va="top",
             color=palette.muted, style="italic", zorder=4.2,
             bbox=dict(boxstyle="round,pad=0.06", facecolor=palette.surface, edgecolor="none", alpha=0.84),
         )
@@ -1157,16 +1197,20 @@ def _draw_leader(
     mode: str = "atlas",
     font_scale: float = 1.0,
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> None:
     if _is_compact_label_only(row, mode):
         return
-    w, _ = _strip_size(row, group_indices, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in)
+    w, _ = _strip_size(
+        row, group_indices, top_rank=top_rank, mode=mode,
+        font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
+    )
     x0, y0 = position
     end = min(((x0, y0), (x0 + w, y0)), key=lambda p: math.dist(p, hub))
     if math.dist(end, hub) > 2.0:
-        ax.add_line(Line2D([hub[0], end[0]], [hub[1], end[1]], color=palette.omics_grey, lw=0.40,
+        ax.add_line(Line2D([hub[0], end[0]], [hub[1], end[1]], color=palette.omics_grey, lw=0.45,
                            linestyle=(0, (1.4, 1.4)), zorder=4.1))
-        ax.add_patch(Circle(hub, 0.20, facecolor=palette.edge_grey, edgecolor=palette.surface, lw=0.25, zorder=4.2))
+        ax.add_patch(Circle(hub, 0.20, facecolor=palette.edge_grey, edgecolor=palette.surface, lw=0.30, zorder=4.2))
 
 
 def _draw_strip(
@@ -1182,22 +1226,27 @@ def _draw_strip(
     strip_mode: str = "omics",
     font_scale: float = 1.0,
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> None:
     x0, y0 = position
     show_rank = mode != "publication"
-    info = _strip_badges(row, group_indices, top_rank=top_rank, show_rank=show_rank)
+    compact_l1 = (mode == "publication") and (min_font_pt is not None)
+    info = _strip_badges(row, group_indices, top_rank=top_rank, show_rank=show_rank, compact_l1=compact_l1)
     label = info["label"]
 
     if _is_compact_label_only(row, mode):
         is_na = row["draw_style"] == "not_assessed"
         ax.text(
-            x0 + 0.15, y0, label, fontsize=3.85 * font_scale, ha="left", va="center",
+            x0 + 0.15, y0, label, fontsize=_scaled_fs(3.85, font_scale, min_font_pt), ha="left", va="center",
             color=palette.muted if is_na else palette.ink2, zorder=5.2,
             bbox=dict(boxstyle="round,pad=0.07", facecolor=palette.surface, edgecolor="none", alpha=0.78),
         )
         return
 
-    w, h = _strip_size(row, group_indices, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in)
+    w, h = _strip_size(
+        row, group_indices, top_rank=top_rank, mode=mode,
+        font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
+    )
     is_key = row["key"] == "key"
     is_l1 = row["key"] == "l1"
     is_hi = row["key"] in ("key", "l1", "top")
@@ -1210,7 +1259,7 @@ def _draw_strip(
     elif is_l1:
         bg, ec, lw, ls = card_face, palette.ink2, 0.88, (0, (2.4, 1.3))
     else:
-        bg, ec, lw, ls = card_face, palette.card_edge, 0.48, "-"
+        bg, ec, lw, ls = card_face, palette.card_edge, 0.50, "-"
 
     card_left = x0 - 0.12
     card_top = y0 - h / 2
@@ -1242,23 +1291,24 @@ def _draw_strip(
     # Reaction label + self-explanatory Tier badge (●●● Confirmed / ●●○ Flux / ●○○ Enz-pred) + Linked flux badge
     tx = strip_x + 4 * CELL + 0.34
     bold = is_key or is_l1
-    lbl_fs = 4.35 * font_scale
+    lbl_fs = _scaled_fs(4.35, font_scale, min_font_pt)
     ax.text(
         tx, y0, label, fontsize=lbl_fs, ha="left", va="center", zorder=z + 0.30,
         color=palette.ink if bold else palette.ink2, fontweight="bold" if bold else "normal",
     )
     bx = tx + _text_width(label, lbl_fs, bold=bold, unit=unit_in) + 0.48
     b_scale = 1.02 * font_scale
+    b_fs = _scaled_fs(3.40, b_scale, min_font_pt) if min_font_pt is not None else None
     total_groups = max(len(group_indices), 1)
     if info["tier"]:
         bx += draw_tier_badge(
             ax, bx, y0, info["tier"], zorder=z + 0.42, scale=b_scale, preset=preset, unit_in=unit_in,
-            label=info.get("tier_label") or None,
+            fontsize=b_fs, label=info.get("tier_label") or None,
         ) + 0.34
     if info["group"] is not None:
         draw_coupled_badge(
             ax, bx, y0, info["group"], zorder=z + 0.42, scale=b_scale, palette=palette,
-            total_groups=total_groups, unit_in=unit_in,
+            total_groups=total_groups, unit_in=unit_in, fontsize=b_fs,
         )
 
 
@@ -1306,6 +1356,7 @@ def _draw_node(
     unit_in: float = UNIT,
     active_positions: set[tuple[str, int]] | None = None,
     metro: bool = False,
+    min_font_pt: float | None = None,
 ) -> None:
     node = layout.nodes[species]
     for idx, (x, y) in enumerate(node.at):
@@ -1314,10 +1365,11 @@ def _draw_node(
         if node.kind == "boundary":
             name = node.label or _species_short(species)
             text = f"{name} (Blood)" if species.endswith("_e") else name
-            fs = 3.85 * font_scale
-            w = max(3.2, _text_width(text, fs, unit=unit_in) + 1.0)
+            fs = _scaled_fs(3.85, font_scale, min_font_pt)
+            w = max(3.2, _text_width(text, fs, bold=metro, unit=unit_in) + 1.0)
+            bh = max(1.44, em_units(fs, unit_in) * 1.62) if min_font_pt is not None else 1.44
             ax.add_patch(FancyBboxPatch(
-                (x - w / 2, y - 0.72), w, 1.44,
+                (x - w / 2, y - bh / 2), w, bh,
                 boxstyle=f"round,pad=0,rounding_size={0.72 if metro else 0.55}",
                 facecolor=palette.boundary_face, edgecolor=palette.boundary_edge,
                 lw=0.85 if metro else 0.60, zorder=4.2,
@@ -1327,10 +1379,11 @@ def _draw_node(
             continue
         if node.kind == "store":
             text = node.label or _species_short(species)
-            fs = 3.95 * font_scale
-            w = max(3.8, _text_width(text, fs, unit=unit_in) + 1.1)
+            fs = _scaled_fs(3.95, font_scale, min_font_pt)
+            w = max(3.8, _text_width(text, fs, bold=metro, unit=unit_in) + 1.1)
+            bh = max(1.48, em_units(fs, unit_in) * 1.62) if min_font_pt is not None else 1.48
             ax.add_patch(FancyBboxPatch(
-                (x - w / 2, y - 0.74), w, 1.48,
+                (x - w / 2, y - bh / 2), w, bh,
                 boxstyle=f"round,pad=0,rounding_size={0.72 if metro else 0.50}",
                 facecolor=palette.store_face, edgecolor=palette.store_edge,
                 lw=0.85 if metro else 0.60, zorder=4.2,
@@ -1376,7 +1429,7 @@ def _draw_node(
         lx, ly, ha, va, _ = node_labels[(species, idx)]
         short_label = node.label or _species_short(species, str(row["label"]) if row is not None else species)
         ax.text(
-            lx, ly, short_label, fontsize=4.6 * font_scale, ha=ha, va=va,
+            lx, ly, short_label, fontsize=_scaled_fs(4.6, font_scale, min_font_pt), ha=ha, va=va,
             color=palette.ink if (sig or measured) else palette.muted,
             fontweight="bold" if sig else "medium", zorder=5.0,
             bbox=dict(boxstyle="round,pad=0.10", facecolor=palette.surface, edgecolor="none", alpha=0.88),
@@ -1394,6 +1447,7 @@ def _draw_aggregate(
     strip_mode: str = "omics",
     font_scale: float = 1.0,
     unit_in: float = UNIT,
+    min_font_pt: float | None = None,
 ) -> None:
     agg = layout.aggregates[row["element_id"]]
     x, y = agg.xy
@@ -1401,6 +1455,25 @@ def _draw_aggregate(
     faint = row["draw_style"] == "not_assessed"
     is_key = row["key"] == "key"
     is_l1 = row["key"] == "l1"
+
+    title = str(row["label"])
+    claim = str(row["flux_claim"]) if row["flux_claim"] in ("L1", "L2", "L3") else ""
+    claim_lbl = "L1" if (claim == "L1" and min_font_pt is not None) else None
+    bold_t = is_key or is_l1
+    if min_font_pt is not None:
+        # 出版模式下严格保底 >= min_font_pt，必要时适度扩宽聚合卡片以防标签与徽章挤压
+        t_fs = _scaled_fs(3.95, font_scale, min_font_pt)
+        b_scale = 0.85 * font_scale
+        b_fs = _scaled_fs(3.40, b_scale, min_font_pt)
+        badge_w = tier_badge_width(claim, scale=b_scale, unit_in=unit_in, fontsize=b_fs, label=claim_lbl) if claim else 0.0
+        need_w = _text_width(title, t_fs, bold=bold_t, unit=unit_in) + (badge_w + 1.35 if claim else 1.1)
+        w = max(w, need_w)
+        h = max(h, em_units(t_fs, unit_in) * 3.85)
+    else:
+        b_scale = 0.78 * font_scale
+        b_fs = None
+        badge_w = tier_badge_width(claim, scale=b_scale, unit_in=unit_in) if claim else 0.0
+        t_fs = 3.85 * font_scale
 
     is_econ = palette.name == "economist"
     ec = palette.ink if is_key else (palette.ink2 if is_l1 else (palette.faint if faint else palette.card_edge))
@@ -1412,27 +1485,24 @@ def _draw_aggregate(
         facecolor=palette.card_bg if is_econ else palette.surface, edgecolor=ec, lw=lw, linestyle=ls, zorder=3.5,
     ))
 
-    title = str(row["label"])
-    claim = str(row["flux_claim"]) if row["flux_claim"] in ("L1", "L2", "L3") else ""
-    title_y = y - 1.02
+    title_y = y - h * 0.255
     if claim:
-        b_scale = 0.78 * font_scale
-        badge_w = tier_badge_width(claim, scale=b_scale, unit_in=unit_in)
-        avail = w - badge_w - 1.05
-        t_fs = 3.85 * font_scale
-        while t_fs > 2.80 and _text_width(title, t_fs, bold=(is_key or is_l1), unit=unit_in) > avail:
-            t_fs -= 0.16
+        if min_font_pt is None:
+            avail = w - badge_w - 1.05
+            while t_fs > 2.80 and _text_width(title, t_fs, bold=bold_t, unit=unit_in) > avail:
+                t_fs -= 0.16
         ax.text(
             x - w / 2 + 0.45, title_y, title, fontsize=t_fs, ha="left", va="center",
-            color=palette.muted if faint else palette.ink, fontweight="bold" if (is_key or is_l1) else "medium",
+            color=palette.muted if faint else palette.ink, fontweight="bold" if bold_t else "medium",
             zorder=4.0,
         )
         draw_tier_badge(
             ax, x + w / 2 - badge_w - 0.38, title_y, claim,
-            zorder=4.15, scale=b_scale, preset=preset, unit_in=unit_in,
+            zorder=4.15, scale=b_scale, preset=preset, unit_in=unit_in, fontsize=b_fs, label=claim_lbl,
         )
     else:
-        t_fs = 4.0 * font_scale if _text_width(title, 4.0 * font_scale, unit=unit_in) <= w - 0.8 else 3.45 * font_scale
+        if min_font_pt is None:
+            t_fs = 4.0 * font_scale if _text_width(title, 4.0 * font_scale, unit=unit_in) <= w - 0.8 else 3.45 * font_scale
         ax.text(
             x, title_y, title, fontsize=t_fs, ha="center", va="center",
             color=palette.muted if faint else palette.ink, fontweight="medium", zorder=4.0,
@@ -2071,15 +2141,20 @@ def _pub_legend_plan(
     color_mode: str,
     strip_mode: str = "omics",
     omics_edge_color: str = "tinted",
+    min_font_pt: float | None = None,
+    include_caption: bool = True,
 ) -> dict:
     """预先计算出版/子图紧凑图例的精确换行与总高度（全部状态与图标均以真实图元呈现）。"""
-    fs = 3.75 * font_scale
+    fs = _scaled_fs(3.75, font_scale, min_font_pt)
+    cb_fs = max(float(min_font_pt), fs * 0.90) if min_font_pt is not None else fs * 0.88
+    note_fs = max(float(min_font_pt), fs * 0.92) if min_font_pt is not None else fs * 0.88
+    cap_fs = max(float(min_font_pt), fs * 0.90) if min_font_pt is not None else fs * 0.86
     inner_w = max(24.0, vw - 4.0)
     bar_len = min(20.0, max(11.0, vw * 0.22))
     sw = 1.28
 
     # Row-group A: Colorbar + Track/Arrow types + Reversible + Linked conduit + Sign reversal + FDR-sig metabolite
-    cb_w = max(bar_len, _text_width("log2FC (−2 → +2)", fs * 0.90, bold=True, unit=unit_in)) + 1.0
+    cb_w = max(bar_len, _text_width("log2FC (−2 → +2)", cb_fs, bold=True, unit=unit_in)) + 1.0
     tinted_sem = (omics_edge_color == "tinted") and (color_mode == "semantic")
     if metro:
         flux_lbl = "MFA Flux (solid)" if color_mode == "semantic" else "MFA Flux (pathway)"
@@ -2132,57 +2207,70 @@ def _pub_legend_plan(
 
     # Row-group C: Self-explanatory Tracer-Aware Tier Badges + Linked Flux Badge (1 DOF redundancy, NOT extra conf.)
     c_scale = 0.98 * font_scale
+    c_fs = _scaled_fs(3.40, c_scale, min_font_pt) if min_font_pt is not None else None
     l3_ex = "U-13C-Glc+Ala"
     l2_ex = "U-13C-Glc Flux"
-    linked_desc = "Locked chain (|r|≥1−1e-6; 1 grouped BH test = 1 DOF, NOT extra conf.)"
+    l1_ex = "L1" if min_font_pt is not None else "Enz-pred"
+    linked_desc = "Locked chain (1 DOF in grouped BH, NOT extra conf.)" if not include_caption else (
+        "Locked chain (|r|≥1−1e-6; 1 grouped BH test = 1 DOF, NOT extra conf.)"
+    )
     c_items = [
-        ("L3", "L3 Multi-tracer", tier_badge_width("L3", scale=c_scale, unit_in=unit_in, label=l3_ex) + 0.55 + _text_width("L3 Multi-tracer", fs, unit=unit_in)),
-        ("L2", "L2 MFA tracer", tier_badge_width("L2", scale=c_scale, unit_in=unit_in, label=l2_ex) + 0.55 + _text_width("L2 MFA tracer", fs, unit=unit_in)),
-        ("L1", "L1 Enzyme only", tier_badge_width("L1", scale=c_scale, unit_in=unit_in) + 0.55 + _text_width("L1 Enzyme only", fs, unit=unit_in)),
-        ("LINK", linked_desc, coupled_badge_width(1, scale=c_scale, total_groups=1, unit_in=unit_in) + 0.55 + _text_width(linked_desc, fs, unit=unit_in)),
+        ("L3", "L3 Multi-tracer", tier_badge_width("L3", scale=c_scale, unit_in=unit_in, fontsize=c_fs, label=l3_ex) + 0.55 + _text_width("L3 Multi-tracer", fs, unit=unit_in)),
+        ("L2", "L2 MFA tracer", tier_badge_width("L2", scale=c_scale, unit_in=unit_in, fontsize=c_fs, label=l2_ex) + 0.55 + _text_width("L2 MFA tracer", fs, unit=unit_in)),
+        ("L1", "L1 Enzyme only", tier_badge_width("L1", scale=c_scale, unit_in=unit_in, fontsize=c_fs, label=l1_ex) + 0.55 + _text_width("L1 Enzyme only", fs, unit=unit_in)),
+        ("LINK", linked_desc, coupled_badge_width(1, scale=c_scale, total_groups=1, unit_in=unit_in, fontsize=c_fs) + 0.55 + _text_width(linked_desc, fs, unit=unit_in)),
     ]
     c_pos, c_rows = _flow_rows([w for _, _, w in c_items], inner_w, gap=1.8)
 
-    # Statistical pooling rule + disclosure note (submap scope or folded regions)
-    char_w = max(em_units(fs * 0.88, unit_in) * 0.56, 0.18)
-    wrap_cols = max(36, int(inner_w / char_w))
-    method_text = (
+    # Statistical pooling rule + disclosure note (clean Cell Press mode moves verbose prose to companion _caption.txt)
+    char_w = max(em_units(note_fs, unit_in) * 0.56, 0.18)
+    wrap_cols = max(32, int(inner_w / char_w))
+    full_method_text = (
         "MFA Pooled IVW: Unconstrained/low-n tracers gated out; identifiable tracers combined by inverse-variance pooling "
         "(Flux Sig.=≥2 tracers & FDR<0.05; Sugg.=|g|≥1 or (≥2 & p<0.05 & |g|≥0.8) & LOO-stable; solid —=TOST equiv.; dashed=undetermined; opposing |g|≥1 → mixed). "
         "Linked flux = stoichiometric 1-DOF redundancy, not higher confidence."
     )
-    note_extra = panel_note or (
-        ("Inactive / unassessed regions folded from print view: " + " · ".join(folded_regions))
-        if folded_regions else ""
-    )
-    note_lines = textwrap.wrap(method_text, wrap_cols)[:3]
-    if note_extra:
-        note_lines.extend(textwrap.wrap(note_extra, wrap_cols)[:2])
+    if include_caption:
+        note_extra = panel_note or (
+            ("Inactive / unassessed regions folded from print view: " + " · ".join(folded_regions))
+            if folded_regions else ""
+        )
+        note_lines = textwrap.wrap(full_method_text, wrap_cols)[:3]
+        if note_extra:
+            note_lines.extend(textwrap.wrap(note_extra, wrap_cols)[:2])
+        cap_wrap_cols = max(36, int((vw - 2.0) / max(em_units(cap_fs, unit_in) * 0.56, 0.18)))
+        cap_lines: list[str] = []
+        for line in caption[:2]:
+            cap_lines.extend(textwrap.wrap(line, cap_wrap_cols))
+    else:
+        # 净版模式：图内仅保留 1 条精炼方法键（长图注与运行溯源写入配套 _caption.txt）
+        concise_method = "MFA Pooled IVW across identifiable tracers; Linked flux = 1-DOF stoichiometric chain (see caption)."
+        note_lines = textwrap.wrap(concise_method, wrap_cols)[:2]
+        cap_lines = []
 
-    cap_wrap_cols = max(40, int((vw - 2.0) / max(em_units(fs * 0.86, unit_in) * 0.56, 0.18)))
-    cap_lines: list[str] = []
-    for line in caption[:2]:
-        cap_lines.extend(textwrap.wrap(line, cap_wrap_cols))
-
-    row_a = 3.20
-    row_b = 2.65
-    row_c = 2.85
+    em_fs = em_units(fs, unit_in)
+    row_a = max(2.45, em_fs * 2.15) if not include_caption else max(3.20, em_fs * 2.65)
+    row_b = max(2.15, em_fs * 1.92) if not include_caption else max(2.65, em_fs * 2.35)
+    row_c = max(2.35, em_fs * 2.12) if not include_caption else max(2.85, em_fs * 2.55)
+    note_step = max(1.45, em_units(note_fs, unit_in) * 1.42)
+    cap_step = max(1.65, em_units(cap_fs, unit_in) * 1.55)
     legend_h = (
-        1.5
-        + a_rows * row_a + 0.45
-        + b_rows * row_b + 0.50
+        1.35
+        + a_rows * row_a + 0.35
+        + b_rows * row_b + 0.40
         + c_rows * row_c
-        + (0.45 + len(note_lines) * 1.80 if note_lines else 0.0)
-        + 0.9
+        + (0.45 + len(note_lines) * note_step if note_lines else 0.0)
+        + 0.75
     )
-    footer_h = 1.6 + legend_h + 1.0 + len(cap_lines) * 1.65 + 0.8
+    footer_h = 1.2 + legend_h + (0.9 + len(cap_lines) * cap_step + 0.7 if cap_lines else 0.55)
     return {
-        "fs": fs, "bar_len": bar_len, "sw": sw,
-        "row_a": row_a, "row_b": row_b, "row_c": row_c,
+        "fs": fs, "cb_fs": cb_fs, "note_fs": note_fs, "cap_fs": cap_fs, "c_fs": c_fs, "l1_ex": l1_ex,
+        "bar_len": bar_len, "sw": sw,
+        "row_a": row_a, "row_b": row_b, "row_c": row_c, "note_step": note_step, "cap_step": cap_step,
         "a_items": a_items, "a_pos": a_pos, "a_rows": a_rows,
         "b_items": b_items, "b_pos": b_pos, "b_rows": b_rows,
         "c_items": c_items, "c_pos": c_pos, "c_rows": c_rows,
-        "note_lines": note_lines, "cap_lines": cap_lines,
+        "note_lines": note_lines, "cap_lines": cap_lines, "full_method_text": full_method_text,
         "legend_h": legend_h, "footer_h": footer_h,
     }
 
@@ -2228,7 +2316,7 @@ def _legend_publication(
                 ax.add_patch(Rectangle((x + xi, y - 0.55), xs[1] - xs[0] + 0.05, 1.15,
                                        facecolor=cmap(DEFAULT_NORM(val)), edgecolor="none", zorder=2))
             ax.add_patch(Rectangle((x, y - 0.55), bar_len, 1.15, facecolor="none", edgecolor=palette.card_edge, lw=0.45, zorder=2.2))
-            ax.text(x, y - 0.85, "log2FC (−2 → +2)", fontsize=fs * 0.88, fontweight="bold", color=palette.ink, va="bottom")
+            ax.text(x, y - 0.85, "log2FC (−2 → +2)", fontsize=plan["cb_fs"], fontweight="bold", color=palette.ink, va="bottom")
         elif kind == "metro_flux":
             draw_metro_track(
                 ax, [(x, y), (x + 5.0, y)], palette.up,
@@ -2342,31 +2430,39 @@ def _legend_publication(
             ax.text(x + sw + 0.45, y, lbl, fontsize=fs, color=palette.ink2, va="center")
 
     # Row-group C: Self-explanatory Tracer-Aware Tier Badges + Linked Flux Badge
-    y_c0 = y0 + 1.5 + plan["a_rows"] * row_a + 0.45 + plan["b_rows"] * row_b + 1.65
+    y_c0 = y0 + 1.35 + plan["a_rows"] * row_a + 0.35 + plan["b_rows"] * row_b + 1.45
     c_scale = 0.98 * font_scale
-    ex_labels = {"L3": "U-13C-Glc+Ala", "L2": "U-13C-Glc Flux", "L1": "Enz-pred"}
+    c_fs = plan.get("c_fs")
+    ex_labels = {"L3": "U-13C-Glc+Ala", "L2": "U-13C-Glc Flux", "L1": plan.get("l1_ex", "Enz-pred")}
     for (kind, lbl, _), (r_idx, x_off) in zip(plan["c_items"], plan["c_pos"]):
         x = vx0 + 2.0 + x_off
         y = y_c0 + r_idx * row_c
         if kind in ("L3", "L2", "L1"):
-            bw = draw_tier_badge(ax, x, y, kind, zorder=2.5, scale=c_scale, preset=preset, unit_in=unit_in, label=ex_labels[kind])
+            bw = draw_tier_badge(
+                ax, x, y, kind, zorder=2.5, scale=c_scale, preset=preset, unit_in=unit_in,
+                fontsize=c_fs, label=ex_labels[kind],
+            )
             ax.text(x + bw + 0.55, y, lbl, fontsize=fs, color=palette.ink2, va="center")
         elif kind == "LINK":
-            bw = draw_coupled_badge(ax, x, y, 1, zorder=2.5, scale=c_scale, palette=palette, total_groups=1, unit_in=unit_in)
+            bw = draw_coupled_badge(
+                ax, x, y, 1, zorder=2.5, scale=c_scale, palette=palette, total_groups=1,
+                unit_in=unit_in, fontsize=c_fs,
+            )
             ax.text(x + bw + 0.55, y, lbl, fontsize=fs, color=palette.coupled_ink, va="center")
 
     # Disclosure note
     if plan["note_lines"]:
-        y_n = y_c0 + (plan["c_rows"] - 1) * row_c + 2.25
+        y_n = y_c0 + (plan["c_rows"] - 1) * row_c + max(2.25, row_c * 0.80)
         for line in plan["note_lines"]:
-            ax.text(vx0 + 2.0, y_n, line, fontsize=fs * 0.88, color=palette.muted, va="center")
-            y_n += 1.80
+            ax.text(vx0 + 2.0, y_n, line, fontsize=plan["note_fs"], color=palette.muted, va="center")
+            y_n += plan["note_step"]
 
-    # Short calibration / provenance footer
-    y = y0 + legend_h + 1.0
-    for wrapped in plan["cap_lines"]:
-        ax.text(vx0 + 1.0, y, wrapped, fontsize=fs * 0.86, va="top", color=palette.ink2)
-        y += 1.65
+    # Short calibration / provenance footer (omitted in Cell Press clean publication mode)
+    if plan["cap_lines"]:
+        y = y0 + legend_h + 1.0
+        for wrapped in plan["cap_lines"]:
+            ax.text(vx0 + 1.0, y, wrapped, fontsize=plan["cap_fs"], va="top", color=palette.ink2)
+            y += plan["cap_step"]
 
 
 def _draw_header(
@@ -2471,12 +2567,14 @@ def build_pathway_map_scene(
     *,
     mode: str = "atlas",
     style: str = "metro_atlas",
+    journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE,
     top_rank: int = 10,
     focus_regions: Sequence[str] | None = None,
     include_reactions: Sequence[str] | None = None,
     exclude_reactions: Sequence[str] | None = None,
 ) -> dict:
-    """计算图 E / 子图与交互式 HTML/SVG 共用的完整场景几何、避让卡片坐标与锁死通量分组。"""
+    """计算通路总图 / 正文子图与交互式 HTML/SVG 共用的完整场景几何、避让卡片坐标与锁死通量分组。"""
+    jprof = get_journal_profile(journal)
     metro = style in ("metro_atlas", "economist")
     all_reactions = view[view["element_type"] == "reaction"]
     all_aggs = view[view["element_type"] == "aggregate"]
@@ -2509,14 +2607,16 @@ def build_pathway_map_scene(
             layout, active_regions, active_node_positions, active_aggs, comp_boxes,
         )
         vw, vh = vx1 - vx0, vy1 - vy0
-        if vw >= 95.0:
-            fig_w = max(DOUBLE_COL_IN * 1.48, vw * 0.092)
-        elif vw >= 58.0:
-            fig_w = max(DOUBLE_COL_IN * 1.15, vw * 0.116)
+        # 1:1 严格锁定到目标期刊物理栏宽（Cell Press: 85 / 114 / 174 mm；Nature: 89 / 120 / 183 mm）
+        if vw >= 58.0:
+            fig_w = jprof.double_col_in
+        elif vw >= 38.0:
+            fig_w = jprof.one_half_col_in
         else:
-            fig_w = max(ONE_HALF_COL_IN * 1.24, vw * 0.145)
+            fig_w = jprof.single_col_in
         unit_in = fig_w / (vw + 1.0)
-        font_scale = max(1.04, min(1.26, 1.16 * (unit_in / 0.105)))
+        font_scale = max(1.04, min(1.22, 1.12 * (unit_in / 0.105)))
+        min_font_pt: float | None = jprof.min_font_pt
         bounds = (vx0, vy0, vx1, vy1)
     else:
         active_regions = set(layout.regions)
@@ -2529,6 +2629,7 @@ def build_pathway_map_scene(
         comp_boxes = _compute_clipped_compartments(layout, active_regions, None, active_aggs, mode="atlas")
         geometries = {fid: _edge_geometry(layout, fid, metro=metro) for fid in reactions["element_id"]}
         font_scale = 1.0
+        min_font_pt = None
         unit_in = UNIT
         fig_w = (layout.width + SIDEBAR) * UNIT
         bounds = (0.0, 0.0, layout.width, layout.height)
@@ -2542,15 +2643,19 @@ def build_pathway_map_scene(
                 grp_counts[gi] = grp_counts.get(gi, 0) + 1
     multi_groups = {gi for gi, cnt in grp_counts.items() if cnt >= 2}
 
-    node_labels = _node_label_placements(layout, geometries, bounds, font_scale=font_scale, unit_in=unit_in)
+    node_labels = _node_label_placements(
+        layout, geometries, bounds, font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
+    )
     positions = _place_strips(
         reactions, layout, geometries, node_labels, group_indices,
         active_species=active_species, active_aggs=active_aggs, active_regions=active_regions,
         bounds=bounds, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
-        metro=metro, comp_boxes=comp_boxes,
+        metro=metro, comp_boxes=comp_boxes, min_font_pt=min_font_pt,
     )
     return {
         "metro": metro,
+        "journal": jprof.name,
+        "min_font_pt": min_font_pt,
         "reactions": reactions,
         "aggs": aggs,
         "nodes_df": nodes_df,
@@ -2590,6 +2695,7 @@ def plot_pathway_map(
     *,
     mode: str = "atlas",
     style: str = "metro_atlas",
+    journal: str | JournalProfile = DEFAULT_JOURNAL_PROFILE,
     color_mode: str = "semantic",
     strip_mode: str = "omics",
     omics_edge_color: str = "tinted",
@@ -2597,6 +2703,8 @@ def plot_pathway_map(
     include_reactions: Sequence[str] | None = None,
     exclude_reactions: Sequence[str] | None = None,
     panel_note: str = "",
+    clean_publication: bool | None = None,
+    panel_label: str = "",
     members: pd.DataFrame | None = None,
     samples: pd.DataFrame | None = None,
     sample_contrasts: pd.DataFrame | None = None,
@@ -2604,28 +2712,7 @@ def plot_pathway_map(
     contrast_id: str = "",
     source: str = "",
 ) -> list[Path]:
-    """Render Figure E (Per-Tissue Multi-Omics Pathway Atlas or Focused Sub-Pathway Panel).
-
-    Parameters
-    ----------
-    mode : ``"atlas"`` | ``"publication"``
-        ``"atlas"`` renders the full 13-region network + right dashboard sidebar;
-        ``"publication"`` crops to active regions (or ``focus_regions``) with responsive single-/double-column
-        typography, smart organelle clipping, and hides non-key micro-strips and exploratory rank tabs.
-    style : ``"economist"`` | ``"metro_atlas"`` | ``"nature_editorial"`` | ``"slide_dark"`` | ``"poster_editorial"``
-        Theme preset name from :mod:`omicsweave.visualization.theme` (default ``"economist"``).
-    color_mode : ``"semantic"`` | ``"pathway"``
-        Color encoding for ``economist`` / ``metro_atlas``: ``"semantic"`` (default) keeps the unified main-text
-        red/blue directional scale; ``"pathway"`` uses muted Morandi pathway-family colors.
-    omics_edge_color : ``"tinted"`` | ``"grey"``
-        Visual encoding for enzyme-predicted (``Enz-pred`` / L1) edges without directional MFA flux:
-        ``"tinted"`` (default) draws saturation-capped soft red/blue hollow double-rails (or dashed arrows);
-        ``"grey"`` keeps all non-MFA-directional edges neutral slate grey.
-    focus_regions : sequence of str, optional
-        Explicit region IDs to include when ``mode="publication"`` (empty = auto-select active regions).
-    panel_note : str, optional
-        Custom concise disclosure note shown inside the publication/sub-map legend bar.
-    """
+    """Render Per-Tissue Multi-Omics Pathway Atlas or Focused Cell Press Publication Sub-Pathway Panel."""
     if mode not in VALID_MODES:
         raise ValueError(f"pathway_map mode 应为 {' / '.join(VALID_MODES)} 之一，实际为 {mode!r}")
     if color_mode not in VALID_COLOR_MODES:
@@ -2636,8 +2723,13 @@ def plot_pathway_map(
         raise ValueError(
             f"pathway_map omics_edge_color 应为 {' / '.join(VALID_OMICS_EDGE_COLORS)} 之一，实际为 {omics_edge_color!r}"
         )
+    jprof = get_journal_profile(journal)
     palette = get_palette(style)
     cmap = palette.diverging_cmap()
+    clean_pub = (
+        jprof.clean_publication_framing if (clean_publication is None and mode == "publication")
+        else (bool(clean_publication) and mode == "publication")
+    )
 
     fmt_list = [str(f).lstrip(".").lower() for f in formats]
     static_formats = [f for f in fmt_list if f != "html"]
@@ -2645,10 +2737,11 @@ def plot_pathway_map(
 
     scene = build_pathway_map_scene(
         view, layout,
-        mode=mode, style=style, top_rank=top_rank,
+        mode=mode, style=style, journal=jprof, top_rank=top_rank,
         focus_regions=focus_regions, include_reactions=include_reactions, exclude_reactions=exclude_reactions,
     )
     metro = scene["metro"]
+    min_font_pt = scene["min_font_pt"]
     reactions = scene["reactions"]
     aggs = scene["aggs"]
     nodes_df = scene["nodes_df"]
@@ -2673,19 +2766,42 @@ def plot_pathway_map(
             vx0, vy0, vx1, vy1 = bounds
             vw, vh = vx1 - vx0, vy1 - vy0
             header_view = pd.concat([reactions, aggs], ignore_index=True)
-            header_h, hdr_stacked, hdr_title_fs, hdr_pill_fs = _header_geometry(
-                title, header_view, vw,
-                palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
-            )
+            if clean_pub:
+                header_h = 2.6 if panel_label else 0.7
+                hdr_stacked, hdr_title_fs, hdr_pill_fs = False, jprof.title_font_pt, jprof.min_font_pt
+            else:
+                header_h, hdr_stacked, hdr_title_fs, hdr_pill_fs = _header_geometry(
+                    title, header_view, vw,
+                    palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
+                )
+            # 先检查卡片与节点实际水平范围，再以完整画布宽度排布紧凑图例，消除极窄子图过度折行与越界
+            x_min_c, x_max_c = vx0 - 0.5, vx1 + 0.5
+            for _, row in reactions.iterrows():
+                px, _ = positions[row["element_id"]]
+                cw, _ = _strip_size(
+                    row, group_indices, top_rank=top_rank, mode=mode,
+                    font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
+                )
+                x_min_c = min(x_min_c, px - 0.5)
+                x_max_c = max(x_max_c, px + cw + 0.6)
+            for sp_key, (_, _, _, _, nb) in node_labels.items():
+                if active_node_positions is None or sp_key in active_node_positions:
+                    x_min_c = min(x_min_c, nb[0] - 0.3)
+                    x_max_c = max(x_max_c, nb[2] + 0.3)
+            leg_x0 = x_min_c + 0.5
+            leg_vw = max(vw, (x_max_c - x_min_c) - 1.0)
             legend_plan = _pub_legend_plan(
-                vw, caption, folded_regions, panel_note,
+                leg_vw, caption, folded_regions, panel_note,
                 font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode,
                 strip_mode=strip_mode, omics_edge_color=omics_edge_color,
+                min_font_pt=min_font_pt, include_caption=(not clean_pub),
             )
             pub_footer = legend_plan["footer_h"]
-            fig_h = fig_w * ((vh + header_h + pub_footer) / (vw + 1.0))
-            x_lim = (vx0 - 0.5, vx1 + 0.5)
-            y_lim = (vy1 + pub_footer + 0.5, vy0 - header_h)
+            x_lim = (x_min_c, x_max_c)
+            y_lim = (vy1 + pub_footer + 0.4, vy0 - header_h)
+            x_span = max(1.0, x_lim[1] - x_lim[0])
+            y_span = max(1.0, y_lim[0] - y_lim[1])
+            fig_h = fig_w * (y_span / x_span)
             y_base = vy0
         else:
             total_w = layout.width + SIDEBAR
@@ -2699,7 +2815,7 @@ def plot_pathway_map(
             y_lim = (total_h + 0.5, -header_h)
             y_base = 0.0
 
-        with themed(preset=style, dpi=150, save_dpi=300):
+        with themed(preset=style, journal=jprof, dpi=150, save_dpi=jprof.default_dpi):
             fig = plt.figure(figsize=(fig_w, fig_h), facecolor=palette.surface)
             ax = fig.add_axes([0, 0, 1, 1], facecolor=palette.surface)
             ax.set_xlim(*x_lim)
@@ -2707,15 +2823,20 @@ def plot_pathway_map(
             ax.set_aspect("equal")
             ax.axis("off")
 
-            _draw_header(
-                ax, title, header_view,
-                x_lim[0] + 0.5, x_lim[1] - 0.5,
-                y_base=y_base, palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
-                stacked=hdr_stacked, title_fs=hdr_title_fs, pill_fs=hdr_pill_fs,
-            )
+            if not clean_pub:
+                _draw_header(
+                    ax, title, header_view,
+                    x_lim[0] + 0.5, x_lim[1] - 0.5,
+                    y_base=y_base, palette=palette, preset=style, font_scale=font_scale, unit_in=unit_in,
+                    stacked=hdr_stacked, title_fs=hdr_title_fs, pill_fs=hdr_pill_fs,
+                )
+            elif panel_label:
+                add_panel_label(fig, panel_label, profile=jprof, color=palette.ink)
+
             _draw_regions_and_compartments(
                 ax, layout, active_regions,
-                palette=palette, font_scale=font_scale, metro=metro, color_mode=color_mode, comp_boxes=comp_boxes,
+                palette=palette, font_scale=font_scale, metro=metro, color_mode=color_mode,
+                comp_boxes=comp_boxes, min_font_pt=min_font_pt,
             )
 
             draw_order = (
@@ -2731,13 +2852,13 @@ def plot_pathway_map(
                     palette=palette, cmap=cmap, layout=layout,
                     is_coupled_member=(gi in multi_groups),
                     font_scale=font_scale, metro=metro, color_mode=color_mode,
-                    omics_edge_color=omics_edge_color, unit_in=unit_in,
+                    omics_edge_color=omics_edge_color, unit_in=unit_in, min_font_pt=min_font_pt,
                 )
 
             for _, row in aggs.iterrows():
                 _draw_aggregate(
                     ax, layout, row, palette=palette, cmap=cmap, preset=style,
-                    strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
+                    strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in, min_font_pt=min_font_pt,
                 )
 
             for species in layout.nodes:
@@ -2748,17 +2869,20 @@ def plot_pathway_map(
                     nodes_df.loc[species] if species in nodes_df.index else None,
                     node_labels, palette=palette, cmap=cmap, font_scale=font_scale,
                     unit_in=unit_in, active_positions=active_node_positions, metro=metro,
+                    min_font_pt=min_font_pt,
                 )
 
             for _, row in reactions.iterrows():
                 _draw_leader(
                     ax, geometries[row["element_id"]]["hub"], positions[row["element_id"]], row, group_indices,
                     palette=palette, top_rank=top_rank, mode=mode, font_scale=font_scale, unit_in=unit_in,
+                    min_font_pt=min_font_pt,
                 )
                 _draw_strip(
                     ax, positions[row["element_id"]], row, group_indices,
                     palette=palette, preset=style, top_rank=top_rank, mode=mode,
                     strip_mode=strip_mode, font_scale=font_scale, unit_in=unit_in,
+                    min_font_pt=min_font_pt,
                 )
 
             if mode == "atlas":
@@ -2774,11 +2898,22 @@ def plot_pathway_map(
                 )
             else:
                 _legend_publication(
-                    ax, bounds[0], bounds[3] + 1.6, bounds[2] - bounds[0], legend_plan,
+                    ax, leg_x0, bounds[3] + 1.2, leg_vw, legend_plan,
                     palette=palette, cmap=cmap, preset=style, font_scale=font_scale, unit_in=unit_in,
                 )
 
-            written.extend(save_stem(fig, stem, formats=tuple(static_formats), dpi=300, facecolor=palette.surface, close=True))
+            written.extend(
+                save_stem(
+                    fig, stem, formats=tuple(static_formats), dpi=jprof.default_dpi,
+                    facecolor=palette.surface, bbox_inches="tight" if mode == "atlas" else None, close=True,
+                )
+            )
+            if clean_pub and legend_plan is not None:
+                write_caption_sidecar(
+                    stem, title, caption,
+                    panel_note=panel_note,
+                    method_note=legend_plan.get("full_method_text", ""),
+                )
 
     if want_html:
         from .pathway_map_html import write_pathway_map_html

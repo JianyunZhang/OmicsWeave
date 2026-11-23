@@ -1577,7 +1577,7 @@ _CSS = r"""
   --coupled-ink: #1D4ED8;
   --red-tag: #C81E1E;
   --radius: 5px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+  --font-sans: "Arial", "Helvetica Neue", Helvetica, "Liberation Sans", "Microsoft YaHei", "PingFang SC", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }

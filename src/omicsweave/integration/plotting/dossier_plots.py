@@ -146,10 +146,10 @@ def _draw_cell(
         edge, width = (pal.ink, 1.6) if ring == "selected" else (pal.ink, 0.8) if ring == "changed" else (pal.muted, 0.4)
         ax.scatter([x], [cy], s=_size(cell["certainty"]), color=face, edgecolors=edge, linewidths=width, zorder=2)
     if pd.notna(value):
-        ax.text(x, y - 0.3, f"{value:+.2f}", ha="center", va="center", fontsize=5.2, color=pal.ink2, zorder=3)
+        ax.text(x, y - 0.3, f"{value:+.2f}", ha="center", va="center", fontsize=6.0, color=pal.ink2, zorder=3)
     if state == "summary" and cell["n_quantified"]:
         ax.text(x + 0.3, y + 0.38, f"{int(cell['n_changed'])}/{int(cell['n_quantified'])}", ha="left", va="bottom",
-                fontsize=5, color=pal.ink2, zorder=3)
+                fontsize=6.0, color=pal.ink2, zorder=3)
 
 
 def _draw_assessment(
@@ -167,20 +167,20 @@ def _draw_assessment(
     direction = int(cell["value"]) if pd.notna(cell["value"]) else 0
     if cell["column"] == "level":
         if state in ("L1", "L2", "L3"):
-            b_sc, b_fs = 0.40, 5.4
+            b_sc, b_fs = 0.42, 6.0
             bw = tier_badge_width(state, scale=b_sc, unit_in=0.50, fontsize=b_fs)
             m = _CONCORDANT_RE.search(str(cell.get("text") or ""))
             suffix = f" ({m.group(1)})" if m else ""
-            suf_w = estimate_text_width(suffix, 5.2, 0.50) if suffix else 0.0
+            suf_w = estimate_text_width(suffix, 6.0, 0.50) if suffix else 0.0
             bx = x - (bw + suf_w) / 2.0
             draw_tier_badge(
                 ax, bx, y, state, zorder=3.2, scale=b_sc, preset=preset,
                 unit_in=0.50, fontsize=b_fs, y_scale=y_scale,
             )
             if suffix:
-                ax.text(bx + bw + 0.06, y, suffix, ha="left", va="center", fontsize=5.2, color=pal.muted, zorder=3.2)
+                ax.text(bx + bw + 0.06, y, suffix, ha="left", va="center", fontsize=6.0, color=pal.muted, zorder=3.2)
         elif state == "LX":
-            ax.text(x, y, "Conflict", ha="center", va="center", fontsize=6.0, fontweight="bold", color=pal.ink2, zorder=3.1)
+            ax.text(x, y, "Conflict", ha="center", va="center", fontsize=6.2, fontweight="bold", color=pal.ink2, zorder=3.1)
         else:
             ax.plot([x - 0.16, x + 0.16], [y, y], color=pal.muted, lw=0.95, solid_capstyle="round", zorder=3.1)
         return
@@ -192,7 +192,7 @@ def _draw_assessment(
         palette=pal, font_scale=1.22, zorder=3.0, draw_box=False, y_up=True, y_scale=y_scale,
     )
     if tag:
-        ax.text(x, y - 0.30, tag, ha="center", va="center", fontsize=4.6, color=pal.muted, zorder=3.1)
+        ax.text(x, y - 0.30, tag, ha="center", va="center", fontsize=6.0, color=pal.muted, zorder=3.1)
 
 
 def _short_label(block: str, column: str, tracer: str) -> str:
@@ -330,16 +330,16 @@ def _matrix_legend(
     cax = fig.add_axes((0.35 / width, 1.62 / height, 1.55 / width, 0.13 / height))
     bar = fig.colorbar(plt.cm.ScalarMappable(norm=NORM, cmap=cmap), cax=cax, orientation="horizontal")
     bar.set_ticks([-2, -1, 0, 1, 2])
-    bar.ax.tick_params(labelsize=5.8, colors=pal.ink2, length=2)
+    bar.ax.tick_params(labelsize=6.0, colors=pal.ink2, length=2)
     bar.outline.set_edgecolor(pal.hairline)
-    cax.set_title("log2FC (regulators: × activity sign)", fontsize=6.2, color=pal.ink2, pad=3)
+    cax.set_title("log2FC (regulators: × activity sign)", fontsize=6.4, color=pal.ink2, pad=3)
 
     handles = [plt.scatter([], [], s=_size(c), color="#d9d8d3", edgecolors=pal.muted, linewidths=0.4)
                for c in (0.6, 0.8, 1.0)]
     handles += [plt.scatter([], [], s=85, color="#d9d8d3", edgecolors=pal.ink, linewidths=w) for w in (0.8, 1.6)]
     handles += [plt.scatter([], [], s=85, color="none", edgecolors=pal.muted, linewidths=0.6)]
     labels = ["P(sign) 0.6", "0.8", "1.0", "FDR < 0.05", "FDR & effect", "unsigned"]
-    fig.legend(handles, labels, loc="lower left", bbox_to_anchor=(2.10 / width, 1.48 / height), ncol=6, fontsize=5.8,
+    fig.legend(handles, labels, loc="lower left", bbox_to_anchor=(2.10 / width, 1.48 / height), ncol=6, fontsize=6.0,
                frameon=False, handletextpad=0.25, columnspacing=0.9)
 
     # 下方等比英寸坐标图例画布（1 unit = 1 inch），直接渲染真实矢量图标与三点徽章
@@ -366,7 +366,7 @@ def _matrix_legend(
         ((("not_detected", 0),), "Not detected"),
         ((("qc_blocked", 0),), "QC / Low-n"),
     ):
-        item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.18
+        item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 6.0, 1.0) + 0.18
         if x > 0.05 and x + item_w > lw_in:
             y1 -= 0.23
             x = 0.02
@@ -376,8 +376,8 @@ def _matrix_legend(
                 palette=pal, font_scale=0.95, zorder=2.5, draw_box=True, y_up=True, y_scale=1.0,
             )
             x += sw + 0.035
-        lax.text(x + 0.03, y1, desc, fontsize=5.8, color=pal.ink2, va="center", ha="left")
-        x += 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.18
+        lax.text(x + 0.03, y1, desc, fontsize=6.0, color=pal.ink2, va="center", ha="left")
+        x += 0.04 + estimate_text_width(desc, 6.0, 1.0) + 0.18
 
     # Row 2 (y = y1 - 0.26): 自解释三点证据徽章 + 4 层图标说明
     y2 = y1 - 0.26
@@ -388,18 +388,18 @@ def _matrix_legend(
         ("L1", "Enzyme only"),
     ):
         bw = draw_tier_badge(
-            lax, x, y2, lvl, zorder=2.5, scale=0.175, preset=preset,
-            unit_in=1.0, fontsize=5.4, y_scale=1.0,
+            lax, x, y2, lvl, zorder=2.5, scale=0.18, preset=preset,
+            unit_in=1.0, fontsize=6.0, y_scale=1.0,
         )
-        lax.text(x + bw + 0.07, y2, desc, fontsize=5.7, color=pal.ink2, va="center", ha="left")
-        x += bw + 0.07 + estimate_text_width(desc, 5.7, 1.0) + 0.24
+        lax.text(x + bw + 0.07, y2, desc, fontsize=6.0, color=pal.ink2, va="center", ha="left")
+        x += bw + 0.07 + estimate_text_width(desc, 6.0, 1.0) + 0.24
     # 附带 4 层微图标含义
     for ikind, ilbl in (("flux", "Flux"), ("protein", "Prot"), ("mrna", "mRNA"), ("metabolite", "Metab")):
-        iw = 0.16 + estimate_text_width(ilbl, 5.6, 1.0) + 0.16
+        iw = 0.16 + estimate_text_width(ilbl, 6.0, 1.0) + 0.16
         if x + iw > lw_in:
             break
         draw_layer_icon(lax, ikind, x + 0.07, y2, size=0.15, color=pal.ink, lw=0.72, zorder=2.5)
-        lax.text(x + 0.17, y2, ilbl, fontsize=5.6, color=pal.ink2, va="center", ha="left")
+        lax.text(x + 0.17, y2, ilbl, fontsize=6.0, color=pal.ink2, va="center", ha="left")
         x += iw
 
     # Row 3 & 4: 来源、说明（含 Flux 轴判定口径）与校准注记
@@ -412,9 +412,9 @@ def _matrix_legend(
     ]
     if runs:
         note_parts.insert(0, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()))
-    lax.text(0.02, y3, "  ·  ".join(note_parts), fontsize=5.4, color=pal.muted, va="center", ha="left")
+    lax.text(0.02, y3, "  ·  ".join(note_parts), fontsize=6.0, color=pal.muted, va="center", ha="left")
     if caption:
-        lax.text(0.02, max(0.08, y3 - 0.20), caption, fontsize=5.7, color=pal.ink2, va="center", ha="left")
+        lax.text(0.02, max(0.08, y3 - 0.20), caption, fontsize=6.0, color=pal.ink2, va="center", ha="left")
 
 
 # ---------------------------------------------------------------------------
@@ -542,9 +542,9 @@ def _draw_member(
     ax.set_title(_panel_title(row), fontsize=6, color=pal.ink, loc="left", pad=3)
     if is_econ:
         style_economist_axes(ax, right_y=False, zero_line=False, horizontal_grid=True)
-        ax.tick_params(labelsize=5.5, colors=pal.ink2)
+        ax.tick_params(labelsize=6.0, colors=pal.ink2)
     else:
-        ax.tick_params(labelsize=5.5, colors=pal.ink2, length=2)
+        ax.tick_params(labelsize=6.0, colors=pal.ink2, length=2)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
         for spine in ("left", "bottom"):
@@ -560,7 +560,7 @@ def _draw_member(
         )
         reason = str(row.get("state_reason") or row["cell_state"]).replace("_", " ")
         text = textwrap.fill(reason.strip(), 16, break_long_words=True)
-        ax.text(0.5, 0.28, text, ha="center", va="center", fontsize=5.3, color=pal.muted)
+        ax.text(0.5, 0.28, text, ha="center", va="center", fontsize=6.0, color=pal.muted)
         ax.set_xticks([])
         ax.set_yticks([])
         return
@@ -606,7 +606,7 @@ def _draw_member(
     ax.set_xlim(-0.6, len(positions) - 0.4)
     units = data["units"].iloc[0] if "units" in data and data["units"].iloc[0] not in ("", "TBD") else ""
     ax.set_ylabel("net flux" + (f" ({units})" if units else " (units TBD)") if scale == "linear" else "log2 value",
-                  fontsize=5.5, color=pal.ink2)
+                  fontsize=6.0, color=pal.ink2)
 
 
 def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataFrame, reaction: str, tissue: str,
@@ -673,7 +673,7 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
             fig.text(0.01, 0.12 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items())
                      + "   values: log2 (CPM + 1 for RNA), net flux linear; flux whiskers = IQR of that animal's fits, "
                        "hollow = at a box-constraint bound (from sample_flux_fits; absent in older bundles)",
-                     fontsize=5.5, color=pal.muted)
+                     fontsize=6.0, color=pal.muted)
         return _save(fig, stem, formats, surface=pal.surface)
 
 
@@ -709,12 +709,12 @@ def _draw_split(
     preset: str = DEFAULT_PRESET,
 ) -> None:
     is_econ = preset == "economist"
-    ax.set_title(_split_title(row), fontsize=5.8, color=pal.ink, loc="left", pad=3)
+    ax.set_title(_split_title(row), fontsize=6.0, color=pal.ink, loc="left", pad=3)
     if is_econ:
         style_economist_axes(ax, right_y=False, zero_line=False, horizontal_grid=True)
-        ax.tick_params(labelsize=5.5, colors=pal.ink2)
+        ax.tick_params(labelsize=6.0, colors=pal.ink2)
     else:
-        ax.tick_params(labelsize=5.5, colors=pal.ink2, length=2)
+        ax.tick_params(labelsize=6.0, colors=pal.ink2, length=2)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
         for spine in ("left", "bottom"):
@@ -732,7 +732,7 @@ def _draw_split(
         )
         detail = str(row.get("detail") or st).replace("_", " ")
         text = textwrap.fill(detail.strip(), 22, break_long_words=False)
-        ax.text(0.5, 0.27, text, ha="center", va="center", fontsize=5.3, color=pal.muted)
+        ax.text(0.5, 0.27, text, ha="center", va="center", fontsize=6.0, color=pal.muted)
         ax.set_xticks([])
         ax.set_yticks([])
         return
@@ -752,7 +752,7 @@ def _draw_split(
     longest = max(map(len, positions))
     ax.set_xticklabels(list(positions), rotation=45 if longest > 4 else 0, ha="right" if longest > 4 else "center")
     ax.set_xlim(-0.6, len(positions) - 0.4)
-    ax.set_ylabel("log2(a / b)", fontsize=5.5, color=pal.ink2)
+    ax.set_ylabel("log2(a / b)", fontsize=6.0, color=pal.ink2)
 
 
 def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.DataFrame, panel: Panel, tissue: str,
@@ -828,11 +828,11 @@ def plot_node_split(splits: pd.DataFrame, per_animal: pd.DataFrame, sides: pd.Da
             ("unchanged", "Same members"),
         ):
             draw_status_cell(lax, lx, 0.17 - sw / 2, sw, st, 0, palette=pal, font_scale=0.9, zorder=2.5, draw_box=True, y_up=True)
-            lax.text(lx + sw + 0.04, 0.17, desc, fontsize=5.5, color=pal.muted, va="center", ha="left")
-            lx += sw + 0.06 + estimate_text_width(desc, 5.5, 1.0) + 0.18
+            lax.text(lx + sw + 0.04, 0.17, desc, fontsize=6.0, color=pal.muted, va="center", ha="left")
+            lx += sw + 0.06 + estimate_text_width(desc, 6.0, 1.0) + 0.18
         if runs:
             fig.text(0.01, 0.10 / height, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()),
-                     fontsize=5.5, color=pal.muted)
+                     fontsize=6.0, color=pal.muted)
         return _save(fig, stem, formats, surface=pal.surface)
 
 
@@ -906,9 +906,9 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
                         ax, j - 0.37, i - s * y_scale / 2, s, flag_state, 0,
                         palette=pal, font_scale=0.95, zorder=3.0, draw_box=False, y_up=False, y_scale=y_scale,
                     )
-                    ax.text(j + 0.08, i, text, ha="center", va="center", fontsize=5.8, color=ink, zorder=3.0)
+                    ax.text(j + 0.08, i, text, ha="center", va="center", fontsize=6.0, color=ink, zorder=3.0)
                 else:
-                    ax.text(j, i, text, ha="center", va="center", fontsize=6, color=ink, zorder=3.0)
+                    ax.text(j, i, text, ha="center", va="center", fontsize=6.0, color=ink, zorder=3.0)
         for i, reaction in enumerate(reactions):       # 面板声明中预期能约束该反应的示踪剂
             for tracer in panel.expected_tracers.get(reaction, []):
                 if tracer in order:
@@ -920,7 +920,7 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
                  color=pal.ink, fontweight="bold", va="top")
         handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in IDENTIFIABILITY.values()]
         fig.legend(handles, [k.replace("_", " ") for k in IDENTIFIABILITY], loc="lower left",
-                   bbox_to_anchor=(0.015, 0.06 / height), ncol=4, fontsize=5.8, frameon=False)
+                   bbox_to_anchor=(0.015, 0.06 / height), ncol=4, fontsize=6.0, frameon=False)
         # 纯矢量图标图例条（替代 x / ! / / 文本）
         lax = fig.add_axes((0.12 / width, 0.52 / height, (width - 0.24) / width, 0.36 / height))
         lax.set_facecolor(pal.surface)
@@ -934,8 +934,8 @@ def plot_tracer_coverage(rows: pd.DataFrame, panel: Panel, tissue: str, contrast
             ("insufficient_n", "Low-n (<2)"),
         ):
             draw_status_cell(lax, lx, 0.18 - sw / 2, sw, st, 0, palette=pal, font_scale=0.92, zorder=2.5, draw_box=True, y_up=True)
-            lax.text(lx + sw + 0.04, 0.18, desc, fontsize=5.6, color=pal.muted, va="center", ha="left")
-            lx += sw + 0.06 + estimate_text_width(desc, 5.6, 1.0) + 0.16
+            lax.text(lx + sw + 0.04, 0.18, desc, fontsize=6.0, color=pal.muted, va="center", ha="left")
+            lx += sw + 0.06 + estimate_text_width(desc, 6.0, 1.0) + 0.16
         lax.add_patch(Rectangle((lx, 0.18 - sw * 0.42), sw, sw * 0.84, fill=False, lw=0.85, ls=(0, (2, 1.5)), ec=pal.ink2))
-        lax.text(lx + sw + 0.05, 0.18, "Expected tracer  ·  a vs b = num vs den", fontsize=5.6, color=pal.muted, va="center", ha="left")
+        lax.text(lx + sw + 0.05, 0.18, "Expected tracer  ·  a vs b = num vs den", fontsize=6.0, color=pal.muted, va="center", ha="left")
         return _save(fig, stem, formats, surface=pal.surface)

@@ -21,7 +21,8 @@ import pandas as pd
 
 from omicsweave.contract.export import write_excel_tsv
 from omicsweave.mfa.tracers import format_tracer_display
-from omicsweave.visualization.graphical_abstract import GA_STYLES
+from omicsweave.visualization.graphical_abstract import GA_LAYOUTS, GA_STYLES
+from omicsweave.visualization.journal import DEFAULT_JOURNAL_PROFILE, list_journal_profiles
 from omicsweave.visualization.palettes import VALID_COLOR_MODES
 from omicsweave.visualization.theme import list_presets
 
@@ -45,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
     "formats": ["pdf", "png", "html"],
     "mode": "atlas",
     "style": "metro_atlas",
+    "journal": DEFAULT_JOURNAL_PROFILE,
     "color_mode": "semantic",
     "strip_mode": "omics",
     "omics_edge_color": "tinted",
@@ -59,6 +61,7 @@ DEFAULTS: dict[str, Any] = {
         "enabled": True,
         "style": "",
         "color_mode": "",
+        "layout": "",
     },
 }
 MAP_TABLE = "pathway_map.parquet"
@@ -105,12 +108,18 @@ def settings(raw: dict[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"pathway_map.abstract.style 应为 {'、'.join(GA_STYLES)} 之一，实际为 {abstract['style']!r}")
     if abstract["color_mode"] and abstract["color_mode"] not in VALID_COLOR_MODES:
         raise ValueError(f"pathway_map.abstract.color_mode 应为 {'、'.join(VALID_COLOR_MODES)} 之一")
+    if abstract["layout"] and abstract["layout"] not in GA_LAYOUTS:
+        raise ValueError(f"pathway_map.abstract.layout 应为 {'、'.join(GA_LAYOUTS)} 之一，实际为 {abstract['layout']!r}")
 
     merged = {**DEFAULTS, **raw, "highlight": highlight, "submaps": submaps, "abstract": abstract}
     if merged["mode"] not in MAP_MODES:
         raise ValueError(f"pathway_map.mode 应为 {'、'.join(MAP_MODES)} 之一，实际为 {merged['mode']!r}")
     if merged["style"] not in list_presets():
         raise ValueError(f"pathway_map.style 应为 {'、'.join(list_presets())} 之一，实际为 {merged['style']!r}")
+    if merged["journal"] not in list_journal_profiles():
+        raise ValueError(
+            f"pathway_map.journal 应为 {'、'.join(list_journal_profiles())} 之一，实际为 {merged['journal']!r}"
+        )
     if merged["color_mode"] not in VALID_COLOR_MODES:
         raise ValueError(f"pathway_map.color_mode 应为 {'、'.join(VALID_COLOR_MODES)} 之一，实际为 {merged['color_mode']!r}")
     if merged["strip_mode"] not in ("omics", "axes"):
@@ -245,6 +254,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                          top_rank=int(conf["highlight"]["top_rank"]),
                          mode=str(conf["mode"]),
                          style=str(conf["style"]),
+                         journal=str(conf["journal"]),
                          color_mode=str(conf["color_mode"]),
                          strip_mode=str(conf["strip_mode"]),
                          omics_edge_color=str(conf["omics_edge_color"]),
@@ -256,7 +266,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                          contrast_id=str(row.contrast_id),
                          source=str(source))
 
-        # 默认生成正文分专题代谢子通路图（沿用与主通路图相同的风格与色彩语义，无数据时自动跳过；静态格式）
+        # 默认生成正文分专题代谢子通路图（1:1 遵循目标期刊栏宽与净版出版规范，无数据时自动跳过；静态格式）
         if sub_conf["enabled"] and static_formats:
             selected_subs, skipped = select_submaps_for_view(
                 view, layout,
@@ -277,6 +287,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                     top_rank=int(conf["highlight"]["top_rank"]),
                     mode="publication",
                     style=str(conf["style"]),
+                    journal=str(conf["journal"]),
                     color_mode=str(conf["color_mode"]),
                     strip_mode=str(conf["strip_mode"]),
                     omics_edge_color=str(conf["omics_edge_color"]),
@@ -290,7 +301,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 if reason != "optional_inactive":
                     skipped_submaps.append(f"{row.tissue}/{row.contrast_id}:{sid}({reason})")
 
-        # 默认同步生成小规模 Graphical Abstract（继承主通路图风格；slide_dark 回退到 metro_atlas）
+        # 默认同步生成小规模 Graphical Abstract（继承主通路图风格与期刊规格；cell_press 默认 1200×1200 方形）
         if abs_conf["enabled"] and static_formats:
             from omicsweave.visualization.graphical_abstract import (
                 build_abstract_from_pathway_view,
@@ -299,6 +310,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
 
             ga_style = str(abs_conf["style"]) or (str(conf["style"]) if str(conf["style"]) in GA_STYLES else "metro_atlas")
             ga_color_mode = str(abs_conf["color_mode"]) or str(conf["color_mode"])
+            ga_layout = str(abs_conf["layout"]) or None
             ga_spec = build_abstract_from_pathway_view(
                 view, regions,
                 tissue=str(row.tissue),
@@ -306,7 +318,10 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 provenance=f"Run: {run_text}  |  Style: {ga_style} ({ga_color_mode})  |  Auto-aggregated from Pathway Atlas view (<=10 hubs)",
             )
             ga_stem = stem.parent / f"abstract_{row.contrast_id}"
-            render_graphical_abstract(ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode, formats=static_formats)
+            render_graphical_abstract(
+                ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode,
+                journal=str(conf["journal"]), layout=ga_layout, formats=static_formats,
+            )
             n_abstracts_rendered += 1
 
     (out_dir / "tables").mkdir(parents=True, exist_ok=True)
@@ -350,6 +365,8 @@ def render_abstracts(
     contrasts: list[str] | None = None,
     style: str = "metro_atlas",
     color_mode: str = "semantic",
+    journal: str = DEFAULT_JOURNAL_PROFILE,
+    ga_layout: str | None = None,
     formats: list[str] | None = None,
     layout_path: str = "",
     root: Path | None = None,
@@ -394,5 +411,10 @@ def render_abstracts(
             provenance=f"Source: {bundle.name}  |  Style: {style}  |  Auto-aggregated from Pathway Atlas view (<=10 hubs)",
         )
         stem = target_dir / str(row.tissue) / f"graphical_abstract_{row.contrast_id}_{style}"
-        written.extend(render_graphical_abstract(spec, stem, style=style, color_mode=color_mode, formats=fmts))
+        written.extend(
+            render_graphical_abstract(
+                spec, stem, style=style, color_mode=color_mode,
+                journal=journal, layout=ga_layout, formats=fmts,
+            )
+        )
     return target_dir, written

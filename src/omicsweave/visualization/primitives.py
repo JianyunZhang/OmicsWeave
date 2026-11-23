@@ -300,8 +300,8 @@ def tier_badge_width(
     text = tier_badge_text(level, label_style=label_style, label=label)
     fs = float(fontsize) if fontsize is not None else 3.40 * scale
     dots_w = 1.64 * scale
-    txt_w = estimate_text_width(text, fs, unit_in, bold=True) * 0.88
-    return dots_w + txt_w + 0.36 * scale
+    txt_w = estimate_text_width(text, fs, unit_in, bold=True) * 0.94
+    return dots_w + txt_w + 0.42 * scale
 
 
 def draw_tier_badge(
@@ -333,8 +333,8 @@ def draw_tier_badge(
     bw = tier_badge_width(
         level, scale=scale, show_code=show_code, unit_in=unit_in, label_style=label_style, fontsize=fs, label=label,
     )
-    bh = 1.14 * scale * y_scale
-    lw_scale = (fs / 3.40) if fontsize is not None else scale
+    bh = max(1.14 * scale, em_units(fs, unit_in) * 1.46 if fontsize is not None else 0.0) * y_scale
+    lw_scale = min(1.35, (fs / 3.40)) if fontsize is not None else scale
     is_econ = preset == "economist"
     rad = (0.12 if is_econ else 0.38) * scale
     ax.add_patch(FancyBboxPatch(
@@ -342,7 +342,7 @@ def draw_tier_badge(
         boxstyle=f"round,pad=0,rounding_size={rad}",
         mutation_aspect=y_scale,
         facecolor=tok["bg"], edgecolor=tok["ec"],
-        lw=float(tok["lw"]) * lw_scale, linestyle=tok["ls"], zorder=zorder,
+        lw=max(0.45, float(tok["lw"]) * lw_scale), linestyle=tok["ls"], zorder=zorder,
     ))
     n_on = int(tok["dots"])
     dot_rx = 0.16 * scale
@@ -434,10 +434,11 @@ def coupled_badge_width(
     total_groups: int = 1,
     label: str | None = None,
     unit_in: float = 0.108,
+    fontsize: float | None = None,
 ) -> float:
     txt = coupled_badge_label(group_num, total_groups=total_groups, label=label)
-    fs = 3.30 * scale
-    return 1.44 * scale + estimate_text_width(txt, fs, unit_in, bold=True) * 0.88 + 0.34 * scale
+    fs = float(fontsize) if fontsize is not None else 3.30 * scale
+    return 1.62 * scale + estimate_text_width(txt, fs, unit_in, bold=True) * 0.94 + 0.38 * scale
 
 
 def draw_coupled_badge(
@@ -452,17 +453,21 @@ def draw_coupled_badge(
     total_groups: int = 1,
     label: str | None = None,
     unit_in: float = 0.108,
+    fontsize: float | None = None,
 ) -> float:
     """绘制清晰带双环锁链 Icon 与直白文字的串联通量徽章（``🔗 Linked flux`` / ``🔗 Linked #1``）。"""
     txt = coupled_badge_label(group_num, total_groups=total_groups, label=label)
-    bw = coupled_badge_width(group_num, scale=scale, total_groups=total_groups, label=label, unit_in=unit_in)
-    bh = 1.14 * scale
+    fs = float(fontsize) if fontsize is not None else 3.30 * scale
+    bw = coupled_badge_width(
+        group_num, scale=scale, total_groups=total_groups, label=label, unit_in=unit_in, fontsize=fs,
+    )
+    bh = max(1.14 * scale, em_units(fs, unit_in) * 1.46 if fontsize is not None else 0.0)
     is_econ = palette.name == "economist"
     ax.add_patch(FancyBboxPatch(
         (x, y - bh / 2), bw, bh,
         boxstyle=f"round,pad=0,rounding_size={(0.12 if is_econ else 0.36) * scale}",
         facecolor=palette.coupled_fill, edgecolor=palette.coupled_edge,
-        lw=0.48 * scale, zorder=zorder,
+        lw=max(0.45, 0.48 * scale), zorder=zorder,
     ))
     # 清晰可读的双扣链环矢量图元
     lh = 0.42 * scale
@@ -471,18 +476,18 @@ def draw_coupled_badge(
     ax.add_patch(FancyBboxPatch(
         (lx0, y - lh / 2), lw_link, lh,
         boxstyle=f"round,pad=0,rounding_size={lh / 2}",
-        facecolor="none", edgecolor=palette.coupled_edge, lw=0.62 * scale, zorder=zorder + 0.1,
+        facecolor="none", edgecolor=palette.coupled_edge, lw=max(0.45, 0.62 * scale), zorder=zorder + 0.1,
     ))
     ax.add_patch(FancyBboxPatch(
         (lx0 + 0.36 * scale, y - lh / 2), lw_link, lh,
         boxstyle=f"round,pad=0,rounding_size={lh / 2}",
-        facecolor="none", edgecolor=palette.coupled_ink, lw=0.62 * scale, zorder=zorder + 0.12,
+        facecolor="none", edgecolor=palette.coupled_ink, lw=max(0.45, 0.62 * scale), zorder=zorder + 0.12,
     ))
     ax.text(
-        x + 1.44 * scale,
+        x + 1.62 * scale,
         y + 0.02 * scale,
         txt,
-        fontsize=3.30 * scale,
+        fontsize=fs,
         fontweight="bold",
         ha="left",
         va="center",

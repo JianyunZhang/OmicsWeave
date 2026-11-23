@@ -225,21 +225,23 @@ class Delivery:
                            "内容": kind_label, "文件": path.name,
                            "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
                 elif path.name.startswith("abstract_"):
-                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png"):
+                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tiff", ".tif", ".txt"):
                         continue
                     tissue = path.parts[-2]
-                    row = {"组织": tissue, "比较": path.stem.removeprefix("abstract_"),
-                           "内容": "概念摘要", "文件": path.name,
+                    kind_label = "概念摘要图注" if path.suffix == ".txt" else "概念摘要"
+                    row = {"组织": tissue, "比较": path.stem.removeprefix("abstract_").removesuffix("_caption"),
+                           "内容": kind_label, "文件": path.name,
                            "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
                 else:
                     continue
-            # 2) 正文分专题子通路图：.../pathway_map/<组织>/submaps/<比较>_<子图ID>.{pdf,png}
+            # 2) 正文分专题子通路图：.../pathway_map/<组织>/submaps/<比较>_<子图ID>.{pdf,png,tiff} 及配套 _caption.txt
             elif len(path.parts) >= 7 and path.parts[-7:-3] == prefix and path.parts[-2] == "submaps":
-                if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png"):
+                if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tiff", ".tif", ".txt"):
                     continue
                 tissue = path.parts[-3]
-                row = {"组织": tissue, "比较": path.stem,
-                       "内容": "子通路图", "文件": f"submaps/{path.name}",
+                kind_label = "子通路图注" if path.suffix == ".txt" else "子通路图"
+                row = {"组织": tissue, "比较": path.stem.removesuffix("_caption"),
+                       "内容": kind_label, "文件": f"submaps/{path.name}",
                        "target": PurePosixPath(MAPS_DIR, tissue, "submaps", path.name)}
             else:
                 continue

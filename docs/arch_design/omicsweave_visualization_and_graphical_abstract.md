@@ -81,10 +81,12 @@ src/omicsweave/visualization/
   - `("#2166AC", "#D95F02", "#1B9E77", "#7570B3", "#E7298A", "#66A61E", "#A6761D", "#666666")`
   - 替换 `scoring_plots.py` 原有的红绿对比色（`#1B7837` vs `#B2182B`）。
 
-### 3.3 期刊栏宽标准（`figures.py`）
+### 3.3 期刊栏宽与出版规格体系（`journal.py` & `figures.py`）
 
-- `SINGLE_COL_MM = 89.0`（≈ 3.50 in），`ONE_HALF_COL_MM = 120.0`（≈ 4.72 in），`DOUBLE_COL_MM = 183.0`（≈ 7.20 in），`MAX_PAGE_H_MM = 247.0`（≈ 9.72 in）。
-- 要求任何面向印刷的 `publication` 模式图件按实际印刷栏宽设计画布，确保正文与标注最终字号 ≥ 5.5–6.5 pt。
+- 将「视觉风格（`metro_atlas` / `economist` / `nature_editorial`）」与「期刊出版规格（`JournalProfile`）」正交解耦，**默认采用 `cell_press`（Cell Press Figure Guidelines）**，并保留 `nature` 随时切换：
+  - **`cell_press`（默认）**：`SINGLE_COL_MM = 85.0`（3.35 in）、`ONE_HALF_COL_MM = 114.0`（4.49 in）、`DOUBLE_COL_MM = 174.0`（6.85 in）、常规页高上限 `MAX_PAGE_H_MM = 200.0`（整页上限 `FULL_PAGE_H_MM = 225.0`）；统一 **Arial / Helvetica** 无衬线字体、`mathtext.fontset="stixsans"`、`pdf.fonttype=42` / `ps.fonttype=42` / `svg.fonttype="none"` 嵌入字体；正文图件最终印刷字号硬底线 **≥ 6.0 pt**，面板角标统一加粗大写无句点（`A`, `B`, `C`，`add_panel_label`）；
+  - **`nature`（可切换）**：`89.0 / 120.0 / 183.0 mm`，页高上限 `247.0 mm`，面板角标小写加粗（`a`, `b`, `c`）。
+- 导出引擎 `save_figure` / `save_stem` 原生支持矢量 `pdf` / `eps` / `svg` 及 300/600 dpi `png` / 无损 LZW `tiff` / 高质量 `jpg`，并支持 `bbox_inches=None` 精确锁死像素维度。
 
 ---
 
@@ -210,6 +212,23 @@ omicsweave abstract --spec my_project_ga.yaml --style metro_atlas --output ./ga_
    - 内置浏览器端 `getBBox()` 零溢出自校准守护（`fitSvgLabels`），自动适配 Windows/macOS/Linux 系统字体宽度差异，确保卡片、证据徽章、聚合卡标题与边界胶囊均无文本越界；
    - 浏览器内支持无缝实时切换主题（`Metro Atlas` / `Economist` / `Nature Editorial` / `Slide Dark`）、分专题一键缩放聚焦、按反应/基因/蛋白/代谢物/EC 瞬时搜索、证据层级过滤、`Enz-pred` 柔色/灰轨切换、悬停 `Linked flux` 整链脉冲高亮与当前视图 SVG/PNG 导出；
    - 右侧 Reaction Dossier 抽屉内置 **逐只动物/样本散点小图**（读取 `dossier_samples.parquet` 与 `dossier_sample_contrasts.parquet`，含实验组红点、对照组蓝点、其他组灰点、中位线、MFA 拟合 IQR 误差棒、盒约束空心菱形与 0 基线）及可排序全量成员明细表；交付模块 `delivery.py` 同步复制 `map_<比较>.html` 至交付目录。
+
+---
+
+## 8. Cell Press 出版级排版与解耦规范化体系（M5）
+
+在完整沿用 `metro_atlas` Beck 地铁视觉语法的基础上，将 Cell Press Figure Guidelines 固化为可跨项目复用的模块化设计层：
+
+1. **独立期刊规格与合规审计模块（`visualization/journal.py`）**：
+   - 零业务耦合（不依赖 `contract` / `pydantic` / `seaborn`），提供 `JournalProfile`、`CELL_PRESS`（默认）、`NATURE`、`get_journal_profile()`、`add_panel_label()`、`write_caption_sidecar()` 与自动化预检器 `audit_figure_compliance()`（代码级核验栏宽、最小字号、无衬线字体族、线宽底线与方形 GA 像素规格）；
+   - `theme.py` 的 `themed(..., journal="cell_press")` 统一注入 Arial/Helvetica 无衬线字体栈、`stixsans` 数学无衬线字体与 Type 42 PDF/EPS 字体嵌入；`pathway_map_html.py` 同步采用 `"Arial", "Helvetica Neue", Helvetica` 字体栈；`dossier_plots.py`（图 A–D）全部标注提升至 `≥ 6.0 pt`。
+2. **正文子通路图 1:1 Cell Press 净版输出（`mode="publication"` / `submaps`）**：
+   - 物理宽度 1:1 严格锁定为 Cell Press 标准栏宽（**85 / 114 / 174 mm**，`bbox_inches=None` 无二次缩放漂移），全图任意反应名、代谢物名、紧凑 `●○○ L1` / 示踪剂 `●●○ U-13C-* Flux` 徽章与符号图例均严格 **≥ 6.0 pt Arial**；
+   - 默认遵循 Cell Press「图内不嵌标题与长图注」原则：去掉图内标题栏与运行哈希页脚（可选左上角粗体大写面板字母 `A/B/C`），并自动写出同名 `<stem>_caption.txt` 供直接粘贴至论文 Figure Legend（`Delivery.copy_maps()` 同步交付）；
+   - 全景总图（`mode="atlas"`）与单页交互 HTML 仍保留完整顶栏 KPI、右侧融合仪表盘与底部四栏统计详注，用于补充材料与交互审阅。
+3. **Cell Press 1200 × 1200 px 方形 Graphical Abstract（`graphical_abstract/square.py`，默认版式）**：
+   - 以策略模式解耦 `cell_press_square`（默认）与 `widescreen` 两种版式；`cell_press_square` 精确输出 **1200 × 1200 px @ 300 dpi**（4.0 × 4.0 in）1:1 单面板地铁概念图，全图所有可见文字严格处于 **Arial 12–15 pt**，同时支持全部 5 套视觉皮肤与 `pdf / png / tiff / jpg / eps / svg` 导出，并自动配套 `<stem>_caption.txt`；
+   - CLI `omicsweave map` 与 `omicsweave abstract` 均新增 `--journal cell_press|nature` 与 `--ga-layout cell_press_square|widescreen` 切换开关。
 
 ---
 
