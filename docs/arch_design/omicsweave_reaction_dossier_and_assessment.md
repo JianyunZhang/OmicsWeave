@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
 > 文档类型：设计建议（S0–S5 已实施，S6 待实施；S4 的组别置换待 E1，S5 的标记层待 G10）
-> 版本：v0.10（2026-11-19，图 E 改为整张网络的分组织总图，设计移到[独立文档](omicsweave_pathway_map.md)，见 4.4 与第 9 节）；v0.9（2026-11-18，C 轴增加规则开关 `rna_single_source_changed`，单示踪剂实验的通量按示踪剂列出，见 3.4、第 7 节与 8.1）；v0.8（2026-11-18，8.1 增加 G10 部分接入的记录：F 轴方向按净通量变化定号、标准化尺度的异质性、逐只动物的拟合分布）；v0.7（2026-11-17，8.1 增加 S5 记录，第 6 节写出 S5 新增的列；v0.6 同日增加 S4 记录、校准表的列与对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
+> 版本：v0.11（2026-11-23，8.1 增加评估规则硬化记录：`not_assessable` 反应门控、`pathway_step` 与 `active_abundance_share`、MFA 单组贴边与 `flux_scale_drift_gate`）；v0.10（2026-11-19，图 E 改为整张网络的分组织总图，设计移到[独立文档](omicsweave_pathway_map.md)，见 4.4 与第 9 节）；v0.9（2026-11-18，C 轴增加规则开关 `rna_single_source_changed`，单示踪剂实验的通量按示踪剂列出，见 3.4、第 7 节与 8.1）；v0.8（2026-11-18，8.1 增加 G10 部分接入的记录：F 轴方向按净通量变化定号、标准化尺度的异质性、逐只动物的拟合分布）；v0.7（2026-11-17，8.1 增加 S5 记录，第 6 节写出 S5 新增的列；v0.6 同日增加 S4 记录、校准表的列与对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -686,6 +686,14 @@ Mazdu_vs_Saline_in_HFD 腓肠肌 11 对 4.7、肝脏 14 对 11.3、肾皮质 22 
 两种药物在 LFD 中的心脏 62–64 对 31–40。肝脏、肾皮质的放宽结果与随机相当。心脏高于诱饵，但涉及 LFD Saline 的比较受那两只心脏
 线粒体 / 脂肪酸氧化基因整体偏低的影响（见课题 README），诱饵是丰度匹配的随机基因，排除不了这种按功能类别成片的偏移。
 这些数字基于旧结果包（MFA 为新数据之前的拟合、没有 E5 稳健性表），只用来检验配置与规则，不是课题结论。
+
+**通用质检接入与评估规则硬化（2026-11-23）**：针对单来源独立评估中暴露的四类流程级边界问题，在档案构建与分轴评估层面新增/硬化三项规则（并接入上游 G1 转录组与 MFA 通用样本质检，完整记录见[通用能力规划](omicsweave_generic_capabilities_and_evaluation.md) 11.8）：
+
+| 项目 | 实现 | 实测效果（队列 B 只读对照） |
+|---|---|---|
+| `not_assessable` 反应硬门控 | `assessment.decide(..., semantics=...)` 与 `assess()` 对 `direction_evidence == "not_assessable"`（如 `BIOMASS_REACTION_*`、`Salvage_c`）强制锁为 `L0`、`claim_direction = 0`、`phenomena = "not_assessable_reaction"` | 虚拟反应非 L0 格数由 **23 降为 0** |
+| `pathway_step` 与 `active_abundance_share` | `reaction_members` 新增 `pathway_step` 关系（覆及 `THERMOGENESIS_UCP`、`FA_esterification_c`、`HMGCR`、`BILE_acid`、`ETHER_LIPID`，并将 `Ucp2`/`Ucp3` 移入 `related_isozymes`）；`dossier_members.parquet` 新增 `active_abundance_share` 列；`_judge_members()` 豁免 `pathway_step` 的同工酶丰度压制，普通同工酶采用活跃条件占比并支持无主要同工酶反向时的多成员合计占比放行 | `sq_adipose THERMOGENESIS_UCP`（4 比较）与 `liver FA_esterification_c`（3 比较）均由 `L0 (minor_isozyme_driven)` 恢复为 `L1`；全表 `minor_isozyme_driven` 由 316 降至 240，真诱饵仍受保护 |
+| MFA 单组贴边与 `flux_scale_drift_gate` | 规则新增 `rules.flux_scale_drift_gate`（默认 `true`，`reaction_dossier._parameters` 校验布尔值）：MFA 差异表带 `flux_scale_drift` 时 F 轴降级为 `undetermined` 并在 `phenomena` 中明示；配合 MFA 2% 上界相对容差与按组贴边核查（`contrast_bound_pinned`），消除跨批次通量尺度漂移与单组撞顶假阳性 | `3W_vs_1W` 两个跨时长比较的 L2/L3 通量声明由 **76 降为 0**；`liver G6Pase_c [Mazdu_3W_vs_1W]` 因 3W 组 `2/3` 撞顶升级 `bound_pinned` 降为 `L0` |
 
 ---
 

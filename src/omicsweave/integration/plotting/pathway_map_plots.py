@@ -1866,7 +1866,7 @@ def _legend_atlas(
     sw = 1.25
     for st_pair, desc in (
         ((("changed", 1), ("changed", -1)), "Sig. (FDR<0.05)"),
-        ((("suggestive", 1), ("suggestive", -1)), "Suggestive (p<0.05)"),
+        ((("suggestive", 1), ("suggestive", -1)), "Suggestive (p<0.05 / |g|≥1)"),
         ((("mixed", 0),), "Mixed"),
     ):
         for st, dr in st_pair:
@@ -1875,21 +1875,22 @@ def _legend_atlas(
         ax.text(ix + 0.25, ry1, desc, fontsize=3.55, color=palette.ink2, va="center")
         ix += 0.35 + _text_width(desc, 3.55, unit=unit_in) + 1.35
 
-    # Row 3b: Non-directional / Missing / Alert icon swatches (every icon drawn directly!)
+    # Row 3b: Non-directional / Missing / Alert icon swatches (explicitly separating Unchanged vs Undetermined)
     ry2 = y0 + 6.40
     ix = c3 + 0.3
     for st, desc in (
-        ("unchanged", "Unchanged"),
+        ("unchanged", "Unchanged (equiv.)"),
+        ("undetermined", "Undetermined"),
         ("not_measured", "Not measured"),
-        ("not_identifiable", "Unidentifiable flux"),
+        ("not_identifiable", "Unident. flux"),
         ("not_detected", "Not detected"),
         ("qc_blocked", "QC / Low-n"),
     ):
         draw_status_cell(ax, ix, ry2 - sw / 2, sw, st, 0, palette=palette, font_scale=1.1, zorder=2.5, draw_box=True)
-        ax.text(ix + sw + 0.45, ry2, desc, fontsize=3.55, color=palette.ink2, va="center")
-        ix += sw + 0.55 + _text_width(desc, 3.55, unit=unit_in) + 1.55
-    draw_sign_reversal_badge(ax, ix + 0.72, ry2, radius=0.72, palette=palette, lw=0.65, zorder=2.5)
-    ax.text(ix + 1.85, ry2, "Net flux reversal (group sign flip)", fontsize=3.55, color=palette.sign_change_ink,
+        ax.text(ix + sw + 0.40, ry2, desc, fontsize=3.50, color=palette.ink2, va="center")
+        ix += sw + 0.45 + _text_width(desc, 3.50, unit=unit_in) + 1.25
+    draw_sign_reversal_badge(ax, ix + 0.68, ry2, radius=0.72, palette=palette, lw=0.65, zorder=2.5)
+    ax.text(ix + 1.75, ry2, "Net flux reversal", fontsize=3.50, color=palette.sign_change_ink,
             fontweight="medium", va="center")
 
     # Row 3c: Self-explanatory 3-dot tracer-aware tier badges
@@ -1965,8 +1966,8 @@ def _legend_atlas(
         c1 + _text_width("Multi-Tracer MFA Pooling (Pooled IVW):", 3.55, bold=True, unit=unit_in) + 0.7, stat_y1,
         "Unconstrained (poorly_constrained / bound_pinned) & low-n (<2/group) tracers are excluded; identifiable tracers are combined via "
         "tracer-stratified inverse-variance fixed-effects pooling (w = 1/[(s²_animal + f̄_fit)/n], stratified permutation p). "
-        "When k=1 tracer constrains a step, Pooled = that single tracer (badge shows ●●○ <Tracer> Flux); k≥2 concordant + FDR<0.05 → ●●● <Tracers>; "
-        "opposing clear tracers (|g|≥1) → grey/mixed (no pooling).",
+        "Flux Sig. (●●●): k≥2 concordant + FDR<0.05 + stable; Suggestive (●●○): |Hedges' g|≥1 or (k≥2 concordant + p<0.05 + |g|≥0.8) & LOO-stable; "
+        "solid — = TOST equivalence-tested unchanged; dashed = undetermined (weak/unstable); opposing clear tracers (|g|≥1) → grey/mixed.",
         fontsize=3.35, color=palette.ink2, va="center",
     )
     ax.text(
@@ -2118,9 +2119,10 @@ def _pub_legend_plan(
         b_items.append((f"icon:{ikind}", ilbl, 1.55 + _text_width(ilbl, fs, bold=True, unit=unit_in)))
     b_items.extend([
         ("cell_sig", "Sig. (FDR<0.05)", 2 * sw + 0.65 + _text_width("Sig. (FDR<0.05)", fs, unit=unit_in)),
-        ("cell_sug", "Suggestive (p<0.05)", 2 * sw + 0.65 + _text_width("Suggestive (p<0.05)", fs, unit=unit_in)),
+        ("cell_sug", "Suggestive (p<0.05 / |g|≥1)", 2 * sw + 0.65 + _text_width("Suggestive (p<0.05 / |g|≥1)", fs, unit=unit_in)),
         ("cell_mixed", "Mixed", sw + 0.50 + _text_width("Mixed", fs, unit=unit_in)),
-        ("cell_unchanged", "Unchanged", sw + 0.50 + _text_width("Unchanged", fs, unit=unit_in)),
+        ("cell_unchanged", "Unchanged (equiv.)", sw + 0.50 + _text_width("Unchanged (equiv.)", fs, unit=unit_in)),
+        ("cell_undetermined", "Undetermined", sw + 0.50 + _text_width("Undetermined", fs, unit=unit_in)),
         ("cell_na", "Not measured", sw + 0.50 + _text_width("Not measured", fs, unit=unit_in)),
         ("cell_unident", "Unident. flux", sw + 0.50 + _text_width("Unident. flux", fs, unit=unit_in)),
         ("cell_nodet", "Not detected", sw + 0.50 + _text_width("Not detected", fs, unit=unit_in)),
@@ -2146,7 +2148,8 @@ def _pub_legend_plan(
     wrap_cols = max(36, int(inner_w / char_w))
     method_text = (
         "MFA Pooled IVW: Unconstrained/low-n tracers gated out; identifiable tracers combined by inverse-variance pooling "
-        "(k=1 equals single tracer; opposing |g|≥1 → grey/mixed). Linked flux = stoichiometric 1-DOF redundancy, not higher confidence."
+        "(Flux Sig.=≥2 tracers & FDR<0.05; Sugg.=|g|≥1 or (≥2 & p<0.05 & |g|≥0.8) & LOO-stable; solid —=TOST equiv.; dashed=undetermined; opposing |g|≥1 → mixed). "
+        "Linked flux = stoichiometric 1-DOF redundancy, not higher confidence."
     )
     note_extra = panel_note or (
         ("Inactive / unassessed regions folded from print view: " + " · ".join(folded_regions))
@@ -2329,6 +2332,7 @@ def _legend_publication(
             st_map = {
                 "cell_mixed": "mixed",
                 "cell_unchanged": "unchanged",
+                "cell_undetermined": "undetermined",
                 "cell_na": "not_measured",
                 "cell_unident": "not_identifiable",
                 "cell_nodet": "not_detected",

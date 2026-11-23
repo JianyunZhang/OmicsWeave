@@ -16,7 +16,7 @@ import pandas as pd
 
 from omicsweave.integration.dossier.assessment import (
     Axis, assess, bh, capacity_axis, decide, flux_axis, loo_stability, mechanism, one_sided, pool_axis,
-    regulation_axis, regulation_coefficient, simes,
+    regulation_axis, regulation_coefficient, simes, stratified_pooled_loo,
 )
 
 RULES = {"alpha": 0.05, "equivalence_bound": 0.58, "flux_min_abs_g": 1.0, "heterogeneity_alpha": 0.10,
@@ -246,6 +246,153 @@ class AxisTest(unittest.TestCase):
         self.assertEqual(flux_axis(rows, RULES, stability={"glycerol": driven}).state, "undetermined")
         self.assertTrue(np.isnan(loo_stability([1.0], [2.0, 2.1])))
 
+    def test_stratified_pooled_stability_rescues_weak_minor_tracer(self) -> None:
+        # 1. stratified_pooled_loo 直接测试：强主示踪剂 + 弱次要示踪剂 → 合并 LOO 为 1.0；n=2 vs 2 固定尺度不退化
+        stable = stratified_pooled_loo([
+            (np.array([4.0, 4.4, 4.2]), np.array([7.0, 7.5, 7.2])),
+            (np.array([9.5, 10.5, 9.2]), np.array([10.0, 9.8, 10.4])),
+        ])
+        self.assertEqual(stable, 1.0)
+        small_n = stratified_pooled_loo([
+            (np.array([10.0, 10.2]), np.array([5.0, 5.2])),
+            (np.array([8.0, 8.2]), np.array([4.0, 4.1])),
+        ])
+        self.assertEqual(small_n, 1.0)
+        # 单只极端动物驱动 → 合并 LOO < 1.0
+        outlier = stratified_pooled_loo([
+            (np.array([1.0, 1.0, 25.0]), np.array([2.0, 2.1, 1.9])),
+            (np.array([2.0, 2.1, 1.9]), np.array([2.0, 2.05, 1.95])),
+        ])
+        self.assertLess(outlier, 1.0)
+
+        # 2. flux_axis 优先使用 __pooled__，不再因次要示踪剂 alanine 单层 LOO=0.67 而否决
+        multi = frame(
+            flux("glucose", -0.8, effect=-1.4),
+            flux("glycerol", -0.7, effect=-1.2),
+            flux("alanine", -0.05, effect=-0.12),
+            flux("pooled", -0.75, effect=-1.10, pvalue=0.02, padj=0.25),
+        )
+        ax_rescued = flux_axis(multi, RULES, stability={"glucose": 1.0, "glycerol": 1.0, "alanine": 0.67, "__pooled__": 1.0})
+        self.assertEqual((ax_rescued.state, ax_rescued.direction), ("suggestive", -1))
+
+        # 3. pooled_loo_stability < 1.0 即使 direction_stability >= 0.8 也不通过稳定性门控
+        with_loo_fail = frame(
+            flux("glucose", 1.0, effect=1.4),
+            flux("lactate", 0.3, effect=0.4),
+            flux("pooled", 0.9, effect=1.2, direction_stability=0.85, pooled_loo_stability=0.91),
+        )
+        ax_loo_fail = flux_axis(with_loo_fail, RULES)
+        self.assertEqual(ax_loo_fail.state, "undetermined")
+        self.assertIn("LOO", ax_loo_fail.rule)
+
+        # 4. 绝对尺度 log2fc 与标准化尺度 Hedges' g 异号时记录 scale_direction_discordant
+        discordant = frame(
+            flux("glucose", 1.2, effect=0.9),
+            flux("lactate", -0.4, effect=-1.1),
+            flux("pooled", 0.6, effect=-0.3, direction_stability=0.9),
+        )
+        ax_disc = flux_axis(discordant, RULES)
+        self.assertIn("scale_direction_discordant", ax_disc.flags)
+
+    def test_assess_uses_stratified_pooled_loo_end_to_end(self) -> None:
+        # 端到端 assess()：仅提供 dossier_samples（无预存 direction_stability），次要示踪剂单层反号但分层合并稳定
+        members = frame(
+            flux("glucose", -0.8, effect=-1.4),
+            flux("glycerol", -0.7, effect=-1.2),
+            flux("alanine", -0.05, effect=-0.12),
+            flux("pooled", -0.75, effect=-1.10, pvalue=0.02, padj=0.25),
+        )
+        samples_rows, side_rows = [], []
+        spec = {
+            "glucose": ([4.0, 4.4, 4.2], [7.0, 7.5, 7.2]),
+            "glycerol": ([8.0, 8.6, 8.2], [11.0, 11.5, 11.2]),
+            "alanine": ([9.5, 10.5, 9.2], [10.0, 9.8, 10.4]),
+        }
+        for tr, (num, den) in spec.items():
+            for side, vals in (("numerator", num), ("denominator", den)):
+                for i, v in enumerate(vals):
+                    sid = f"{tr}_{side}_{i}"
+                    samples_rows.append({"source": "A", "layer": "mfa", "tissue": "liver",
+                                         "feature_id": "R1", "tracer": tr, "sample_id": sid, "value": v})
+                    side_rows.append({"source": "A", "layer": "mfa", "contrast_id": "C",
+                                      "sample_id": sid, "side": side})
+        axes_tbl, rxn_tbl = assess(members, "A", RULES, samples=pd.DataFrame(samples_rows),
+                                   sides=pd.DataFrame(side_rows))
+        f_row = axes_tbl[axes_tbl["axis"] == "flux"].iloc[0]
+        self.assertEqual((f_row["state"], int(f_row["direction"])), ("suggestive", -1))
+        self.assertEqual(rxn_tbl.iloc[0]["flux_claim"], "L2")
+
+    def test_phase3_multi_tracer_perm_suggestive_path_b(self) -> None:
+        # S4 路径 B：≥2 可辨识同向示踪剂、无异质性、置换 p < 0.05、|g| = 0.85 >= 0.8、方向稳定 → suggestive
+        concordant = frame(
+            flux("glucose", -1.4, effect=-0.9),
+            flux("glycerol", -1.8, effect=-0.8),
+            flux("pooled", -1.6, effect=-0.85, pvalue=0.033, padj=0.35, direction_stability=0.96,
+                 pooled_loo_stability=1.0),
+        )
+        ax = flux_axis(concordant, RULES)
+        self.assertEqual((ax.state, ax.direction), ("suggestive", -1))
+        self.assertIn("multi_tracer_perm_suggestive", ax.flags)
+
+        # 关闭路径 B（flux_concordant_min_abs_g=None）回退为 undetermined
+        ax_off = flux_axis(concordant, {**RULES, "flux_concordant_min_abs_g": None})
+        self.assertEqual(ax_off.state, "undetermined")
+
+        # 仅 1 种示踪剂 / 有异质性 / |g| < 0.8 均不能走路径 B
+        single = frame(
+            flux("glucose", -1.4, effect=-0.85),
+            flux("pooled", -1.4, effect=-0.85, pvalue=0.033, direction_stability=0.96, pooled_loo_stability=1.0),
+        )
+        self.assertEqual(flux_axis(single, RULES).state, "undetermined")
+        het = frame(
+            flux("glucose", -1.4, effect=-0.9),
+            flux("glycerol", -1.8, effect=-0.8),
+            flux("pooled", -1.6, effect=-0.85, pvalue=0.033, heterogeneity_pvalue=0.04,
+                 direction_stability=0.96, pooled_loo_stability=1.0),
+        )
+        self.assertEqual(flux_axis(het, RULES).state, "undetermined")
+        weak_g = frame(
+            flux("glucose", -1.4, effect=-0.7),
+            flux("glycerol", -1.8, effect=-0.7),
+            flux("pooled", -1.6, effect=-0.72, pvalue=0.033, direction_stability=0.96, pooled_loo_stability=1.0),
+        )
+        self.assertEqual(flux_axis(weak_g, RULES).state, "undetermined")
+
+    def test_phase3_flux_tost_equivalence_and_l1_guard(self) -> None:
+        # S5：4 示踪剂均无强效应、pooled 为 equivalent、无异质性且 |g| 90% 上界 < 1.0 → unchanged
+        equiv_rows = frame(
+            flux("glucose", 0.20, effect=0.35, n_numerator=3, n_denominator=3),
+            flux("glycerol", -0.15, effect=-0.25, n_numerator=3, n_denominator=3),
+            flux("lactate", -0.10, effect=-0.20, n_numerator=3, n_denominator=3),
+            flux("alanine", 0.25, effect=0.40, n_numerator=3, n_denominator=3),
+            flux("pooled", 0.08, state="equivalent", se=0.18, effect=0.10, smd_se=0.35,
+                 n_numerator=12, n_denominator=12, direction_stability=0.60, pooled_loo_stability=0.80),
+        )
+        ax_eq = flux_axis(equiv_rows, RULES)
+        self.assertEqual((ax_eq.state, ax_eq.direction), ("unchanged", 0))
+        self.assertIn("通量等效未变", ax_eq.rule)
+
+        # 护栏 1：若任一可辨识示踪剂自身 |g| >= 1.0（类似 RPI_c 陷阱），不得判为 unchanged
+        trap_rows = equiv_rows.copy()
+        trap_rows.loc[trap_rows["tracer"] == "alanine", "effect"] = 1.45
+        self.assertEqual(flux_axis(trap_rows, RULES).state, "undetermined")
+
+        # 护栏 2：样本量不足（单示踪剂 3v3，|g| 90% 上界 > 1.0）不得判为 unchanged
+        low_power = frame(
+            flux("glucose", 0.05, effect=0.10, n_numerator=3, n_denominator=3),
+            flux("pooled", 0.05, state="equivalent", se=0.10, effect=0.10, n_numerator=3, n_denominator=3),
+        )
+        self.assertEqual(flux_axis(low_power, RULES).state, "undetermined")
+
+        # 护栏 3：关闭 S5（flux_equiv_g_bound=None）回退为 undetermined
+        self.assertEqual(flux_axis(equiv_rows, {**RULES, "flux_equiv_g_bound": None}).state, "undetermined")
+
+        # 护栏 4：decide() 当 F 轴为 unchanged 且 C 轴 changed 时，不再给 L1，而是 L0 + flux_unchanged_despite_capacity
+        decision = decide(ax_eq, Axis("capacity", "changed", direction=1),
+                          Axis("regulation", "no_knowledge"), Axis("pool", "not_measured"), RULES)
+        self.assertEqual((decision["flux_claim"], decision["claim_direction"]), ("L0", 0))
+        self.assertIn("flux_unchanged_despite_capacity", decision["phenomena"])
+
     def test_statistics(self) -> None:
         self.assertAlmostEqual(one_sided(0.04, 1.0, 1), 0.02)
         self.assertAlmostEqual(one_sided(0.04, -1.0, 1), 0.98)
@@ -280,6 +427,107 @@ class AssessTest(unittest.TestCase):
         components = axes_table[axes_table["flux_id"] == "R1"]["pvalue_one_sided"]
         self.assertAlmostEqual(claims.at["R1", "conjunction_pvalue"], components.max())
         self.assertEqual(claims.at["R2", "conjunction_statement"], "capacity up & regulation up & pool up")
+
+    def test_not_assessable_reaction_cannot_be_promoted_above_l0(self) -> None:
+        # 虚拟/边界反应（如 BIOMASS_REACTION_1、Salvage_c）：即使通量轴达到 suggestive / changed，也禁止升为 L1/L2/L3/LX
+        biomass = frame(
+            flux("glucose", 1.5, effect=1.8, direction_stability=0.95, flux_id="BIOMASS_REACTION_1",
+                 direction_evidence="not_assessable"),
+            flux("pooled", 1.5, effect=1.8, padj=0.01, pvalue=0.001, direction_stability=0.95,
+                 flux_id="BIOMASS_REACTION_1", direction_evidence="not_assessable"),
+        )
+        _, rxn = assess(biomass, "A", RULES)
+        row_out = rxn.iloc[0]
+        self.assertEqual(row_out["flux_claim"], "L0")
+        self.assertEqual(int(row_out["claim_direction"]), 0)
+        self.assertEqual(int(row_out["n_concordant_axes"]), 0)
+        self.assertEqual(row_out["mechanism_class"], "")
+        self.assertEqual(row_out["phenomena"], "not_assessable_reaction")
+
+        # decide() 直接验证：即使传入 changed F 轴 + changed C 轴，not_assessable 也强制 L0
+        dec = decide(Axis("flux", "changed", direction=1), Axis("capacity", "changed", direction=1),
+                     Axis("regulation", "no_knowledge"), Axis("pool", "not_measured"), RULES,
+                     semantics="not_assessable")
+        self.assertEqual((dec["flux_claim"], dec["claim_direction"], dec["phenomena"]),
+                         ("L0", 0, "not_assessable_reaction"))
+
+    def test_pathway_step_active_share_and_combined_concordant_rescue(self) -> None:
+        # 1. pathway_step（如 THERMOGENESIS_UCP 的 Ucp1、FA_esterification_c 的 Mogat1）：不受可替代同工酶丰度占比压制
+        mogat = frame(
+            changed(3.2, layer="transcriptomics", member_id="Mogat1", member_relation="pathway_step",
+                    abundance_share=0.004),
+            row(layer="transcriptomics", member_id="Lpin2", member_relation="pathway_step",
+                log2fc=0.05, abundance_share=0.40, pvalue=0.7),
+            row(layer="transcriptomics", member_id="Dgat2", member_relation="pathway_step",
+                log2fc=0.10, abundance_share=0.35, pvalue=0.6),
+        )
+        ax_step = capacity_axis(mogat, {**RULES, "rna_single_source_changed": True}, ["A"])
+        self.assertEqual((ax_step.state, ax_step.direction), ("changed", 1))
+        self.assertNotIn("minor_isozyme_driven", ax_step.flags)
+
+        # pathway_step 中若两个通过 FDR 的步骤方向相反 -> mixed
+        mixed_step = frame(
+            changed(2.0, member_id="StepA", member_relation="pathway_step", abundance_share=0.1),
+            changed(-1.8, member_id="StepB", member_relation="pathway_step", abundance_share=0.9),
+        )
+        self.assertEqual(capacity_axis(mixed_step, RULES, ["A"]).state, "mixed")
+
+        # 2. 条件丰度占比 active_abundance_share：在活跃条件达到 >=20% 的诱导型同工酶得以保留
+        inducible = frame(
+            changed(4.0, member_id="IsoB", abundance_share=0.06, active_abundance_share=0.28),
+            row(member_id="IsoA", log2fc=0.0, abundance_share=0.94, active_abundance_share=0.72, pvalue=0.9),
+        )
+        ax_ind = capacity_axis(inducible, RULES, ["A"])
+        self.assertEqual((ax_ind.state, ax_ind.direction), ("changed", 1))
+        self.assertNotIn("minor_isozyme_driven", ax_ind.flags)
+
+        # 真正痕量且与主要同工酶反向的诱饵仍被拦截
+        decoy = frame(
+            changed(1.2, member_id="Pkm", abundance_share=0.05, active_abundance_share=0.08),
+            row(member_id="Pklr", log2fc=-0.6, abundance_share=0.95, active_abundance_share=0.92, pvalue=0.15),
+        )
+        ax_decoy = capacity_axis(decoy, RULES, ["A"])
+        self.assertEqual(ax_decoy.state, "undetermined")
+        self.assertIn("minor_isozyme_driven", ax_decoy.flags)
+
+        # 3. 多成员同向合计占比达标（无主要同工酶反向）：不被 minor_isozyme_driven 误杀
+        multi_ok = frame(
+            changed(1.1, member_id="Iso1", abundance_share=0.12),
+            changed(0.9, member_id="Iso2", abundance_share=0.11),
+            row(member_id="IsoMain", log2fc=0.1, abundance_share=0.77, pvalue=0.5),
+        )
+        ax_multi = capacity_axis(multi_ok, RULES, ["A"])
+        self.assertEqual((ax_multi.state, ax_multi.direction), ("changed", 1))
+        self.assertNotIn("minor_isozyme_driven", ax_multi.flags)
+
+        # 若主要同工酶明显反向（|log2fc| >= 0.3），即使多个次要同工酶合计 >= 20% 仍禁止放行
+        multi_opp = frame(
+            changed(1.1, member_id="Iso1", abundance_share=0.12),
+            changed(0.9, member_id="Iso2", abundance_share=0.11),
+            row(member_id="IsoMain", log2fc=-0.5, abundance_share=0.77, pvalue=0.12),
+        )
+        ax_opp = capacity_axis(multi_opp, RULES, ["A"])
+        self.assertEqual(ax_opp.state, "undetermined")
+        self.assertIn("minor_isozyme_driven", ax_opp.flags)
+
+    def test_flux_scale_drift_gates_flux_axis_and_propagates_to_phenomena(self) -> None:
+        drifted = frame(
+            flux("glucose", 1.2, effect=1.8, direction_stability=1.0, flags="flux_scale_drift"),
+            flux("pooled", 1.2, effect=1.8, direction_stability=1.0, flags="flux_scale_drift"),
+        )
+        # 默认 flux_scale_drift_gate=True：降级为 undetermined，阻止升 L2
+        ax_gated = flux_axis(drifted, RULES)
+        self.assertEqual(ax_gated.state, "undetermined")
+        self.assertIn("flux_scale_drift", ax_gated.flags)
+        dec = decide(ax_gated, Axis("capacity", "undetermined"),
+                     Axis("regulation", "no_knowledge"), Axis("pool", "not_measured"), RULES)
+        self.assertEqual(dec["flux_claim"], "L0")
+        self.assertIn("flux_scale_drift", dec["phenomena"])
+
+        # 关闭门控时恢复 suggestive，但仍保留 flux_scale_drift 标记提醒
+        ax_open = flux_axis(drifted, {**RULES, "flux_scale_drift_gate": False})
+        self.assertEqual(ax_open.state, "suggestive")
+        self.assertIn("flux_scale_drift", ax_open.flags)
 
 
 if __name__ == "__main__":

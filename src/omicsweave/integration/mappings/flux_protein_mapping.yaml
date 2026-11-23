@@ -2202,14 +2202,15 @@ OXPHOS_CV:
 THERMOGENESIS_UCP:
   direct_enzymes:
   - Ucp1
-  - Ucp2
-  - Ucp3
   - Dio2
   - Cidea
   upstream_regulators: []
   downstream_enzymes: []
   transporters: []
   cofactors: []
+  related_isozymes:
+  - Ucp2
+  - Ucp3
   description: Mitochondrial uncoupling proteins and thermogenic program
   transcription_factors:
   - Ppargc1a

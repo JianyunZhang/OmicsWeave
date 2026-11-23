@@ -55,7 +55,7 @@ GENE_ROLE_ROLE = {s.gene_role: s.role for s in ROLES.values() if s.gene_role}
 _ROLE_SPEC = {s.role: s for s in ROLES.values()}
 GENE_ROLE_ORDER = tuple(s.gene_role for s in ROLES.values() if s.gene_role)
 
-RELATIONS = ("isozyme", "complex_subunit", "shared_subunit")
+RELATIONS = ("isozyme", "complex_subunit", "shared_subunit", "pathway_step")
 EFFECTS = ("activates", "inhibits", "unknown")
 ACTIVITY_MODES = ("phosphorylation", "dephosphorylation", "allosteric", "protein_interaction")
 MODES = (*ACTIVITY_MODES, "transcription", "signaling", "unknown")

@@ -149,6 +149,157 @@ class PathwayMapHtmlTest(unittest.TestCase):
             self.assertTrue(reg_strokes)
             self.assertLessEqual(max(reg_strokes), 0.10)
 
+    def test_render_maps_omits_figure_e_label_in_outputs(self) -> None:
+        """PDF/PNG/HTML 主图、子通路图及 Graphical Abstract 输出文本均不应标注 'Figure E'。"""
+        import ast
+
+        root = Path(__file__).resolve().parents[2]
+        targets = [
+            root / "src/omicsweave/integration/pathway_map.py",
+            root / "src/omicsweave/integration/plotting/pathway_map_plots.py",
+            root / "src/omicsweave/integration/plotting/pathway_map_html.py",
+            root / "src/omicsweave/visualization/graphical_abstract/spec.py",
+            root / "src/omicsweave/visualization/graphical_abstract/renderer.py",
+        ]
+        for path in targets:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            # Collect docstring AST nodes so only non-docstring runtime strings are checked
+            doc_nodes: set[int] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    if (
+                        node.body
+                        and isinstance(node.body[0], ast.Expr)
+                        and isinstance(node.body[0].value, ast.Constant)
+                        and isinstance(node.body[0].value.value, str)
+                    ):
+                        doc_nodes.add(id(node.body[0].value))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in doc_nodes:
+                    self.assertNotIn(
+                        "figure e",
+                        node.value.lower(),
+                        f"Unexpected 'Figure E' runtime string in {path.name}:{getattr(node, 'lineno', '?')}: {node.value!r}",
+                    )
+
+        # If full runtime dependencies (pydantic) are present, also exercise render_maps end-to-end
+        try:
+            from unittest.mock import patch
+            from omicsweave.integration import pathway_map as pm
+        except ModuleNotFoundError:
+            return
+
+        view, regions = _synthetic_map_view()
+        members = pd.DataFrame([{
+            "tissue": "liver", "contrast_id": "HFD_vs_LFD", "source": "U-13C-glucose",
+            "layer": "mfa", "flux_id": "CS_m", "cell_state": "suggestive",
+            "tracer": "glucose", "n_numerator": 6, "n_denominator": 6,
+        }])
+        axes = pd.DataFrame([{"tissue": "liver", "contrast_id": "HFD_vs_LFD", "flux_id": "CS_m"}])
+        assessed = pd.DataFrame([{"tissue": "liver", "contrast_id": "HFD_vs_LFD", "flux_id": "CS_m"}])
+        coverage = pd.DataFrame([{"flux_id": "CS_m", "placement": "edge"}])
+
+        captured: list[str] = []
+
+        def fake_plot(v, lay, reg, title, caption, stem, formats=("pdf", "png", "html"), **kwargs):
+            captured.append(str(title))
+            if kwargs.get("panel_note"):
+                captured.append(str(kwargs["panel_note"]))
+            return []
+
+        def fake_ga(spec, stem, **kwargs):
+            captured.append(str(spec.provenance))
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dossier_dir = Path(tmp) / "dossier"
+            out_dir = Path(tmp) / "out"
+            (dossier_dir / "tables").mkdir(parents=True)
+            with (
+                patch.object(pm, "coverage_table", return_value=coverage),
+                patch.object(pm, "map_view", return_value=view),
+                patch.object(pm, "region_summary", return_value=regions),
+                patch.object(pm, "extra_pathway_fusion", return_value=pd.DataFrame()),
+                patch.object(pm, "signed_module_summary", return_value={}),
+                patch("omicsweave.integration.plotting.pathway_map_plots.plot_pathway_map", side_effect=fake_plot),
+                patch("omicsweave.visualization.graphical_abstract.render_graphical_abstract", side_effect=fake_ga),
+            ):
+                pm.render_maps(
+                    dossier_dir, out_dir, {"formats": ["pdf", "png", "html"]},
+                    source="U-13C-glucose", runs={"Integration": "run_test"},
+                    members=members, axes=axes, assessed=assessed, calibration=pd.DataFrame(),
+                )
+
+        self.assertGreaterEqual(len(captured), 1)
+        self.assertTrue(captured[0].startswith("Liver · HFD_vs_LFD"))
+        for text in captured:
+            self.assertNotIn("figure e", text.lower())
+
+    def test_svg_status_cell_distinguishes_unchanged_and_undetermined(self) -> None:
+        from omicsweave.integration.plotting.pathway_map_html import _svg_status_cell
+        from omicsweave.visualization.palettes import get_palette
+
+        pal = get_palette("metro_atlas")
+        svg_unch = _svg_status_cell(0.0, 0.0, 1.0, "unchanged", 0, pal)
+        svg_undet = _svg_status_cell(0.0, 0.0, 1.0, "undetermined", 0, pal)
+        self.assertEqual(svg_unch.count("<line "), 1)
+        self.assertEqual(svg_undet.count("<line "), 2)
+        self.assertIn(pal.ink2, svg_unch)
+        self.assertIn(pal.muted, svg_undet)
+
+    def test_flux_gate_checklist_payload_and_drawer_js(self) -> None:
+        layout = default_layout()
+        view, regions = _synthetic_map_view()
+        view["F_flags"] = ""
+        view["F_g"] = np.nan
+        view["text"] = ""
+        hex_mask = (view["element_type"] == "reaction") & (view["element_id"] == "HEX_c")
+        view.loc[hex_mask, "F_flags"] = "single_subject_driven"
+        view.loc[hex_mask, "F_g"] = 0.66
+        view.loc[hex_mask, "text"] = "可辨识，未达 suggestive/changed（|g| = 0.66 < 1，单只动物驱动）"
+
+        members = pd.DataFrame([
+            {
+                "flux_id": "HEX_c", "tissue": "liver", "contrast_id": "HFD_vs_LFD", "source": "s1",
+                "layer": "mfa", "role": "flux", "member_id": "HEX_c", "feature_id": "HEX_c",
+                "feature_name": "HEX_c", "tracer": "pooled", "member_relation": "", "regulator_effect": "",
+                "log2fc": 0.85, "effect": 0.66, "effect_type": "hedges_g", "smd_se": 0.42, "padj": 0.22,
+                "padj_global": 0.42, "fdr_scope": "per_tissue", "pvalue": 0.08,
+                "lfsr": np.nan, "abundance_share": np.nan, "mean_numerator": 18.0, "mean_denominator": 10.0,
+                "n_numerator": 6, "n_denominator": 6, "cell_state": "no_evidence", "state_reason": "",
+                "identifiability": "well_constrained", "heterogeneity_pvalue": 0.61, "direction_stability": 0.72,
+                "pooled_loo_stability": 0.83, "smd_weights": "glucose:0.55;lactate:0.45",
+                "tracer_weights": "glucose:0.90;lactate:0.10", "g_total_var": 1.42, "smd_weighting": "smd",
+                "flags": "single_subject_driven",
+            },
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            out = write_pathway_map_html(
+                view, layout, regions, "Gate Checklist Test", ["Run: demo"],
+                Path(tmp) / "gate.html",
+                members=members, tissue="liver", contrast_id="HFD_vs_LFD", source="s1",
+            )
+            txt = out.read_text(encoding="utf-8")
+            self.assertIn("renderFluxGateChecklist", txt)
+            self.assertIn("Flux Assessment Gate Checklist", txt)
+            self.assertIn("Unchanged (Equiv.)", txt)
+            self.assertIn("PASS (P+G)", txt)
+            payload = _extract_payload_json(txt)
+            hx = payload["elements"]["rxn:HEX_c"]
+            self.assertEqual(hx["f_flags"], ["single_subject_driven"])
+            self.assertAlmostEqual(hx["f_g"], 0.66)
+            self.assertIn("|g| = 0.66 < 1", hx["f_rule"])
+            m0 = hx["members"][0]
+            self.assertAlmostEqual(m0["effect"], 0.66)
+            self.assertAlmostEqual(m0["smd_se"], 0.42)
+            self.assertAlmostEqual(m0["padj_global"], 0.42)
+            self.assertEqual(m0["fdr_scope"], "per_tissue")
+            self.assertAlmostEqual(m0["dir_stab"], 0.72)
+            self.assertAlmostEqual(m0["loo_stab"], 0.83)
+            self.assertAlmostEqual(m0["g_total_var"], 1.42)
+            self.assertEqual(m0["smd_weights"], "glucose:0.55;lactate:0.45")
+            self.assertEqual(m0["tracer_weights"], "glucose:0.90;lactate:0.10")
+
 
 if __name__ == "__main__":
     unittest.main()

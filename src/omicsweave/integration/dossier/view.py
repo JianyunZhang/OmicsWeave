@@ -38,13 +38,16 @@ MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 FLUX_STATES = ("not_identifiable", "insufficient_n", "not_infused")
 VIEW_COLUMNS = ["panel_id", "tissue", "contrast_id", "row", "element_type", "element_id", "label", "segment",
                 "block", "column", "source", "layer", "tracer", "expected_tracer", "value", "certainty",
-                "display_state", "n_changed", "n_quantified", "ring", "members", "text"]
+                "display_state", "n_changed", "n_quantified", "ring", "members", "text", "flags"]
 AXIS_LABELS = {"flux": "F", "capacity": "C", "regulation": "R", "pool": "M"}
 LAYER_CODE = {"proteomics": "P", "transcriptomics": "R", "metabolomics": "M"}
 MEMBER_EXPORT = ["source", "flux_id", "layer", "role", "member_id", "feature_id", "feature_name", "tracer",
-                 "member_relation", "regulator_effect", "regulator_mode", "log2fc", "log2fc_unshrunk", "se", "pvalue",
-                 "padj", "lfsr", "n_numerator", "n_denominator", "abundance_share", "cell_state", "state_reason",
-                 "selected", "identifiability", "flags", "implied_direction"]
+                 "member_relation", "regulator_effect", "regulator_mode", "log2fc", "log2fc_unshrunk", "effect",
+                 "effect_type", "se", "smd_se", "pvalue", "padj", "padj_global", "fdr_scope", "lfsr", "n_numerator",
+                 "n_denominator", "abundance_share",
+                 "cell_state", "state_reason", "selected", "identifiability", "heterogeneity_pvalue",
+                 "direction_stability", "pooled_loo_stability", "smd_weights", "tracer_weights", "g_total_var",
+                 "tracer_evidence", "flags", "implied_direction"]
 
 
 def certainty(row: pd.Series | dict) -> float:
@@ -236,7 +239,8 @@ def matrix_view(panel: Panel, elements: pd.DataFrame, members: pd.DataFrame, tis
 def _assessment_cells(add, element: pd.Series, assessment: tuple[pd.DataFrame, pd.DataFrame], reaction: str,
                       tissue: str, contrast: str, source: str) -> None:
     axes, reactions = assessment
-    empty = {"value": np.nan, "certainty": np.nan, "n_changed": 0, "n_quantified": 0, "ring": "", "members": ""}
+    empty = {"value": np.nan, "certainty": np.nan, "n_changed": 0, "n_quantified": 0, "ring": "", "members": "",
+             "flags": ""}
     here = axes[(axes["flux_id"] == reaction) & (axes["tissue"] == tissue) & (axes["contrast_id"] == contrast)]
     for axis, label in AXIS_LABELS.items():
         row = here[here["axis"] == axis]
@@ -246,7 +250,7 @@ def _assessment_cells(add, element: pd.Series, assessment: tuple[pd.DataFrame, p
         row = row.iloc[0]
         add(element, "assessment", label, source, "", "",
             {**empty, "display_state": row["state"], "value": float(row["direction"]), "text": row["rule"],
-             "members": row["basis"]})
+             "members": row["basis"], "flags": str(row.get("flags") or "") if pd.notna(row.get("flags")) else ""})
     claim = reactions[(reactions["flux_id"] == reaction) & (reactions["tissue"] == tissue)
                       & (reactions["contrast_id"] == contrast)]
     if claim.empty:
@@ -256,21 +260,26 @@ def _assessment_cells(add, element: pd.Series, assessment: tuple[pd.DataFrame, p
                                    else "")
     add(element, "assessment", "level", source, "", "",
         {**empty, "display_state": claim["flux_claim"], "value": float(claim["claim_direction"]), "text": level,
-         "members": claim["phenomena"]})
+         "members": claim["phenomena"], "flags": ""})
 
 
 def wide_table(view: pd.DataFrame) -> pd.DataFrame:
-    """导出用的宽表：行与图相同，每个格子三列（值、状态、通过数 / 测到数）。"""
+    """导出用的宽表：行与图相同；数据格含值、状态、通过数 / 测到数，评估轴含方向、状态、判定依据与标记。"""
     index = ["row", "element_type", "element_id", "label", "segment"]
     out = view[index].drop_duplicates().set_index("row")
     for (block, column), cell in view.groupby(["block", "column"], sort=False):
         cell = cell.set_index("row")
         name = f"{block} {column}"
-        if block == "assessment":                 # 评估块：方向（+1 / −1 / 0）、状态；结论等级另写文字
+        if block == "assessment":                 # 评估块：方向（+1 / −1 / 0）、状态；轴另写 rule 与 flags，等级写文字与现象
             out[f"{name} direction"] = cell["value"]
             out[f"{name} state"] = cell["display_state"]
             if column == "level":
                 out[f"{name} text"] = cell["text"]
+                out[f"{name} phenomena"] = cell["members"]
+            else:
+                out[f"{name} rule"] = cell["text"]
+                if "flags" in cell.columns:
+                    out[f"{name} flags"] = cell["flags"]
             continue
         out[f"{name} log2fc"] = cell["value"].round(4)
         out[f"{name} state"] = cell["display_state"]
@@ -284,6 +293,9 @@ def member_table(members: pd.DataFrame, panel: Panel, tissue: str, contrast: str
     rows = members[(members["tissue"] == tissue) & (members["contrast_id"] == contrast)
                    & members["flux_id"].isin(panel.reactions)].copy()
     rows["_order"] = rows["flux_id"].map(order)
+    for column in MEMBER_EXPORT:
+        if column not in rows.columns:
+            rows[column] = np.nan
     return rows.sort_values(["_order", "source", "layer", "role", "member_id"], kind="stable")[MEMBER_EXPORT]
 
 

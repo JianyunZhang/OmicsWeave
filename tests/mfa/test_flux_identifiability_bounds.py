@@ -112,6 +112,12 @@ class BoundHelpersTest(unittest.TestCase):
         self.assertEqual(flags.tolist(),
                          [True, True, False, True, True, True, False, False])
 
+    def test_flag_at_bound_relative_tolerance_catches_near_upper_bound(self) -> None:
+        values = [3000.0, 2999.88, 2965.6, 2940.0, 2939.0, 2500.0, 1.04, 1.06]
+        flags = _flag_at_bound(values, [0.0, 1.0, 3000.0], 0.05, rel_tolerance=0.02)
+        self.assertEqual(flags.tolist(),
+                         [True, True, True, True, False, False, True, False])
+
     def test_net_bound_values_cover_both_directions_of_the_box(self) -> None:
         # 不可逆：lb / ub；可逆：两向同侧 → 0，分处两侧 → ub − lb
         self.assertEqual(_net_bound_values([0.0, 1.0], (LOWER, UPPER)),
@@ -209,6 +215,64 @@ class DifferentialFluxIdentifiabilityTest(unittest.TestCase):
             gated = self._run_differential(Path(temp_dir), require_identifiable=True)
         self.assertFalse(bool(gated.loc["DIFF_c", "is_significant"]))
 
+    def test_per_contrast_group_upper_bound_pinning_overrides_global_dilution(self) -> None:
+        """20 鼠队列中仅 group_3w 的 2/3 只动物在 G6Pase_c 上贴近上界 3000（2965.6 与 3000.0），
+        全局贴边率仅 2/20 = 10%（well_constrained）；但 group_3w vs group_1w 比较必须判为 bound_pinned，
+        而同反应在未贴边比较 group_1w vs saline_1w 中仍保持 well_constrained。"""
+        groups = {
+            **{f"w3_{i}": "group_3w" for i in range(3)},
+            **{f"w1_{i}": "group_1w" for i in range(4)},
+            **{f"s1_{i}": "saline_1w" for i in range(4)},
+            **{f"s3_{i}": "saline_3w" for i in range(4)},
+            **{f"other_{i}": "other" for i in range(5)},
+        }
+        g6p_vals = {"w3_0": 3000.0, "w3_1": 2965.6, "w3_2": 1702.0}
+        fits = {}
+        for sid in groups:
+            val = g6p_vals.get(sid, 1000.0 + (hash(sid) % 7) * 10.0)
+            fits[sid] = pd.DataFrame({
+                "loss": np.linspace(0.1, 0.2, N_FITS),
+                "liver--G6Pase_c": _pinned(val) if val >= 2950.0 else _tight(val),
+                "liver--CS_m": _tight(50.0),
+                "liver--CAP_c": _pinned(UPPER),  # 提供盒约束上界 3000 的真实撞顶点质量
+            })
+        config = {
+            "annotation": {"require_standard_reaction_ids": False},
+            "differential_flux": {"statistic": "effect_size_only", "require_identifiable": True},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir, contextlib.redirect_stdout(io.StringIO()):
+            out = Path(temp_dir)
+            mat = sample_flux_matrix(_flux_df(fits), fits, groups, ["liver"], out, analysis_config=config)
+            ident = pd.read_csv(out / "01_df_results" / "all_tissues" / "flux_matrix"
+                                / "flux_identifiability.csv").set_index("reaction")
+            res = differential_flux(
+                _flux_df(fits), fits, groups, ["group_3w", "group_1w", "saline_1w"], ["liver"], out,
+                comparisons=[("group_3w", "group_1w"), ("group_1w", "saline_1w")],
+                analysis_config=config,
+            )
+
+        # 2965.6 落在 3000 的 2% 相对容差内，应被识别为上界贴边
+        w3_rows = mat[(mat["reaction"] == "G6Pase_c") & (mat["sample_id"].isin(["w3_0", "w3_1", "w3_2"]))].set_index("sample_id")
+        self.assertTrue(bool(w3_rows.loc["w3_0", "at_upper_bound"]))
+        self.assertTrue(bool(w3_rows.loc["w3_1", "at_upper_bound"]))
+        self.assertFalse(bool(w3_rows.loc["w3_2", "at_upper_bound"]))
+        # 全局稀释后仅 2/20 = 10%
+        self.assertAlmostEqual(ident.loc["G6Pase_c", "frac_at_bound"], 2 / 20)
+        self.assertEqual(ident.loc["G6Pase_c", "identifiability"], "well_constrained")
+
+        # 单组贴边比较升级为 bound_pinned 且被 require_identifiable 门控
+        pinned_df = res["GROUP_3W_vs_GROUP_1W"].set_index("reaction")
+        self.assertEqual(pinned_df.loc["G6Pase_c", "identifiability"], "bound_pinned")
+        self.assertTrue(bool(pinned_df.loc["G6Pase_c", "contrast_bound_pinned"]))
+        self.assertAlmostEqual(pinned_df.loc["G6Pase_c", "contrast_frac_at_bound"], 2 / 3)
+        self.assertFalse(bool(pinned_df.loc["G6Pase_c", "is_significant"]))
+
+        # 未贴边比较保持 well_constrained
+        clean_df = res["GROUP_1W_vs_SALINE_1W"].set_index("reaction")
+        self.assertEqual(clean_df.loc["G6Pase_c", "identifiability"], "well_constrained")
+        self.assertFalse(bool(clean_df.loc["G6Pase_c", "contrast_bound_pinned"]))
+        self.assertAlmostEqual(clean_df.loc["G6Pase_c", "contrast_frac_at_bound"], 0.0)
+
 
 class CrossProtocolConsensusGateTest(unittest.TestCase):
     def test_bound_pinned_in_any_protocol_fails_consensus(self) -> None:
@@ -243,6 +307,8 @@ class IdentifiabilityConfigValidationTest(unittest.TestCase):
         for bad in ({"bound_pinned_min_fraction": 0.0},
                     {"bound_pinned_min_fraction": 1.5},
                     {"bound_tolerance": -0.1},
+                    {"bound_rel_tolerance": -0.01},
+                    {"bound_rel_tolerance": 0.5},
                     {"bound_values": 1.0},
                     {"bound_values": ["lower"]}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
@@ -250,7 +316,7 @@ class IdentifiabilityConfigValidationTest(unittest.TestCase):
 
     def test_accepts_defaults(self) -> None:
         _validate_analysis_config({"identifiability": {
-            "bound_values": [0.0, 1.0], "bound_tolerance": 0.05,
+            "bound_values": [0.0, 1.0], "bound_tolerance": 0.05, "bound_rel_tolerance": 0.02,
             "infer_bounds_from_fits": True, "bound_pinned_min_fraction": 0.5,
         }})
 

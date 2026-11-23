@@ -13,6 +13,7 @@
 #
 # 成员可以写成列表，或写成 {成员: {属性}}。属性：
 #   relation  isozyme（默认，可互相替代）/ complex_subunit（复合体亚基）/ shared_subunit（多个复合体共用的亚基）
+#             pathway_step（集总多步/分枝或功能不可替代的诱导酶，不互相替代，不按次要同工酶压制）
 #   effect    activates / inhibits / unknown（对酶活性的作用方向；unknown 只展示，不参与方向判断）
 #   mode      phosphorylation / dephosphorylation / allosteric / protein_interaction（作用于活性）
 #             transcription / signaling（作用于酶量或经由其他通路，只展示）/ unknown
@@ -197,7 +198,21 @@ HSL_c:
     Prkaa2: {effect: inhibits, mode: phosphorylation, sources: [PMID:14641008]}
 
 HMGCR:
-  direct_enzymes: [Hmgcs1, Hmgcr, Mvk, Pmvk, Mvd, Fdps, Fdft1, Sqle, Lss, Cyp51, Dhcr7, Dhcr24, Soat1, Soat2]
+  direct_enzymes:
+    Hmgcs1: {relation: pathway_step}
+    Hmgcr: {relation: pathway_step}
+    Mvk: {relation: pathway_step}
+    Pmvk: {relation: pathway_step}
+    Mvd: {relation: pathway_step}
+    Fdps: {relation: pathway_step}
+    Fdft1: {relation: pathway_step}
+    Sqle: {relation: pathway_step}
+    Lss: {relation: pathway_step}
+    Cyp51: {relation: pathway_step}
+    Dhcr7: {relation: pathway_step}
+    Dhcr24: {relation: pathway_step}
+    Soat1: {relation: pathway_step}
+    Soat2: {relation: pathway_step}
   regulators:
     Prkaa1: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
     Prkaa2: {effect: inhibits, mode: phosphorylation, sources: [PMID:2598924, PMID:2889619]}
@@ -216,3 +231,49 @@ CPS1_c:
       effect: activates
       mode: allosteric
       sources: [PMID:8663466, PMID:2742825]
+
+# --- Multi-step / functionally non-interchangeable lumped reactions (pathway_step) ---
+#   PMID:21068344  Ricquier D. Uncoupling protein 1 of brown adipocytes, the only uncoupler: a historical perspective. Front Endocrinol 2011
+#   PMID:25031320  Hall AM, et al. Abrogating monoacylglycerol acyltransferase activity in liver improves glucose tolerance and hepatic insulin signaling. Hepatology 2014
+
+THERMOGENESIS_UCP:
+  direct_enzymes:
+    Ucp1: {relation: pathway_step, sources: [PMID:21068344], note: 经典产热解偶联蛋白，在棕色/米色脂肪中被强诱导，不可与广泛表达的 Ucp2 互相替代}
+    Dio2: {relation: pathway_step, note: 2 型脱碘酶（局部 T4→T3 激活产热程序）}
+    Cidea: {relation: pathway_step, note: 脂滴相关产热效应蛋白}
+  related_isozymes: [Ucp2, Ucp3]
+  transcription_factors: [Ppargc1a, Prdm16]
+
+FA_esterification_c:
+  direct_enzymes:
+    Gpam: {relation: pathway_step, note: GPAT 步骤}
+    Gpat3: {relation: pathway_step, note: GPAT 步骤}
+    Gpat4: {relation: pathway_step, note: GPAT 步骤}
+    Agpat2: {relation: pathway_step, note: AGPAT 步骤}
+    Lpin1: {relation: pathway_step, note: PAP/Lipin 步骤}
+    Lpin2: {relation: pathway_step, note: PAP/Lipin 步骤}
+    Dgat1: {relation: pathway_step, note: DGAT 步骤}
+    Dgat2: {relation: pathway_step, note: DGAT 步骤}
+    Mogat1: {relation: pathway_step, sources: [PMID:25031320], note: MAG→DAG 旁路诱导酶，脂肪肝高表达且受 GLP-1RA 强下调，非 Lpin/Gpat 同工酶}
+
+BILE_acid:
+  direct_enzymes:
+    Cyp7a1: {relation: pathway_step}
+    Cyp27a1: {relation: pathway_step}
+    Cyp8b1: {relation: pathway_step}
+    Cyp7b1: {relation: pathway_step}
+    Hsd3b7: {relation: pathway_step}
+    Akr1d1: {relation: pathway_step}
+    Slc27a5: {relation: pathway_step}
+    Baat: {relation: pathway_step}
+  carriers:
+    Abcb11: {relation: pathway_step}
+    Slc10a1: {relation: pathway_step}
+
+ETHER_LIPID:
+  direct_enzymes:
+    Gnpat: {relation: pathway_step}
+    Agps: {relation: pathway_step}
+    Far1: {relation: pathway_step}
+    Far2: {relation: pathway_step}
+    Peds1: {relation: pathway_step}

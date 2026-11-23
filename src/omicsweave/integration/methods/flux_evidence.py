@@ -83,7 +83,8 @@ def _isozyme_check(direct: pd.DataFrame, fc_col: str, abundance_col: str, name_c
                    concordant: list[str], minor_share: float) -> dict[str, Any]:
     """同工酶加权（G7）：方向成员按该组织中的平均丰度占比加权，给出容量变化的加权值。
 
-    与通量同向的成员全部是丰度占比低于 ``minor_share`` 的次要同工酶，而占比最高的主要同工酶方向相反时，
+    同时计算分子/分母组的条件活跃占比（``max(pooled_share, share_num, share_den)``），避免强诱导型同工酶在整体均值中被稀释误杀。
+    与通量同向的成员全部在整体及活跃条件下占比都低于 ``minor_share``，而占比最高的主要同工酶方向相反时，
     记 ``minor_isozyme_driven``（调用方据此不计为支持）。没有丰度列或匹配到的方向成员少于 2 个时不判断。
     """
     if abundance_col not in direct.columns or fc_col not in direct.columns or len(direct) < 2:
@@ -93,13 +94,21 @@ def _isozyme_check(direct: pd.DataFrame, fc_col: str, abundance_col: str, name_c
     usable = abundance.gt(0) & fc.notna()
     if usable.sum() < 2:
         return {}
-    share = abundance[usable] / abundance[usable].sum()
+    a_use = abundance[usable]
+    fc_use = fc[usable]
+    share = a_use / a_use.sum()
+    ratio = np.power(2.0, fc_use.clip(-15.0, 15.0))
+    a_num = 2.0 * a_use * ratio / (1.0 + ratio)
+    a_den = 2.0 * a_use / (1.0 + ratio)
+    share_num = a_num / a_num.sum() if a_num.sum() > 0 else share
+    share_den = a_den / a_den.sum() if a_den.sum() > 0 else share
+    active_share = np.maximum(share, np.maximum(share_num, share_den))
     names = direct.loc[share.index, name_col].astype(str)
     major = share.idxmax()
-    concordant_share = share[names.isin(concordant)]
+    concordant_share = active_share[names.isin(concordant)]
     driven = bool(not concordant_share.empty and concordant_share.max() < minor_share
                   and names[major] not in concordant and fc[major] != 0 and np.sign(fc[major]) == -np.sign(flux_fc))
-    return {"weighted_capacity_change": float((share * fc[usable]).sum()), "major_member": names[major],
+    return {"weighted_capacity_change": float((share * fc_use).sum()), "major_member": names[major],
             "major_share": round(float(share.max()), 4), "minor_isozyme_driven": driven}
 
 

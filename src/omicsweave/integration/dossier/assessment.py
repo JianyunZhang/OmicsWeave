@@ -27,17 +27,26 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy.stats import t as student_t
 
 from ..mappings.reaction_members import ACTIVITY_MODES
 
-RULES: dict[str, Any] = {"alpha": 0.05, "equivalence_bound": 0.58, "flux_min_abs_g": 1.0, "heterogeneity_alpha": 0.10,
+RULES: dict[str, Any] = {"alpha": 0.05, "equivalence_bound": 0.58, "flux_min_abs_g": 1.0,
+                         # S4：多示踪剂同向、无异质性、分层置换 p < alpha 且方向稳定时，辅助 Suggestive 路径的 |g| 下限
+                         # （设为 None 或 >= flux_min_abs_g 时关闭该路径，仅保留 |g| >= flux_min_abs_g 单路径）
+                         "flux_concordant_min_abs_g": 0.8,
+                         # S5：通量轴 TOST 等效检验的标准化效应 90% 上界门槛（与 log2FC 等效界联合把关，设为 None 或 <= 0 关闭）
+                         "flux_equiv_g_bound": 1.0,
+                         "heterogeneity_alpha": 0.10,
                          "direction_stability_min": 0.8, "established_min_group": 3, "minor_share": 0.2,
                          "bootstrap": 2000, "seed": 20261117,
                          # L1 要求 R、M 轴没有相反的指向；suggestive（名义 p）即算指向（设计文档 3.5），可改为 changed
                          "opposition_min_state": "suggestive",
                          # 没有蛋白、只有一个来源测到 RNA 时，该来源通过 FDR 是否判为 changed（默认要求两个来源同向）。
                          # 供没有蛋白组、也没有第二个队列的项目使用；打开后应运行诱饵校准，看 C 轴 changed 是否高于诱饵
-                         "rna_single_source_changed": False}
+                         "rna_single_source_changed": False,
+                         # MFA 比较存在整鼠通量系统性尺度漂移（flux_scale_drift）时，F 轴禁止升为 suggestive / changed
+                         "flux_scale_drift_gate": True}
 MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 MISSING_ORDER = ("qc_blocked", "not_detected", "not_measured", "no_knowledge")
 AXIS_COLUMNS = ["flux_id", "tissue", "contrast_id", "axis", "direction", "state", "effect", "ci_lower", "ci_upper",
@@ -158,6 +167,97 @@ def loo_stability(numerator: np.ndarray, denominator: np.ndarray) -> float:
     return float(np.mean(np.array(signs) == full))
 
 
+def stratified_pooled_loo(strata: list[tuple[np.ndarray, np.ndarray]]) -> float:
+    """多示踪剂分层合并的逐只去除（LOO）方向稳定性（S2）：各可辨识示踪剂按完整层内 Hedges' g 尺度与
+    逆方差权重固定合并，逐一去除所有层中的每只动物后检验合并估计是否维持原方向。固定尺度避免 n=2 vs 2
+    去一后 df=1 导致 J(1)=0 的退化，也不再被弱贡献示踪剂的单层符号波动否决。"""
+    cleaned: list[tuple[np.ndarray, np.ndarray]] = []
+    for num, den in strata:
+        a = np.asarray(num, float)
+        b = np.asarray(den, float)
+        a, b = a[np.isfinite(a)], b[np.isfinite(b)]
+        if len(a) >= 2 and len(b) >= 2:
+            cleaned.append((a, b))
+    if not cleaned:
+        return np.nan
+    if len(cleaned) == 1:
+        return loo_stability(*cleaned[0])
+    prepared: list[tuple[np.ndarray, np.ndarray, float, float, float]] = []
+    for a, b in cleaned:
+        na, nb = len(a), len(b)
+        df = na + nb - 2
+        ss = float(np.sum((a - a.mean()) ** 2) + np.sum((b - b.mean()) ** 2))
+        sp = float(np.sqrt(ss / df)) if df > 0 else 0.0
+        if not np.isfinite(sp) or sp <= 0.0:
+            continue
+        j = 1.0 - 3.0 / (4.0 * df - 1.0)
+        scale = j / sp
+        g = float((a.mean() - b.mean()) * scale)
+        var_g = (na + nb) / (na * nb) + (g * g) / (2.0 * (na + nb))
+        if not np.isfinite(var_g) or var_g <= 0.0:
+            continue
+        prepared.append((a, b, scale, g, 1.0 / var_g))
+    if not prepared:
+        signs = [np.sign(a.mean() - b.mean()) for a, b in cleaned]
+        return 1.0 if signs and signs[0] != 0 and len(set(signs)) == 1 else np.nan
+    if len(prepared) == 1:
+        return loo_stability(prepared[0][0], prepared[0][1])
+    total_w = sum(w for *_, w in prepared)
+    total_wg = sum(w * g for *_, g, w in prepared)
+    full_sign = float(np.sign(total_wg / total_w))
+    if full_sign == 0.0:
+        return 0.0
+    same: list[bool] = []
+    for a, b, scale, g, w in prepared:
+        base_wg = total_wg - w * g
+        mean_a, mean_b = float(a.mean()), float(b.mean())
+        for i in range(len(a)):
+            g_new = (float(np.delete(a, i).mean()) - mean_b) * scale
+            same.append(bool(np.sign((base_wg + w * g_new) / total_w) == full_sign))
+        for j in range(len(b)):
+            g_new = (mean_a - float(np.delete(b, j).mean())) * scale
+            same.append(bool(np.sign((base_wg + w * g_new) / total_w) == full_sign))
+    return float(np.mean(same))
+
+
+def _flux_smd_se(head: pd.Series, identifiable: pd.DataFrame) -> tuple[float, float]:
+    """合并标准化效应量 Hedges' g 的标准误与总自由度（用于 S5 通量等效检验）。
+    优先读取差异表落盘的 ``smd_se``；历史结果包未存该列时，由可辨识示踪剂的 (n_numerator, n_denominator, effect)
+    按逆方差 Hedges' g 合并公式回算。"""
+    n_pairs: list[tuple[float, float, float]] = []
+    for _, tr in identifiable.iterrows():
+        na = pd.to_numeric(tr.get("n_numerator"), errors="coerce")
+        nb = pd.to_numeric(tr.get("n_denominator"), errors="coerce")
+        gt = pd.to_numeric(tr.get("effect"), errors="coerce")
+        if pd.notna(na) and pd.notna(nb) and na >= 2 and nb >= 2:
+            n_pairs.append((float(na), float(nb), float(gt) if pd.notna(gt) else 0.0))
+    df = sum(na + nb - 2.0 for na, nb, _ in n_pairs)
+    if df <= 0:
+        ha = pd.to_numeric(head.get("n_numerator"), errors="coerce")
+        hb = pd.to_numeric(head.get("n_denominator"), errors="coerce")
+        if pd.notna(ha) and pd.notna(hb) and ha >= 2 and hb >= 2:
+            df = float(ha + hb - 2.0)
+    reported_se = pd.to_numeric(head.get("smd_se"), errors="coerce")
+    if pd.notna(reported_se) and reported_se > 0 and df >= 1:
+        return float(reported_se), float(df)
+    if n_pairs and df >= 1:
+        inv_vars = []
+        for na, nb, gt in n_pairs:
+            vg = (na + nb) / (na * nb) + (gt * gt) / (2.0 * (na + nb))
+            if np.isfinite(vg) and vg > 0:
+                inv_vars.append(1.0 / vg)
+        if inv_vars:
+            return float(np.sqrt(1.0 / sum(inv_vars))), float(df)
+    ha = pd.to_numeric(head.get("n_numerator"), errors="coerce")
+    hb = pd.to_numeric(head.get("n_denominator"), errors="coerce")
+    gh = pd.to_numeric(head.get("effect"), errors="coerce")
+    if pd.notna(ha) and pd.notna(hb) and ha >= 2 and hb >= 2 and pd.notna(gh):
+        vg = (float(ha) + float(hb)) / (float(ha) * float(hb)) + (float(gh) ** 2) / (2.0 * (float(ha) + float(hb)))
+        if np.isfinite(vg) and vg > 0:
+            return float(np.sqrt(vg)), float(ha + hb - 2.0)
+    return np.nan, 0.0
+
+
 def flux_axis(rows: pd.DataFrame, rules: dict[str, Any], expected: list[str] | None = None,
               stability: dict[str, float] | None = None) -> Axis:
     """``rows``：本实验在该（反应, 组织, 比较）的通量行（各示踪剂与 pooled）；``stability``：各示踪剂由逐只动物的值
@@ -207,31 +307,109 @@ def flux_axis(rows: pd.DataFrame, rules: dict[str, Any], expected: list[str] | N
     n_min = pd.to_numeric(pd.Series([head.get("n_numerator"), head.get("n_denominator")]), errors="coerce").min()
     flags = _flags(pooled) | _flags(identifiable)
     single_subject = "single_subject_driven" in flags
+    scale_drift = "flux_scale_drift" in flags
+    if scale_drift:
+        axis.flags.append("flux_scale_drift")
+        if rules.get("flux_scale_drift_gate", True):
+            axis.state = "undetermined"
+            axis.rule = "整鼠通量存在系统性尺度漂移（flux_scale_drift），不作通量变化判定"
+            return axis
     reported = pd.to_numeric(head.get("direction_stability"), errors="coerce")
+    reported_loo = pd.to_numeric(head.get("pooled_loo_stability"), errors="coerce")
+    pooled_computed = pd.to_numeric(stability.get("__pooled__", np.nan), errors="coerce") if stability else np.nan
     computed = [stability[t] for t in identifiable["tracer"] if stability and pd.notna(stability.get(t, np.nan))]
     if pd.notna(reported):
-        stable = reported >= rules["direction_stability_min"]
+        stable = bool(reported >= rules["direction_stability_min"])
+        if pd.notna(reported_loo):
+            stable = stable and bool(reported_loo >= 1.0)
+    elif pd.notna(pooled_computed):
+        # 多示踪剂分层合并的逐只去除（LOO）稳定性（S2）：不再因最弱示踪剂单层反号否决合并结论
+        stable = bool(pooled_computed >= 1.0)
     elif computed:
-        # 由逐只动物的通量算得（多种示踪剂时取最不稳定者）。每组 3 只时只有 6 个逐只去除的估计，由单只动物驱动的结果
-        # 恰好反号 1 次（5/6），所以这里要求没有任何一次反号——与 E5 的 single_subject_driven 同一口径；
-        # direction_stability_min 只用于差异结果自带的（自助法）方向稳定性
+        # 单示踪剂或调用方仅传入分示踪剂 LOO 字典时的兜底口径
         stable = min(computed) >= 1.0
     else:
         stable = False
         axis.flags.append("stability_unknown")
     stable = stable and not single_subject
+    fc_sign, g_sign = _sign(head.get("log2fc")), _sign(head.get("effect"))
+    if len(identifiable) >= 2 and fc_sign != 0 and g_sign != 0 and fc_sign != g_sign:
+        axis.flags.append("scale_direction_discordant")
     passes = pd.notna(head.get("padj")) and head["padj"] < rules["alpha"]
+    pval = pd.to_numeric(head.get("pvalue"), errors="coerce")
     g = abs(pd.to_numeric(head.get("effect"), errors="coerce"))
+    concordant_g_min = rules.get("flux_concordant_min_abs_g", RULES["flux_concordant_min_abs_g"])
+    equiv_g_bound = rules.get("flux_equiv_g_bound", RULES["flux_equiv_g_bound"])
+    perm_suggestive = (
+        concordant_g_min is not None
+        and float(concordant_g_min) < rules["flux_min_abs_g"]
+        and len(identifiable) >= 2
+        and len(signs) == 1
+        and not heterogeneous
+        and pd.notna(pval)
+        and pval < rules["alpha"]
+        and pd.notna(g)
+        and g >= float(concordant_g_min)
+        and stable
+    )
     if len(identifiable) >= 2 and len(signs) == 1 and not heterogeneous and passes \
             and n_min >= rules["established_min_group"] and stable:
         axis.state, axis.rule = "changed", "至少两种可辨识示踪剂同向，合并估计通过检验（established）"
     elif pd.notna(g) and g >= rules["flux_min_abs_g"] and stable:
         axis.state = "suggestive"
         axis.rule = f"有可辨识示踪剂，|g| = {g:.2f} ≥ {rules['flux_min_abs_g']:g}，方向稳定，未达检验阈值"
+    elif perm_suggestive:
+        axis.state = "suggestive"
+        axis.flags.append("multi_tracer_perm_suggestive")
+        axis.rule = (f"多示踪剂同向且分层置换 p = {pval:.3g} < {rules['alpha']:g}，"
+                     f"|g| = {g:.2f} ≥ {float(concordant_g_min):g}，方向稳定（未过 FDR）")
     else:
-        axis.state = "undetermined"
-        axis.rule = "可辨识，但效应小或不稳定" + (f"（|g| = {g:.2f}" if pd.notna(g) else "（") \
-            + ("，逐只去除后的方向稳定性未知）" if "stability_unknown" in axis.flags else "）")
+        # S5：通量级 TOST 等效性检验（严格把关：log2FC 90% CI 在 ±equivalence_bound 内、无异质性、非单鼠驱动、
+        # 任意单示踪剂均无明确效应、且合并 |Hedges' g| 的 90% 上界 < flux_equiv_g_bound）
+        smd_se, equiv_df = _flux_smd_se(head, identifiable)
+        g_90_hi = float(g + float(student_t.ppf(0.95, equiv_df)) * smd_se) \
+            if (pd.notna(g) and pd.notna(smd_se) and equiv_df >= 1) else np.nan
+        no_tracer_signal = (
+            not identifiable["cell_state"].isin(["changed", "nominal"]).any()
+            and not (tracer_g >= rules["flux_min_abs_g"]).any()
+        )
+        flux_equivalent = (
+            equiv_g_bound is not None
+            and float(equiv_g_bound) > 0
+            and str(head.get("cell_state") or "") == "equivalent"
+            and not heterogeneous
+            and not single_subject
+            and no_tracer_signal
+            and pd.notna(g_90_hi)
+            and g_90_hi < float(equiv_g_bound)
+        )
+        if flux_equivalent:
+            axis.state = "unchanged"
+            axis.direction = 0
+            axis.rule = (f"通量等效未变：log2FC 90% 区间在 ±{rules['equivalence_bound']:g} 内，"
+                         f"且 |g| 90% 上界 {g_90_hi:.2f} < {float(equiv_g_bound):g}")
+        else:
+            axis.state = "undetermined"
+            reasons: list[str] = []
+            if pd.isna(g):
+                reasons.append("|g| 缺失")
+            elif g < rules["flux_min_abs_g"]:
+                reasons.append(f"|g| = {g:.2f} < {rules['flux_min_abs_g']:g}")
+            if single_subject:
+                reasons.append("单只动物驱动")
+            elif "stability_unknown" in axis.flags:
+                reasons.append("逐只去除后的方向稳定性未知")
+            elif not stable:
+                if pd.notna(reported) and reported < rules["direction_stability_min"]:
+                    reasons.append(f"方向稳定性 {reported:.2f} < {rules['direction_stability_min']:g}")
+                elif pd.notna(reported_loo) and reported_loo < 1.0:
+                    reasons.append(f"分层 LOO = {reported_loo:.2f} < 1")
+                elif pd.notna(pooled_computed) and pooled_computed < 1.0:
+                    reasons.append(f"分层 LOO = {pooled_computed:.2f} < 1")
+                else:
+                    reasons.append("逐只去除后方向不稳定")
+            detail = "，".join(reasons) if reasons else (f"|g| = {g:.2f}" if pd.notna(g) else "")
+            axis.rule = f"可辨识，未达 suggestive/changed（{detail}）" if detail else "可辨识，但效应小或不稳定"
     if single_subject:
         axis.flags.append("single_subject_driven")
     if expected:
@@ -240,7 +418,7 @@ def flux_axis(rows: pd.DataFrame, rules: dict[str, Any], expected: list[str] | N
         constrained, wanted = set(identifiable["tracer"]), set(expected)
         if (constrained - wanted) or ((wanted & evaluable) - constrained):
             axis.flags.append("tracer_expectation_mismatch")
-            if axis.state in ("changed", "suggestive"):
+            if axis.state in ("changed", "suggestive", "unchanged"):
                 axis.state = "undetermined"
                 axis.rule += "；可辨识的示踪剂与面板声明的预期不符，最高为 undetermined"
     return axis
@@ -276,15 +454,52 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
             axis.state, axis.direction, axis.rule = "suggestive", direction, "复合体：只有部分亚基有变化证据"
         else:
             axis.state, axis.rule = "undetermined", "复合体：测到，无变化证据"
+    elif (quantified["member_relation"] == "pathway_step").any():
+        # 集总多步/分枝或功能不可替代的诱导酶反应（如 FA_esterification_c、THERMOGENESIS_UCP、HMGCR）：
+        # 不同步骤或不同机制的成员不互相替代，不按可替代同工酶的丰度占比压制
+        changed = quantified[states == "changed"]
+        dirs = {_sign(v) for v in changed["log2fc"]} - {0}
+        if len(dirs) > 1:
+            axis.state, axis.effect = "mixed", float(fc.median())
+            axis.rule = "多步/集总反应：通过 FDR 的成员方向相反"
+        elif dirs:
+            direction = next(iter(dirs))
+            axis.state, axis.direction = "changed", direction
+            axis.effect = float(pd.to_numeric(changed["log2fc"], errors="coerce").median())
+            names = "、".join(str(m) for m in changed["member_id"])
+            axis.rule = f"多步/诱导反应：{names} 通过 FDR"
+            if bool(single_subject[changed.index].all()):
+                axis.state = "suggestive"
+                axis.flags.append("single_subject_driven")
+        elif states.eq("equivalent").all():
+            axis.state, axis.effect, axis.rule = "unchanged", float(fc.median()), "多步/集总反应：已定量成员全部等效"
+        elif states.eq("nominal").any():
+            nom = quantified[states == "nominal"]
+            nom_dirs = {_sign(v) for v in nom["log2fc"]} - {0}
+            if len(nom_dirs) == 1:
+                axis.state, axis.direction = "suggestive", next(iter(nom_dirs))
+                axis.effect = float(pd.to_numeric(nom["log2fc"], errors="coerce").median())
+                axis.rule = "多步/集总反应：部分成员有名义 p"
+            else:
+                axis.state, axis.effect = "undetermined", float(fc.median())
+                axis.rule = "多步/集总反应：名义 p 成员方向不一致"
+        else:
+            axis.state, axis.effect = "undetermined", float(fc.median())
+            axis.rule = "多步/集总反应：测到，既不能判为变化，也不能判为等效"
     else:
         share = pd.to_numeric(quantified["abundance_share"], errors="coerce")
         share = share / share.sum() if share.notna().any() and share.sum() > 0 \
             else pd.Series(1.0 / len(quantified), index=quantified.index)
         share = share.fillna(0.0)
+        if "active_abundance_share" in quantified.columns:
+            active_share = pd.to_numeric(quantified["active_abundance_share"], errors="coerce")
+            eff_share = np.maximum(share, active_share.fillna(share))
+        else:
+            eff_share = share
         axis.effect = float((share * fc.fillna(0.0)).sum())
         major = share.idxmax()
-        # 主要成员：占比不低于 minor_share 的成员；成员很多、都低于该值时至少包括占比最高者
-        majors = quantified[(share >= rules["minor_share"]) | (quantified.index == major)]
+        # 主要成员：整体或活跃条件占比不低于 minor_share 的成员；成员很多、都低于该值时至少包括占比最高者
+        majors = quantified[(eff_share >= rules["minor_share"]) | (quantified.index == major)]
         changed_majors = majors[majors["cell_state"] == "changed"]
         directions = {_sign(v) for v in changed_majors["log2fc"]} - {0}
         if len(directions) > 1:
@@ -292,7 +507,7 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
             axis.flags.append("isozyme_switch")
         elif directions:
             axis.state, axis.direction = "changed", next(iter(directions))
-            names = "、".join(f"{r.member_id}（占比 {share[i]:.0%}）" for i, r in changed_majors.iterrows())
+            names = "、".join(f"{r.member_id}（占比 {eff_share[i]:.0%}）" for i, r in changed_majors.iterrows())
             axis.rule = f"主要成员 {names} 通过 FDR"
             if bool(single_subject[changed_majors.index].all()):
                 axis.state = "suggestive"
@@ -300,8 +515,28 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
         elif majors["cell_state"].eq("equivalent").all():
             axis.state, axis.rule = "unchanged", "主要成员全部等效"
         elif states.eq("changed").any():
-            axis.state, axis.rule = "undetermined", "只有次要同工酶通过 FDR"
-            axis.flags.append("minor_isozyme_driven")
+            changed_all = quantified[states == "changed"]
+            c_dirs = {_sign(v) for v in changed_all["log2fc"]} - {0}
+            c_dir = next(iter(c_dirs)) if len(c_dirs) == 1 else 0
+            major_fcs = pd.to_numeric(majors["log2fc"], errors="coerce").fillna(0.0)
+            major_opposing = bool(
+                c_dir and (
+                    (majors["cell_state"].isin(["changed", "nominal"]) & (np.sign(major_fcs) == -c_dir)).any()
+                    or (_sign(quantified.at[major, "log2fc"]) == -c_dir and abs(float(major_fcs.loc[major])) >= 0.3)
+                )
+            )
+            combined_share = float(eff_share[changed_all.index].sum())
+            if c_dir and len(changed_all) >= 2 and not major_opposing and combined_share >= rules["minor_share"]:
+                axis.state, axis.direction = "changed", c_dir
+                axis.effect = float(pd.to_numeric(changed_all["log2fc"], errors="coerce").median())
+                names = "、".join(str(m) for m in changed_all["member_id"])
+                axis.rule = f"多个同向成员 {names}（合计占比 {combined_share:.0%}）通过 FDR"
+                if bool(single_subject[changed_all.index].all()):
+                    axis.state = "suggestive"
+                    axis.flags.append("single_subject_driven")
+            else:
+                axis.state, axis.rule = "undetermined", "只有次要同工酶通过 FDR"
+                axis.flags.append("minor_isozyme_driven")
         elif majors["cell_state"].eq("nominal").any():
             axis.state, axis.direction = "suggestive", _sign(quantified.at[major, "log2fc"])
             axis.rule = "主要成员只有名义 p"
@@ -451,8 +686,20 @@ def pool_axis(rows: pd.DataFrame, rules: dict[str, Any], direction_evidence: str
 # 判定表、调控系数、合取检验
 # ---------------------------------------------------------------------------
 
-def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = None) -> dict[str, Any]:
+def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = None,
+           semantics: str = "directional") -> dict[str, Any]:
     """判定表（3.5）：结论等级、方向、同向的非通量轴数、反向的轴、现象标签。"""
+    if semantics == "not_assessable":
+        # 虚拟/血浆/输入输出等不可评估反应（如 BIOMASS_REACTION_*、Salvage_c、*_protein_input）：
+        # 保留各轴明细供核对，但绝不允许升为 L1 / L2 / L3 / LX
+        return {
+            "flux_claim": "L0",
+            "claim_direction": 0,
+            "n_concordant_axes": 0,
+            "concordant": [],
+            "discordant_axes": "",
+            "phenomena": "not_assessable_reaction",
+        }
     rules = {**RULES, **(rules or {})}
     vetoing = ("changed",) if rules["opposition_min_state"] == "changed" else ("changed", "suggestive")
     others = {"capacity": c, "regulation": r, "pool": m}
@@ -462,6 +709,9 @@ def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = No
         claim, direction = "L3", f.direction
     elif f.state == "suggestive":
         claim, direction = "L2", f.direction
+    elif f.state == "unchanged":
+        # 实测通量已通过等效性检验（未变化）：不能再由酶容量外推为 L1 通量变化
+        claim, direction = "L0", 0
     else:
         robust = c.state == "changed" and "single_subject_driven" not in c.flags
         opposite = any(ax.state in vetoing and ax.direction == -c.direction for ax in (r, m))
@@ -472,13 +722,15 @@ def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = No
     phenomena = []
     if c.pointing and c.state == "changed":
         phenomena.append("capacity_up" if c.direction > 0 else "capacity_down")
+    if f.state == "unchanged" and c.pointing:
+        phenomena.append("flux_unchanged_despite_capacity")
     if c.state == "mixed" or "isozyme_switch" in c.flags:
         phenomena.append("isozyme_switch")
     if "regulator_inhibitory_up" in r.flags:
         phenomena.append("regulator_inhibitory_up")
     if c.pointing and m.pointing and c.direction == -m.direction:
         phenomena.append("capacity_pool_opposed")
-    for flag in ("rna_protein_discordant", "tracer_expectation_mismatch", "rna_single_source"):
+    for flag in ("rna_protein_discordant", "tracer_expectation_mismatch", "rna_single_source", "flux_scale_drift"):
         if flag in c.flags + f.flags:
             phenomena.append(flag)
     return {"flux_claim": claim, "claim_direction": direction, "n_concordant_axes": len(concordant),
@@ -591,12 +843,20 @@ def assess(members: pd.DataFrame, primary: str, rules: dict[str, Any] | None = N
         own = rows[rows["source"] == primary]
         semantics = str(own["direction_evidence"].dropna().iloc[0]) if own["direction_evidence"].notna().any() else ""
         side_map = sides_by_contrast.get(str(contrast), {})
-        stability = _flux_stability(flux_samples.get((flux_id, tissue)), side_map)
-        f = flux_axis(own[own["layer"] == "mfa"], rules, expected_tracers.get(flux_id), stability)
+        mfa_own = own[own["layer"] == "mfa"]
+        ident_tracers = set(
+            mfa_own.loc[
+                (mfa_own["tracer"] != "pooled")
+                & ~mfa_own["cell_state"].isin(["not_infused", "not_measured", "not_identifiable", "insufficient_n"]),
+                "tracer",
+            ].astype(str)
+        )
+        stability = _flux_stability(flux_samples.get((flux_id, tissue)), side_map, ident_tracers)
+        f = flux_axis(mfa_own, rules, expected_tracers.get(flux_id), stability)
         c = capacity_axis(rows, rules, sources)
         r = regulation_axis(rows, rules)
         m = pool_axis(rows, rules, semantics)
-        decision = decide(f, c, r, m, rules)
+        decision = decide(f, c, r, m, rules, semantics=semantics)
         rho = (np.nan, np.nan)
         if decision["flux_claim"] in ("L2", "L3") and samples is not None and c.state in ("changed", "suggestive"):
             rho = _rho(rows, samples, side_map, rules, tissue, f)
@@ -647,15 +907,24 @@ def assess(members: pd.DataFrame, primary: str, rules: dict[str, Any] | None = N
     return axes, reactions[REACTION_COLUMNS]
 
 
-def _flux_stability(part: pd.DataFrame | None, sides: dict[tuple, str]) -> dict[str, float]:
-    """各示踪剂的逐只去除方向稳定性，由该反应在该组织的逐只动物通量与比较的分子 / 分母样本算得。"""
+def _flux_stability(part: pd.DataFrame | None, sides: dict[tuple, str],
+                    identifiable_tracers: set[str] | None = None) -> dict[str, float]:
+    """各示踪剂的逐只去除方向稳定性，以及跨可辨识示踪剂的分层合并逐只去除稳定性（``__pooled__``）。"""
     if part is None or part.empty or not sides:
         return {}
-    out = {}
+    out: dict[str, float] = {}
+    pooled_strata: list[tuple[np.ndarray, np.ndarray]] = []
     for tracer, values in part.groupby("tracer"):
         side = values["sample_id"].map(lambda s: sides.get(("mfa", s), ""))
-        out[str(tracer)] = loo_stability(values.loc[side == "numerator", "value"].to_numpy(),
-                                         values.loc[side == "denominator", "value"].to_numpy())
+        num = values.loc[side == "numerator", "value"].to_numpy()
+        den = values.loc[side == "denominator", "value"].to_numpy()
+        out[str(tracer)] = loo_stability(num, den)
+        if identifiable_tracers is None or str(tracer) in identifiable_tracers:
+            pooled_strata.append((num, den))
+    if len(pooled_strata) >= 2:
+        pooled_loo = stratified_pooled_loo(pooled_strata)
+        if pd.notna(pooled_loo):
+            out["__pooled__"] = pooled_loo
     return out
 
 

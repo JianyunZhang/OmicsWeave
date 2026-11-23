@@ -113,11 +113,13 @@ COLUMNS = [
     "flux_id", "tissue", "contrast_id", "source", "layer", "role", "member_id", "feature_id", "feature_name", "tracer",
     "member_relation", "regulator_effect", "regulator_mode", "direction_member", "mapping_method",
     "log2fc", "log2fc_unshrunk", "effect", "effect_type", "se", "ci_lower", "ci_upper", "pvalue", "padj", "lfsr",
-    "n_numerator", "n_denominator", "mean_numerator", "mean_denominator", "abundance_share",
+    "n_numerator", "n_denominator", "mean_numerator", "mean_denominator", "abundance_share", "active_abundance_share",
     "cell_state", "state_reason", "selected", "identifiability", "frac_at_bound", "evidence_level", "qc_status",
     "flags", "implied_direction", "direction_evidence", "in_flux_anchored",
-    # 通量合并估计的附加读数（S3 的 F 轴用到）：示踪剂间异质性、逐只去除后的方向稳定性、示踪剂证据类别
-    "heterogeneity_pvalue", "direction_stability", "tracer_evidence",
+    # 通量合并估计的附加读数（S3 的 F 轴与交互诊断用到）：示踪剂间异质性、分层方向稳定性与分层 LOO、
+    # 合并权重（标准化 / 绝对尺度）、标准化标准误与方差放大诊断（smd_se / g_total_var）、全局校正 p 值与示踪剂证据类别
+    "heterogeneity_pvalue", "direction_stability", "pooled_loo_stability", "tracer_evidence",
+    "smd_se", "smd_weights", "tracer_weights", "g_total_var", "smd_weighting", "padj_global", "fdr_scope",
 ]
 _LONG_STATS = {"log2fc": "log2fc", "log2fc_unshrunk": "log2fc_unshrunk", "effect_size": "effect",
                "effect_size_type": "effect_type", "lfc_se": "se", "pvalue": "pvalue", "padj": "padj", "lfsr": "lfsr",
@@ -145,9 +147,10 @@ def _parameters(ctx: RunContext, parameters: dict[str, Any]) -> dict[str, Any]:
         raise RunError(f"integration.parameters.{MODE.value}.rules 中有无法识别的阈值：{'、'.join(bad_rules)}"
                        f"（可用：{'、'.join(DEFAULTS['rules'])}）")
     params["rules"] = {**DEFAULTS["rules"], **(parameters.get("rules") or {})}
-    if not isinstance(params["rules"]["rna_single_source_changed"], bool):
-        raise RunError(f"integration.parameters.{MODE.value}.rules.rna_single_source_changed 应为 true 或 false，"
-                       f"实际为 {params['rules']['rna_single_source_changed']!r}")
+    for bool_rule in ("rna_single_source_changed", "flux_scale_drift_gate"):
+        if not isinstance(params["rules"][bool_rule], bool):
+            raise RunError(f"integration.parameters.{MODE.value}.rules.{bool_rule} 应为 true 或 false，"
+                           f"实际为 {params['rules'][bool_rule]!r}")
     for group in ("calibration", "pathway"):
         bad = sorted(set(parameters.get(group) or {}) - set(DEFAULTS[group]))
         if bad:
@@ -310,14 +313,39 @@ def _omics_rows(builder: FluxEvidenceBuilder, ctx: _Context, layer: str, flux_id
     return rows
 
 
+def _condition_abundances(row: dict[str, Any]) -> tuple[float, float]:
+    """成员在分子组与分母组中的条件丰度估计（用于条件诱导型同工酶的活跃占比）。"""
+    m_num = pd.to_numeric(pd.Series([row.get("mean_numerator")]), errors="coerce").iloc[0]
+    m_den = pd.to_numeric(pd.Series([row.get("mean_denominator")]), errors="coerce").iloc[0]
+    if pd.notna(m_num) and pd.notna(m_den) and m_num >= 0 and m_den >= 0 and (m_num + m_den) > 0:
+        return float(m_num), float(m_den)
+    abund = float(row["_abundance"])
+    lfc = pd.to_numeric(pd.Series([row.get("log2fc_unshrunk")]), errors="coerce").iloc[0]
+    if pd.isna(lfc):
+        lfc = pd.to_numeric(pd.Series([row.get("log2fc")]), errors="coerce").iloc[0]
+    if pd.isna(lfc):
+        return abund, abund
+    ratio = float(np.power(2.0, float(np.clip(lfc, -15.0, 15.0))))
+    return 2.0 * abund * ratio / (1.0 + ratio), 2.0 * abund / (1.0 + ratio)
+
+
 def _annotate_members(rows: list[dict[str, Any]], minor_share: float) -> None:
-    """同层同工酶成员的丰度占比（次要同工酶标记）与重复特征标记。"""
+    """同层同工酶成员的丰度占比（含条件活跃占比，避免强诱导型同工酶被整体均值稀释误杀）与重复特征标记。"""
     isozymes = [r for r in rows if r["role"] in ("direct_enzyme", "carrier") and r.get("member_relation") == "isozyme"
                 and pd.notna(r.get("_abundance")) and r["_abundance"] > 0]
     total = sum(r["_abundance"] for r in isozymes)
-    for r in isozymes:
-        r["abundance_share"] = r["_abundance"] / total if total else np.nan
-        if len(isozymes) >= 2 and r["abundance_share"] < minor_share:
+    cond_pairs = [_condition_abundances(r) for r in isozymes]
+    total_num = sum(a for a, _ in cond_pairs)
+    total_den = sum(b for _, b in cond_pairs)
+    for r, (a_num, a_den) in zip(isozymes, cond_pairs):
+        pooled_share = r["_abundance"] / total if total else np.nan
+        share_num = a_num / total_num if total_num > 0 else np.nan
+        share_den = a_den / total_den if total_den > 0 else np.nan
+        candidates = [v for v in (pooled_share, share_num, share_den) if pd.notna(v)]
+        active_share = max(candidates) if candidates else np.nan
+        r["abundance_share"] = pooled_share
+        r["active_abundance_share"] = active_share
+        if len(isozymes) >= 2 and pd.notna(active_share) and active_share < minor_share:
             r["flags"].append("minor_isozyme")
     counts = pd.Series([(r["role"], r["member_id"]) for r in rows if r.get("feature_id")]).value_counts()
     for r in rows:
@@ -386,7 +414,10 @@ def _mfa_stats(r: pd.Series) -> dict[str, Any]:
             "identifiability": r.get("identifiability"), "frac_at_bound": r.get("frac_at_bound"),
             "evidence_level": r.get("evidence_level"), "selected": bool(r.get("selected", False)),
             "heterogeneity_pvalue": heterogeneity, "direction_stability": r.get("direction_stability"),
-            "tracer_evidence": r.get("tracer_evidence"), "flags": flags}
+            "pooled_loo_stability": r.get("pooled_loo_stability"), "tracer_evidence": r.get("tracer_evidence"),
+            "smd_se": r.get("smd_se"), "smd_weights": r.get("smd_weights"), "tracer_weights": r.get("tracer_weights"),
+            "g_total_var": r.get("g_total_var"), "smd_weighting": r.get("smd_weighting"),
+            "padj_global": r.get("padj_global"), "fdr_scope": r.get("fdr_scope"), "flags": flags}
 
 
 def _mfa_state(row: dict[str, Any], rules: dict[str, float]) -> tuple[str, str]:

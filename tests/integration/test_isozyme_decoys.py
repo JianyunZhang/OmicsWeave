@@ -61,6 +61,21 @@ class IsozymeTest(unittest.TestCase):
         self.assertFalse(details["minor_isozyme_driven"])
         self.assertEqual(details["concordant_proteins"], ["Pkm"])
 
+    def test_strongly_induced_isozyme_uses_active_condition_share(self) -> None:
+        """合并均值占比仅 ~10%、但在活跃条件（上调组）占比超过 20% 的诱导型同工酶不被误判为次要同工酶。"""
+        inducible = pd.DataFrame({
+            "protein": ["Pklr", "Pkm"],
+            "abundance": [880.0, 120.0],
+            f"log2fc_{C}": [-0.4, 3.5],
+            f"padj_{C}": [0.3, 0.005],
+            f"pval_{C}": [0.15, 0.001],
+            f"evidence_{C}": "inferential",
+            f"n_eff_{C}": 6,
+        })
+        details = builder().proteomics_evidence(self.flux, inducible, C)
+        self.assertFalse(details["minor_isozyme_driven"])
+        self.assertEqual(details["concordant_proteins"], ["Pkm"])
+
 
 class DecoyPackageTest(unittest.TestCase):
     def test_decoy_package_replaces_members_and_keeps_semantics(self) -> None:

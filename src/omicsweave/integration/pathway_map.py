@@ -240,7 +240,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
         signed_mods = signed_module_summary(pathway_tests, row.tissue, row.contrast_id)
         tissue_title = str(row.tissue).replace("_", " ").upper() if len(str(row.tissue)) <= 3 else str(row.tissue).replace("_", " ").title()
         plot_pathway_map(view, layout, regions,
-                         f"Figure E  |  {tissue_title} · {row.contrast_id}  —  Tissue Multi-Omics Pathway Atlas",
+                         f"{tissue_title} · {row.contrast_id}  —  Tissue Multi-Omics Pathway Atlas",
                          caption, stem, formats, extra_fusion=extra_fusion, signed_modules=signed_mods,
                          top_rank=int(conf["highlight"]["top_rank"]),
                          mode=str(conf["mode"]),
@@ -256,7 +256,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                          contrast_id=str(row.contrast_id),
                          source=str(source))
 
-        # 默认生成正文分专题代谢子通路图（沿用与图 E 相同的风格与色彩语义，无数据时自动跳过；静态格式）
+        # 默认生成正文分专题代谢子通路图（沿用与主通路图相同的风格与色彩语义，无数据时自动跳过；静态格式）
         if sub_conf["enabled"] and static_formats:
             selected_subs, skipped = select_submaps_for_view(
                 view, layout,
@@ -270,7 +270,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
             for sub in selected_subs:
                 sub_stem = sub_dir / f"{row.contrast_id}_{sub.id}"
                 sub_title = f"{tissue_title} · {row.contrast_id}  —  {sub.title}"
-                sub_note = f"Sub-pathway panel ({sub.subtitle}) · Cross-pathway links attach at boundary stations; full network in Figure E Atlas."
+                sub_note = f"Sub-pathway panel ({sub.subtitle}) · Cross-pathway links attach at boundary stations; full network in Pathway Atlas."
                 plot_pathway_map(
                     view, layout, regions,
                     sub_title, caption[:2], sub_stem, static_formats,
@@ -290,7 +290,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 if reason != "optional_inactive":
                     skipped_submaps.append(f"{row.tissue}/{row.contrast_id}:{sid}({reason})")
 
-        # 默认同步生成小规模 Graphical Abstract（继承图 E 风格；slide_dark 回退到 economist）
+        # 默认同步生成小规模 Graphical Abstract（继承主通路图风格；slide_dark 回退到 metro_atlas）
         if abs_conf["enabled"] and static_formats:
             from omicsweave.visualization.graphical_abstract import (
                 build_abstract_from_pathway_view,
@@ -303,7 +303,7 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                 view, regions,
                 tissue=str(row.tissue),
                 contrast=str(row.contrast_id),
-                provenance=f"Run: {run_text}  |  Style: {ga_style} ({ga_color_mode})  |  Auto-aggregated from Figure E view (<=10 hubs)",
+                provenance=f"Run: {run_text}  |  Style: {ga_style} ({ga_color_mode})  |  Auto-aggregated from Pathway Atlas view (<=10 hubs)",
             )
             ga_stem = stem.parent / f"abstract_{row.contrast_id}"
             render_graphical_abstract(ga_spec, ga_stem, style=ga_style, color_mode=ga_color_mode, formats=static_formats)
@@ -391,7 +391,7 @@ def render_abstracts(
             view, reg,
             tissue=str(row.tissue),
             contrast=str(row.contrast_id),
-            provenance=f"Source: {bundle.name}  |  Style: {style}  |  Auto-aggregated from Figure E view (<=10 hubs)",
+            provenance=f"Source: {bundle.name}  |  Style: {style}  |  Auto-aggregated from Pathway Atlas view (<=10 hubs)",
         )
         stem = target_dir / str(row.tissue) / f"graphical_abstract_{row.contrast_id}_{style}"
         written.extend(render_graphical_abstract(spec, stem, style=style, color_mode=color_mode, formats=fmts))

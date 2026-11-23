@@ -124,6 +124,7 @@ DEFAULT_ANALYSIS_CONFIG: dict[str, Any] = {
     "identifiability": {
         "bound_values": [0.0, 1.0],
         "bound_tolerance": 0.05,
+        "bound_rel_tolerance": 0.02,
         "infer_bounds_from_fits": True,
         "bound_pinned_min_fraction": 0.5,
     },
@@ -675,6 +676,9 @@ def _validate_analysis_config(analysis: dict[str, Any]) -> None:
         raise ValueError("analysis.identifiability.bound_values must be a list of numbers")
     if float(ident.get("bound_tolerance", 0.05)) < 0:
         raise ValueError("analysis.identifiability.bound_tolerance must be >= 0")
+    rel_tol = float(ident.get("bound_rel_tolerance", 0.02))
+    if not 0 <= rel_tol < 0.5:
+        raise ValueError("analysis.identifiability.bound_rel_tolerance must be in [0, 0.5)")
     min_fraction = float(ident.get("bound_pinned_min_fraction", 0.5))
     if not 0 < min_fraction <= 1:
         raise ValueError("analysis.identifiability.bound_pinned_min_fraction must be in (0, 1]")

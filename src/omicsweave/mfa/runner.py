@@ -22,6 +22,9 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
                                     ``enabled``（默认 true）、``min_abs_correlation``（默认 1 − 1e−6）
     qc/fitting_loss.parquet         每个样本的拟合残差分布
     qc/mid_fit_residuals.parquet    实测与模拟 MID 的残差（有 MID 时）
+    qc/sample_quality.parquet       MFA 通用样本质检（拟合残差、整鼠通量尺度、上界贴边饱和度）
+    qc/sample_qc_metrics.parquet    逐样本 MFA 质检指标汇总
+    qc/contrast_scale_qc.parquet    比较级整鼠通量尺度漂移与上界不对称质检
     tables/differential.parquet     统一差异结果表（所有比较 × 所有组织）
     figures/                        火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
                                     :mod:`omicsweave.visualization.volcano`）：纵轴为主检验的 p 值，只给效应量的
@@ -69,12 +72,14 @@ from .df_analysis import (
     selection_thresholds,
 )
 from .export import differential_flux_to_contract
+from .sample_qc import MFAQualityResult, apply_scale_drift_flags, evaluate_mfa_quality
 
 STEPS = ("qc", "differential", "figures")
 # 火山图横轴半宽的上限（log2FC = 10，即 1024 倍）：净通量的分母接近 0 时 |log2FC| 可达 20 以上，属于数值假象
 _VOLCANO_X_CAP = 10.0
-# df_analysis.differential_flux 从输出目录读取 sample_flux_matrix 写出的可辨识性表
+# df_analysis.differential_flux 从输出目录读取 sample_flux_matrix 写出的可辨识性与逐样本贴边表
 _IDENTIFIABILITY = Path("01_df_results", "all_tissues", "flux_matrix", "flux_identifiability.csv")
+_SAMPLE_NET_FLUX = Path("01_df_results", "all_tissues", "flux_matrix", "sample_net_flux.csv")
 
 
 def _preview(values, limit: int = 5) -> str:
@@ -121,7 +126,7 @@ def tracer_strata(experiment: Experiment, samples: list[str], results: MFAResult
 
 
 SAMPLE_FIT_COLUMNS = ["sample_id", "tissue", "reaction", "tracer", "net_flux", "n_fits", "fit_q25", "fit_q75",
-                      "fit_p25", "fit_p75", "fit_std", "at_bound"]
+                      "fit_p25", "fit_p75", "fit_std", "at_bound", "at_upper_bound"]
 FLUX_GROUP_SETTINGS = {"enabled": True, "min_abs_correlation": fg.DEFAULT_MIN_ABS_CORRELATION}
 
 
@@ -196,9 +201,10 @@ def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits
             continue
         # 每个比较单独一个明细目录，避免水平相同、subset 不同的比较互相覆盖
         contrast_dir = details / "contrasts" / contrast.id
-        if (details / _IDENTIFIABILITY).is_file():
-            (contrast_dir / _IDENTIFIABILITY).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(details / _IDENTIFIABILITY, contrast_dir / _IDENTIFIABILITY)
+        for rel in (_IDENTIFIABILITY, _SAMPLE_NET_FLUX):
+            if (details / rel).is_file():
+                (contrast_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(details / rel, contrast_dir / rel)
         pair = (contrast.numerator, contrast.denominator)
         found = differential_flux(flux_df, all_fits, members, list(pair), tissues, contrast_dir,
                                   comparisons=[pair], analysis_config=analysis, flux_groups=groups)
@@ -211,23 +217,72 @@ def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits
     return tables
 
 
+def _write_mfa_quality(
+    experiment: Experiment,
+    animals_df: pd.DataFrame | None,
+    loss_df: pd.DataFrame | None,
+    analysis: dict,
+    out: Path,
+    record: OmicsRun,
+) -> MFAQualityResult | None:
+    """运行 MFA 通用样本级与比较级尺度漂移质检，写出 ``qc/sample_quality.parquet`` 与 ``qc/contrast_scale_qc.parquet``。"""
+    if animals_df is None or animals_df.empty:
+        return None
+    qc_cfg = (analysis or {}).get("sample_qc")
+    contrast_map = {
+        c.id: (contrast_groups(experiment, c, Omics.MFA), c.numerator, c.denominator)
+        for c in experiment.config.design.contrasts
+    }
+    qc_res = evaluate_mfa_quality(animals_df, contrast_map, loss_df=loss_df, config=qc_cfg)
+    if not qc_res.parameters.get("enabled", True):
+        return qc_res
+    qc_dir = out / "qc"
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    qc_res.sample_quality.to_parquet(qc_dir / "sample_quality.parquet", index=False)
+    if not qc_res.sample_metrics.empty:
+        qc_res.sample_metrics.to_parquet(qc_dir / "sample_qc_metrics.parquet", index=False)
+    if not qc_res.contrast_scale.empty:
+        qc_res.contrast_scale.to_parquet(qc_dir / "contrast_scale_qc.parquet", index=False)
+    if qc_res.excluded_samples or qc_res.flagged_samples:
+        affected = sorted(qc_res.excluded_samples | qc_res.flagged_samples)
+        record.notes.append(
+            f"MFA 通用质检标记 {len(affected)} 个尺度/贴顶/残差异常样本（{_preview(affected)}），"
+            f"明细见 omics/mfa/qc/sample_quality.parquet"
+        )
+    if qc_res.drift_contrasts:
+        labels_txt = "、".join(
+            f"{cid}" if tr == "single" else f"{cid}({tr})"
+            for cid, tr in sorted(qc_res.drift_contrasts)
+        )
+        record.notes.append(
+            f"MFA 尺度漂移质检：{labels_txt} 存在整鼠通量系统性尺度漂移（flux_scale_drift），"
+            f"已写入差异表 flags 与 omics/mfa/qc/contrast_scale_qc.parquet"
+        )
+    return qc_res
+
+
 def _run_single(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
-                tissues: list[str], labels: dict[str, str], analysis: dict, out: Path, record: OmicsRun) -> list[str]:
+                tissues: list[str], labels: dict[str, str], analysis: dict, out: Path, record: OmicsRun,
+                loss_df: pd.DataFrame | None = None) -> list[str]:
     details = out / "details"
     matrix = sample_flux_matrix(flux_df, all_fits, labels, tissues, details, analysis)
     if matrix is not None:
         _write_flux_datasets(matrix, results, out)
+    qc_res = _write_mfa_quality(experiment, matrix, loss_df, analysis, out, record)
     groups = _flux_groups({"all": all_fits}, _flux_group_settings(analysis), out, record)
     tables = _differential_tables(experiment, flux_df, all_fits, tissues, details, analysis,
                                   results.info.flux_units, record, groups=(groups or {}).get("all"))
     if tables:
-        write_differential(pd.concat(tables.values(), ignore_index=True), out / "tables" / "differential.parquet")
+        combined = pd.concat(tables.values(), ignore_index=True)
+        if qc_res is not None:
+            combined = apply_scale_drift_flags(combined, qc_res.contrast_scale)
+        write_differential(combined, out / "tables" / "differential.parquet")
     return list(tables)
 
 
 def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
                       tissues: list[str], labels: dict[str, str], tracer_of: dict[str, str], analysis: dict,
-                      out: Path, record: OmicsRun) -> list[str]:
+                      out: Path, record: OmicsRun, loss_df: pd.DataFrame | None = None) -> list[str]:
     """先在每个示踪剂内单独分析（可辨识性、差异通量），再分层合并。"""
     try:
         settings = multi_tracer.PoolingSettings.from_analysis(analysis)
@@ -256,12 +311,15 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
 
     animals_df = pd.concat(animals, ignore_index=True)
     _write_flux_datasets(animals_df, results, out)
+    qc_res = _write_mfa_quality(experiment, animals_df, loss_df, analysis, out, record)
     coverage = multi_tracer.tracer_coverage(pd.concat(identifiability, ignore_index=True), settings)
     tables_dir = out / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
     coverage.to_parquet(tables_dir / "tracer_coverage.parquet", index=False)
     if by_tracer:
         per_tracer = pd.concat(by_tracer, ignore_index=True)
+        if qc_res is not None:
+            per_tracer = apply_scale_drift_flags(per_tracer, qc_res.contrast_scale, tracer_col="tracer")
         for tracer, part in per_tracer.groupby("tracer"):
             problems = validate_differential(part.drop(columns="tracer"))
             if problems:
@@ -284,7 +342,10 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
         record.notes.append(f"比较 {contrast.id} 多示踪剂合并：{int(table['selected'].sum())} 条通量入选；"
                             + "、".join(f"{k} {v}" for k, v in sorted(counts.items())))
     if pooled_tables:
-        write_differential(pd.concat(pooled_tables, ignore_index=True), tables_dir / "differential.parquet")
+        pooled_all = pd.concat(pooled_tables, ignore_index=True)
+        if qc_res is not None:
+            pooled_all = apply_scale_drift_flags(pooled_all, qc_res.contrast_scale)
+        write_differential(pooled_all, tables_dir / "differential.parquet")
 
     levels, deviations = multi_tracer.flux_levels(animals_df, labels, coverage, settings)
     if not levels.empty:
@@ -356,6 +417,7 @@ def run(ctx: RunContext) -> OmicsRun:
     # 只用于明细表与 QC 表中的标注；差异分析按各比较的分组进行
     labels = sample_labels(experiment, used)
 
+    loss = None
     if ctx.wants("qc"):
         (out / "qc").mkdir(parents=True, exist_ok=True)
         loss = quality_control(all_fits, labels, details)
@@ -371,11 +433,12 @@ def run(ctx: RunContext) -> OmicsRun:
     contrasts_run = []
     if ctx.wants("differential"):
         if tracer_of is None:
-            contrasts_run = _run_single(experiment, results, flux_df, all_fits, tissues, labels, analysis, out, record)
+            contrasts_run = _run_single(experiment, results, flux_df, all_fits, tissues, labels, analysis, out, record,
+                                        loss_df=loss)
         else:
             record.notes += _multi_tracer_notes(experiment, tracer_of)
             contrasts_run = _run_multi_tracer(experiment, results, flux_df, all_fits, tissues, labels, tracer_of,
-                                              analysis, out, record)
+                                              analysis, out, record, loss_df=loss)
 
     if ctx.wants("figures"):
         cut = selection_thresholds(analysis)

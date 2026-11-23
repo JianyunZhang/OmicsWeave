@@ -71,6 +71,11 @@ METHOD = "tracer_stratified_permutation"
 ALL_TISSUES = "all_tissues"
 # 可辨识性从好到差；合并结果的 identifiability 取参与合并的示踪剂中最好的一档
 _IDENTIFIABILITY_ORDER = ("well_constrained", "moderate", "undetermined", "poorly_constrained", "bound_pinned")
+# 标准化合并权重模式、置换尺度模式与多重检验校正域
+SMD_WEIGHTINGS = ("smd", "reliability_smd", "identifiability_smd")
+PERMUTATION_SCALES = ("absolute", "relative")
+FDR_SCOPES = ("per_tissue", "per_contrast")
+_IDENTIFIABILITY_QUALITY = {"well_constrained": 1.0, "moderate": 0.5, "undetermined": 0.25}
 # 单个示踪剂内的组划分数不超过该值时全部枚举，否则随机抽取
 _MAX_ENUMERATED_SPLITS = 50_000
 _TIE_TOLERANCE = 1e-9
@@ -88,12 +93,30 @@ class PoolingSettings:
     max_exact_permutations: int = 200_000   # 分层置换的组合总数不超过该值时精确枚举
     n_permutations: int = 10_000            # 否则随机置换的次数
     random_state: int = 0
-    # 以下取自 analysis.differential_flux / preprocessing
+    smd_weighting: str = "smd"              # 标准化权重模式：smd | reliability_smd | identifiability_smd
+    permutation_scale: str = "absolute"     # 分层置换统计量尺度：absolute | relative（层内均值幅度归一化）
+    n_bootstrap: int = 2000                 # 分层自助法重抽样次数（计算 direction_stability）
+    fdr_scope: str = "per_tissue"           # BH-FDR 校正域：per_tissue（按组织分层）| per_contrast（全组织合并）
+    # 以下取自 analysis.differential_flux / preprocessing / identifiability
     pvalue_threshold: float = 0.05
     fdr_threshold: float = 0.10
     log2fc_threshold: float = 0.5
     hedges_g_threshold: float = 0.5
     zero_threshold: float = 1.0e-10
+    bound_pinned_min_fraction: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.smd_weighting not in SMD_WEIGHTINGS:
+            raise ValueError(f"analysis.multi_tracer.smd_weighting 必须为 {' / '.join(SMD_WEIGHTINGS)} 之一，"
+                             f"实际为 {self.smd_weighting!r}")
+        if self.permutation_scale not in PERMUTATION_SCALES:
+            raise ValueError(f"analysis.multi_tracer.permutation_scale 必须为 {' / '.join(PERMUTATION_SCALES)} 之一，"
+                             f"实际为 {self.permutation_scale!r}")
+        if self.fdr_scope not in FDR_SCOPES:
+            raise ValueError(f"analysis.multi_tracer.fdr_scope 必须为 {' / '.join(FDR_SCOPES)} 之一，"
+                             f"实际为 {self.fdr_scope!r}")
+        if int(self.n_bootstrap) < 0:
+            raise ValueError(f"analysis.multi_tracer.n_bootstrap 不能为负数，实际为 {self.n_bootstrap!r}")
 
     @classmethod
     def from_analysis(cls, analysis: dict[str, Any] | None) -> PoolingSettings:
@@ -104,6 +127,8 @@ class PoolingSettings:
             raise ValueError(f"analysis.multi_tracer 中有无法识别的参数：{'、'.join(unknown)}"
                              f"（可选：{'、'.join(_OWN_SETTINGS)}）")
         diff = analysis.get("differential_flux") or {}
+        if "fdr_scope" not in own and "fdr_scope" in diff:
+            own["fdr_scope"] = str(diff["fdr_scope"]).lower()
         cohen_d = float(diff.get("cohen_d_threshold", cls.hedges_g_threshold))
         return cls(
             **own,
@@ -112,12 +137,15 @@ class PoolingSettings:
             log2fc_threshold=float(diff.get("log2fc_threshold", cls.log2fc_threshold)),
             hedges_g_threshold=float(diff.get("hedges_g_threshold", cohen_d)),
             zero_threshold=float((analysis.get("preprocessing") or {}).get("zero_threshold", cls.zero_threshold)),
+            bound_pinned_min_fraction=float((analysis.get("identifiability") or {}).get(
+                "bound_pinned_min_fraction", cls.bound_pinned_min_fraction)),
         )
 
 
 # analysis.multi_tracer 可设置的参数；其余阈值取自 differential_flux / preprocessing
 _OWN_SETTINGS = ("exclude_unconstrained", "include_fit_variance", "heterogeneity_alpha", "min_tracers",
-                 "max_exact_permutations", "n_permutations", "random_state")
+                 "max_exact_permutations", "n_permutations", "random_state", "smd_weighting", "permutation_scale",
+                 "n_bootstrap", "fdr_scope")
 
 
 # ── 各示踪剂对反应的约束 ─────────────────────────────────────────────────────
@@ -150,11 +178,12 @@ def _with_fit_variance(animals: pd.DataFrame, settings: PoolingSettings) -> pd.D
 
 @dataclass
 class _Stratum:
-    """一个示踪剂在某反应上的数据：每只动物的代表通量、拟合方差，以及是否属于分子组。"""
+    """一个示踪剂在某反应上的数据：每只动物的代表通量、拟合方差、是否属于分子组以及可辨识性分档。"""
     tracer: str
     values: np.ndarray
     fit_var: np.ndarray
     is_num: np.ndarray
+    identifiability: str = "moderate"
 
     @property
     def n(self) -> int:
@@ -207,27 +236,38 @@ def _random_masks(n: int, n_num: int, size: int, rng: np.random.Generator) -> np
     return masks
 
 
+def _scale_stratum_relative(stratum: _Stratum, zero_threshold: float) -> _Stratum:
+    """层内置换不变尺度归一化：按全部动物 ``mean(|values|)`` 缩放，使不同绝对量纲的示踪剂在置换 z 中可比且保持精确可交换性。"""
+    scale = float(np.mean(np.abs(stratum.values))) if len(stratum.values) else 0.0
+    if not np.isfinite(scale) or scale <= zero_threshold:
+        return stratum
+    return _Stratum(stratum.tracer, stratum.values / scale, stratum.fit_var / (scale * scale),
+                    stratum.is_num, stratum.identifiability)
+
+
 def _permutation_test(strata: list[_Stratum], settings: PoolingSettings, seed: int) -> dict[str, Any]:
     """合并 z 的双侧分层置换 p 值：每个示踪剂内独立置换组标签。"""
-    observed = [_split_terms(s, s.is_num[None, :]) for s in strata]
+    active = ([_scale_stratum_relative(s, settings.zero_threshold) for s in strata]
+              if settings.permutation_scale == "relative" else strata)
+    observed = [_split_terms(s, s.is_num[None, :]) for s in active]
     z_obs = sum(a[0] for a, _ in observed) / math.sqrt(sum(b[0] for _, b in observed))
-    total = math.prod(math.comb(s.n, s.n_num) for s in strata)
+    total = math.prod(math.comb(s.n, s.n_num) for s in active)
     if total <= settings.max_exact_permutations:
         num, den = np.zeros(1), np.zeros(1)
-        for stratum in strata:
+        for stratum in active:
             a, b = _split_terms(stratum, _split_masks(stratum.n, stratum.n_num))
             num = (num[:, None] + a[None, :]).ravel()
             den = (den[:, None] + b[None, :]).ravel()
         extreme = np.abs(num / np.sqrt(den)) >= abs(z_obs) * (1 - _TIE_TOLERANCE)
         # 各示踪剂两组等大时，整体交换组标签得到 −z，最极端的划分至少有两种
-        mirrored = all(2 * s.n_num == s.n for s in strata)
+        mirrored = all(2 * s.n_num == s.n for s in active)
         return {"pvalue": float(extreme.mean()), "p_floor": (2.0 if mirrored else 1.0) / total,
                 "n_permutations": total, "exact": True, "z": z_obs}
 
     rng = np.random.default_rng(seed)
     size = settings.n_permutations
     num, den = np.zeros(size), np.zeros(size)
-    for stratum in strata:
+    for stratum in active:
         a, b = _split_terms(stratum, _random_masks(stratum.n, stratum.n_num, size, rng))
         num += a
         den += b
@@ -247,30 +287,112 @@ def _describe(values: dict[str, float], digits: int = 4) -> str:
     return ";".join(f"{k}:{v:.{digits}g}" for k, v in values.items())
 
 
-def _pool_standardized(g: np.ndarray, n_num: list[int], n_den: list[int]) -> dict[str, Any]:
-    """标准化尺度上的合并（G10：相对尺度）：各示踪剂的 Hedges' g 按 1 / Var(g) 加权，
-    Var(g) = (n₁ + n₂) / (n₁n₂) + g² / (2(n₁ + n₂))（Hedges & Olkin 1985）。
+def _smd_raw_weights(g: np.ndarray, n1: np.ndarray, n2: np.ndarray, *, weighting: str = "smd",
+                     reliability_inflation: np.ndarray | None = None,
+                     identifiability: list[str] | None = None) -> np.ndarray:
+    """标准化合并权重（仅用于有限 g 的子集）：支持 ``smd``、``reliability_smd`` 与 ``identifiability_smd``。"""
+    base = 1.0 / ((n1 + n2) / (n1 * n2) + g ** 2 / (2.0 * (n1 + n2)))
+    if weighting == "reliability_smd" and reliability_inflation is not None:
+        infl = np.asarray(reliability_inflation, dtype=float)
+        factor = np.where(np.isfinite(infl) & (infl >= 1.0), infl, 1.0)
+        return base / factor
+    if weighting == "identifiability_smd" and identifiability is not None:
+        quality = np.array([_IDENTIFIABILITY_QUALITY.get(str(lbl), 0.5) for lbl in identifiability], dtype=float)
+        return base * quality
+    return base
 
-    不同示踪剂的模型给出的绝对通量不在同一个尺度上（同一反应可差数十倍，净通量还可能在两组间变号），按绝对差值
-    做逆方差合并时权重几乎全给数值小的示踪剂，异质性检验也主要反映尺度差异。g 以各示踪剂自己的动物间标准差为
-    单位，变号时也有定义，适合判断各示踪剂的效应是否一致。"""
+
+def _pool_standardized(g: np.ndarray, n_num: list[int], n_den: list[int],
+                       tracers: list[str] | None = None, *, weighting: str = "smd",
+                       reliability_inflation: np.ndarray | None = None,
+                       identifiability: list[str] | None = None,
+                       g_total: np.ndarray | None = None) -> dict[str, Any]:
+    """标准化尺度上的合并（G10：相对尺度）：各示踪剂的 Hedges' g 按所选权重模式加权合并。
+
+    - ``smd``（默认，W2）：经典 Hedges & Olkin 逆方差权重 ``1 / Var(g)``；
+    - ``reliability_smd``（W3b）：``1 / (Var(g) · (1 + f̄_fit / s²_p))``，拟合越嘈杂权重越低但不压缩 ``g`` 本身；
+    - ``identifiability_smd``（W4）：按可辨识性先验（``well_constrained=1.0, moderate=0.5``）乘 ``1 / Var(g)``。
+
+    同时在提供 ``g_total`` 时计算含拟合方差的全方差合并 Hedges' g（``g_total_var``）作为伴随质控读数。"""
     g = np.asarray(g, dtype=float)
     n1, n2 = np.asarray(n_num, dtype=float), np.asarray(n_den, dtype=float)
     finite = np.isfinite(g)
-    out = {"smd": np.nan, "smd_se": np.nan, "smd_heterogeneity_q": np.nan, "smd_heterogeneity_pvalue": np.nan,
-           "smd_i_squared": np.nan, "n_tracers_smd": int(finite.sum())}
+    out: dict[str, Any] = {"smd": np.nan, "smd_se": np.nan, "smd_heterogeneity_q": np.nan,
+                           "smd_heterogeneity_pvalue": np.nan, "smd_i_squared": np.nan,
+                           "n_tracers_smd": int(finite.sum()), "smd_weights": "",
+                           "smd_weighting": weighting, "g_total_var": np.nan}
+    if g_total is not None:
+        gt = np.asarray(g_total, dtype=float)
+        ok_gt = np.isfinite(gt)
+        if ok_gt.any():
+            wt = 1.0 / ((n1[ok_gt] + n2[ok_gt]) / (n1[ok_gt] * n2[ok_gt]) + gt[ok_gt] ** 2 / (2.0 * (n1[ok_gt] + n2[ok_gt])))
+            out["g_total_var"] = float((wt * gt[ok_gt]).sum() / wt.sum())
     if not finite.any():
         return out
-    g, n1, n2 = g[finite], n1[finite], n2[finite]
-    weight = 1.0 / ((n1 + n2) / (n1 * n2) + g ** 2 / (2 * (n1 + n2)))
-    pooled = float((weight * g).sum() / weight.sum())
-    out.update(smd=pooled, smd_se=float(math.sqrt(1.0 / weight.sum())))
-    k = len(g)
+    g_ok, n1_ok, n2_ok = g[finite], n1[finite], n2[finite]
+    infl_ok = np.asarray(reliability_inflation, dtype=float)[finite] if reliability_inflation is not None else None
+    ident_ok = [lbl for lbl, ok in zip(identifiability, finite) if ok] if identifiability is not None else None
+    weight = _smd_raw_weights(g_ok, n1_ok, n2_ok, weighting=weighting,
+                              reliability_inflation=infl_ok, identifiability=ident_ok)
+    w_total = float(weight.sum())
+    pooled = float((weight * g_ok).sum() / w_total)
+    out.update(smd=pooled, smd_se=float(math.sqrt(1.0 / w_total)))
+    if tracers is not None:
+        used_tracers = [t for t, ok in zip(tracers, finite) if ok]
+        out["smd_weights"] = _describe(dict(zip(used_tracers, weight / w_total)), 3)
+    k = len(g_ok)
     if k > 1:
-        q = float((weight * (g - pooled) ** 2).sum())
+        q = float((weight * (g_ok - pooled) ** 2).sum())
         out.update(smd_heterogeneity_q=q, smd_heterogeneity_pvalue=float(stats.chi2.sf(q, k - 1)),
                    smd_i_squared=max(0.0, (q - (k - 1)) / q) if q > 0 else 0.0)
     return out
+
+
+def _stratified_stability(strata: list[_Stratum], scales: np.ndarray, weights: np.ndarray,
+                          seed: int, n_bootstrap: int) -> tuple[float, float]:
+    """基于激活标准化权重与固定层内尺度因子，计算合并效应的：
+    1. ``pooled_loo_stability``：分层留一法中保持与全样本合并效应同号的比例（1.0 = 零反号）；
+    2. ``direction_stability``：分层组内自助法（各示踪剂各组独立有放回重抽样）保持同号的比例。"""
+    usable = []
+    for s, c, w in zip(strata, scales, weights):
+        if np.isfinite(c) and c > 0.0 and np.isfinite(w) and w > 0.0:
+            a, b = s.values[s.is_num], s.values[~s.is_num]
+            usable.append((a, b, float(c), float(w), float(c * (a.mean() - b.mean()))))
+    if not usable:
+        # 所有层组内零方差（如 [5,5,5] vs [1,1,1]）时，改用等权原始组均值差
+        usable = [(s.values[s.is_num], s.values[~s.is_num], 1.0, 1.0,
+                   float(s.values[s.is_num].mean() - s.values[~s.is_num].mean())) for s in strata]
+    w_sum = sum(item[3] for item in usable)
+    if w_sum <= 0.0:
+        return np.nan, np.nan
+    full = sum(item[3] * item[4] for item in usable) / w_sum
+    full_sign = float(np.sign(full)) if np.isfinite(full) else 0.0
+    if full_sign == 0.0:
+        return 0.0, 0.0
+
+    # 分层留一法
+    loo_signs = []
+    for idx, (a, b, c, w, _) in enumerate(usable):
+        other = sum(item[3] * item[4] for j, item in enumerate(usable) if j != idx)
+        for i in range(len(a)):
+            val = (other + w * c * float(np.delete(a, i).mean() - b.mean())) / w_sum
+            loo_signs.append(float(np.sign(val)))
+        for i in range(len(b)):
+            val = (other + w * c * float(a.mean() - np.delete(b, i).mean())) / w_sum
+            loo_signs.append(float(np.sign(val)))
+    loo_stab = float(np.mean(np.asarray(loo_signs) == full_sign)) if loo_signs else np.nan
+
+    # 分层组内自助法（向量化）
+    if n_bootstrap <= 0:
+        return loo_stab, np.nan
+    rng = np.random.default_rng((int(seed) + 1) % 2 ** 32)
+    boot_num = np.zeros(int(n_bootstrap), dtype=float)
+    for a, b, c, w, _ in usable:
+        ba = a[rng.integers(0, len(a), (int(n_bootstrap), len(a)))].mean(axis=1)
+        bb = b[rng.integers(0, len(b), (int(n_bootstrap), len(b)))].mean(axis=1)
+        boot_num += w * c * (ba - bb)
+    boot_stab = float(np.mean(np.sign(boot_num / w_sum) == full_sign))
+    return loo_stab, boot_stab
 
 
 def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int) -> dict[str, Any]:
@@ -278,12 +400,22 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
     for s in strata:
         a, b = s.values[s.is_num], s.values[~s.is_num]
         fa, fb = s.fit_var[s.is_num], s.fit_var[~s.is_num]
+        n1, n2 = len(a), len(b)
+        df = n1 + n2 - 2
         var_a, var_b = a.var(ddof=1), b.var(ddof=1)
-        mean_var_a = (var_a + fa.mean()) / len(a)
-        mean_var_b = (var_b + fb.mean()) / len(b)
-        _, g = _standardized_mean_difference(a.mean(), b.mean(), math.sqrt(var_a), math.sqrt(var_b), len(a), len(b))
-        stats_rows.append((a.mean(), b.mean(), mean_var_a, mean_var_b, g))
-    mean_a, mean_b, var_mean_a, var_mean_b, g = (np.array(c, dtype=float) for c in zip(*stats_rows))
+        f_a, f_b = float(fa.mean()), float(fb.mean())
+        mean_var_a = (var_a + f_a) / n1
+        mean_var_b = (var_b + f_b) / n2
+        _, g = _standardized_mean_difference(a.mean(), b.mean(), math.sqrt(var_a), math.sqrt(var_b), n1, n2)
+        sp2_anim = ((n1 - 1) * var_a + (n2 - 1) * var_b) / df if df > 0 else np.nan
+        f_pool = ((n1 - 1) * f_a + (n2 - 1) * f_b) / df if df > 0 else 0.0
+        sp2_tot = sp2_anim + f_pool if np.isfinite(sp2_anim) else np.nan
+        j_corr = (1.0 - 3.0 / (4.0 * df - 1.0)) if df > 0 and 4.0 * df > 1.0 else np.nan
+        scale_c = float(j_corr / math.sqrt(sp2_anim)) if (np.isfinite(sp2_anim) and sp2_anim > 0 and np.isfinite(j_corr)) else np.nan
+        g_tot = float(j_corr * (a.mean() - b.mean()) / math.sqrt(sp2_tot)) if (np.isfinite(sp2_tot) and sp2_tot > 0 and np.isfinite(j_corr)) else np.nan
+        infl = float(1.0 + f_pool / sp2_anim) if (np.isfinite(sp2_anim) and sp2_anim > 0 and np.isfinite(f_pool)) else np.nan
+        stats_rows.append((a.mean(), b.mean(), mean_var_a, mean_var_b, g, scale_c, g_tot, infl))
+    mean_a, mean_b, var_mean_a, var_mean_b, g, scale_c, g_tot, infl = (np.array(c, dtype=float) for c in zip(*stats_rows))
     delta = mean_a - mean_b
     variance = var_mean_a + var_mean_b
     # 与置换统计量相同的下界：零方差的示踪剂（如所有动物拟合值相同）仍可参与，但权重有上限
@@ -302,8 +434,27 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
     log2fc_se = (np.nan if near_zero else
                  math.sqrt((se_a / pooled_mean_a) ** 2 + (se_b / pooled_mean_b) ** 2) / math.log(2.0))
     tracers = [s.tracer for s in strata]
+    idents = [s.identifiability for s in strata]
+    n_nums = [s.n_num for s in strata]
+    n_dens = [s.n - s.n_num for s in strata]
     perm = _permutation_test(strata, settings, seed)
-    standardized = _pool_standardized(g, [s.n_num for s in strata], [s.n - s.n_num for s in strata])
+    standardized = _pool_standardized(
+        g, n_nums, n_dens, tracers,
+        weighting=settings.smd_weighting,
+        reliability_inflation=infl,
+        identifiability=idents,
+        g_total=g_tot,
+    )
+    finite_g = np.isfinite(g)
+    smd_w_all = np.zeros(len(strata), dtype=float)
+    if finite_g.any():
+        smd_w_all[finite_g] = _smd_raw_weights(
+            g[finite_g], np.asarray(n_nums, float)[finite_g], np.asarray(n_dens, float)[finite_g],
+            weighting=settings.smd_weighting,
+            reliability_inflation=infl[finite_g],
+            identifiability=[lbl for lbl, ok in zip(idents, finite_g) if ok],
+        )
+    pooled_loo, boot_stab = _stratified_stability(strata, scale_c, smd_w_all, seed, int(settings.n_bootstrap))
     return {
         **standardized,
         "tracer_smd": _describe(dict(zip(tracers, g)), 3),
@@ -316,13 +467,16 @@ def _pool_reaction(strata: list[_Stratum], settings: PoolingSettings, seed: int)
         "ci_upper": diff + _Z_CRITICAL * diff_se,
         "log2fc": _log2fc_from_means(pooled_mean_a, pooled_mean_b, diff, settings.zero_threshold),
         "log2fc_se": log2fc_se,
-        # 合并的 Hedges' g 在标准化尺度上按 g 的方差加权（不再借用绝对尺度的权重，见 _pool_standardized）
+        # 合并的 Hedges' g 在标准化尺度上按选定权重模式加权（见 _pool_standardized）
         "effect_size": standardized["smd"],
         "statistic": perm["z"],
         "permutation_pvalue": perm["pvalue"],
         "min_achievable_p": perm["p_floor"],
         "n_permutations": perm["n_permutations"],
         "permutation_exact": perm["exact"],
+        "permutation_scale": settings.permutation_scale,
+        "pooled_loo_stability": pooled_loo,
+        "direction_stability": boot_stab,
         "heterogeneity_q": q,
         "heterogeneity_pvalue": float(stats.chi2.sf(q, k - 1)) if k > 1 else np.nan,
         "i_squared": (max(0.0, (q - (k - 1)) / q) if q > 0 else 0.0) if k > 1 else np.nan,
@@ -350,17 +504,25 @@ def pool_contrast(animals: pd.DataFrame, groups: dict[str, str], numerator: str,
     for (tissue, reaction), part in data.groupby(["tissue", "reaction"], sort=True):
         included, excluded, described = [], [], []
         for tracer, sub in part.groupby("tracer", sort=True):
+            label = labels.get((str(tracer), tissue, reaction), "undetermined")
             stratum = _Stratum(str(tracer), sub["net_flux"].to_numpy(float), sub["fit_var"].to_numpy(float),
-                               sub["is_num"].to_numpy(bool))
+                               sub["is_num"].to_numpy(bool), label)
             n_a, n_b = stratum.n_num, stratum.n - stratum.n_num
             if n_a < 1 or n_b < 1:
                 continue
             described.append(stratum)
-            label = labels.get((stratum.tracer, tissue, reaction), "undetermined")
+            contrast_pinned = False
+            if settings.exclude_unconstrained and "at_bound" in sub.columns:
+                ab = sub["at_bound"].fillna(False).to_numpy(dtype=bool)
+                num_ab = float(ab[stratum.is_num].mean()) if n_a > 0 else 0.0
+                den_ab = float(ab[~stratum.is_num].mean()) if n_b > 0 else 0.0
+                contrast_pinned = max(num_ab, den_ab) >= float(settings.bound_pinned_min_fraction)
             if n_a < 2 or n_b < 2:
                 excluded.append(f"{stratum.tracer}:low_n")
             elif (stratum.tracer, tissue, reaction) not in informative:
                 excluded.append(f"{stratum.tracer}:{label}")
+            elif contrast_pinned:
+                excluded.append(f"{stratum.tracer}:contrast_bound_pinned")
             elif stratum.values.var() + stratum.fit_var.mean() <= 0:
                 excluded.append(f"{stratum.tracer}:no_variation")
             else:
@@ -382,8 +544,11 @@ def pool_contrast(animals: pd.DataFrame, groups: dict[str, str], numerator: str,
             row.update({"k": 0,
                         "mean_numerator": float(np.mean([s.values[s.is_num].mean() for s in described])),
                         "mean_denominator": float(np.mean([s.values[~s.is_num].mean() for s in described]))})
-            row["identifiability"] = _best_label(labels.get((s.tracer, tissue, reaction), "undetermined")
-                                                 for s in described)
+            row["identifiability"] = _best_label(
+                "bound_pinned" if any(e == f"{s.tracer}:contrast_bound_pinned" for e in excluded)
+                else labels.get((s.tracer, tissue, reaction), "undetermined")
+                for s in described
+            )
             used = described
         row["n_numerator"] = sum(s.n_num for s in used)
         row["n_denominator"] = sum(s.n - s.n_num for s in used)
@@ -438,16 +603,25 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
     evidence_level = np.select([statistical, underpowered], ["statistical_test", "effect_size_only"], "insufficient")
 
     pvalue = table["permutation_pvalue"].where(statistical)
-    padj = pd.Series(np.nan, index=table.index)
+    padj_global = pd.Series(np.nan, index=table.index)
+    padj_tissue = pd.Series(np.nan, index=table.index)
     tested = pvalue.notna()
     keys = None
     if groups is not None:
         from .flux_groups import group_keys, grouped_bh
         keys = group_keys(table["tissue"], table["reaction"], groups)
-        padj = grouped_bh(pvalue, keys)
+        padj_global = grouped_bh(pvalue, keys)
+        for _, part_idx in table.groupby("tissue", sort=False).groups.items():
+            padj_tissue.loc[part_idx] = grouped_bh(pvalue.loc[part_idx], keys.loc[part_idx])
     elif tested.any():
         from statsmodels.stats.multitest import multipletests
-        padj[tested] = multipletests(pvalue[tested], method="fdr_bh")[1]
+        padj_global[tested] = multipletests(pvalue[tested], method="fdr_bh")[1]
+        for _, part_idx in table.groupby("tissue", sort=False).groups.items():
+            sub_tested = tested.loc[part_idx]
+            if sub_tested.any():
+                idx_valid = part_idx[sub_tested.to_numpy()]
+                padj_tissue.loc[idx_valid] = multipletests(pvalue.loc[idx_valid], method="fdr_bh")[1]
+    padj = padj_tissue if settings.fdr_scope == "per_tissue" else padj_global
 
     supported = table["tracer_evidence"].isin(SUPPORTED) & (table["k"] >= settings.min_tracers)
     fc_ok = table["log2fc"].abs().ge(settings.log2fc_threshold)
@@ -455,7 +629,7 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
     g_ok = table["effect_size"].abs().ge(settings.hedges_g_threshold)
     selected = supported & ((statistical & p_ok & fc_ok) | (underpowered & g_ok & fc_ok))
     rule_p = (f"permutation p<{settings.pvalue_threshold:g} and fdr_bh<={settings.fdr_threshold:g} "
-              f"and |log2FC|>={settings.log2fc_threshold:g}")
+              f"({settings.fdr_scope}) and |log2FC|>={settings.log2fc_threshold:g}")
     rule_g = f"|Hedges' g|>={settings.hedges_g_threshold:g} and |log2FC|>={settings.log2fc_threshold:g}"
     scope = f"; tracer_evidence in {'/'.join(SUPPORTED)}; informative tracers>={settings.min_tracers}"
     selection_rule = np.select([statistical, underpowered], [rule_p + scope, rule_g + scope], "")
@@ -493,6 +667,8 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
         "statistic": table["statistic"].where(statistical).astype(float),
         "pvalue": pvalue.astype(float),
         "padj": padj.astype(float),
+        "padj_global": padj_global.astype(float),
+        "fdr_scope": settings.fdr_scope,
         "padj_method": np.where(statistical, "fdr_bh", "none"),
         "n_numerator": table["n_numerator"].astype("int64"),
         "n_denominator": table["n_denominator"].astype("int64"),
@@ -506,6 +682,8 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
         "selected": selected.astype(bool),
         "selection_rule": selection_rule,
         "identifiability": table["identifiability"].astype(str),
+        "direction_stability": pd.to_numeric(table["direction_stability"], errors="coerce").astype(float)
+        if "direction_stability" in table.columns else np.nan,
         "permutation_pvalue": table["permutation_pvalue"].astype(float),
         "flags": flags,
         "flux_id": table["tissue"].astype(str) + "--" + table["reaction"].astype(str),
@@ -513,8 +691,9 @@ def to_differential(pooled: pd.DataFrame, *, contrast_id: str, contrast_role: st
     for column in ("tracer_evidence", "n_tracers", "n_tracers_informative", "tracers_informative", "tracers_excluded",
                    "diff", "diff_se", "ci_lower", "ci_upper", "log2fc_se", "heterogeneity_q", "heterogeneity_pvalue",
                    "i_squared", "n_tracers_up", "n_tracers_down", "tracer_effects", "tracer_weights",
-                   "n_permutations", "permutation_exact", "smd", "smd_se", "smd_heterogeneity_q",
-                   "smd_heterogeneity_pvalue", "smd_i_squared", "n_tracers_smd", "tracer_smd"):
+                   "n_permutations", "permutation_exact", "permutation_scale", "pooled_loo_stability",
+                   "smd", "smd_se", "smd_heterogeneity_q", "smd_heterogeneity_pvalue", "smd_i_squared",
+                   "n_tracers_smd", "tracer_smd", "smd_weights", "smd_weighting", "g_total_var"):
         if column in table.columns:
             out[column] = table[column].to_numpy()
     if keys is not None:

@@ -240,6 +240,133 @@ class PoolingTest(unittest.TestCase):
         self.assertFalse(table.at[0, "selected"])
         self.assertIn("identifiability:poorly_constrained", table.at[0, "flags"])
 
+    def test_smd_weighting_modes_and_validation(self) -> None:
+        # 两个同向示踪剂：glucose 拟合方差小且 well_constrained，lactate 拟合方差大且 moderate
+        spec = {
+            "glucose": ([12.0, 13.0, 12.5], [10.0, 10.4, 9.9]),
+            "lactate": ([13.5, 11.2, 13.0], [10.5, 9.4, 10.8]),
+        }
+        animals, groups = _animals(spec, fit_std=0.2)
+        animals.loc[animals["tracer"] == "lactate", "fit_std"] = 3.5
+        cov = _coverage({"glucose": "well_constrained", "lactate": "moderate"})
+
+        def parse_weights(text: str) -> dict[str, float]:
+            return {k: float(v) for k, v in (item.split(":") for item in str(text).split(";") if ":" in item)}
+
+        r_smd = mt.pool_contrast(animals, groups, "treat", "control", cov,
+                                 mt.PoolingSettings(smd_weighting="smd")).iloc[0]
+        r_rel = mt.pool_contrast(animals, groups, "treat", "control", cov,
+                                 mt.PoolingSettings(smd_weighting="reliability_smd")).iloc[0]
+        r_id = mt.pool_contrast(animals, groups, "treat", "control", cov,
+                                mt.PoolingSettings(smd_weighting="identifiability_smd")).iloc[0]
+
+        w_smd = parse_weights(r_smd["smd_weights"])
+        w_rel = parse_weights(r_rel["smd_weights"])
+        w_id = parse_weights(r_id["smd_weights"])
+        for parsed in (w_smd, w_rel, w_id):
+            self.assertAlmostEqual(sum(parsed.values()), 1.0, delta=0.01)
+        # reliability_smd 应降低高 fit_std 的 lactate 权重，提高 glucose 权重
+        self.assertGreater(w_rel["glucose"], w_smd["glucose"])
+        # identifiability_smd 应降低 moderate 的 lactate 权重（q=0.5 vs 1.0）
+        self.assertGreater(w_id["glucose"], w_smd["glucose"])
+        self.assertEqual(r_rel["smd_weighting"], "reliability_smd")
+        self.assertEqual(r_id["smd_weighting"], "identifiability_smd")
+        self.assertTrue(np.isfinite(r_smd["g_total_var"]) and r_smd["g_total_var"] > 0)
+
+        with self.assertRaises(ValueError):
+            mt.PoolingSettings(smd_weighting="invalid_mode")
+        with self.assertRaises(ValueError):
+            mt.PoolingSettings(permutation_scale="invalid_scale")
+        with self.assertRaises(ValueError):
+            mt.PoolingSettings(fdr_scope="invalid_scope")
+
+    def test_fdr_scope_per_tissue_vs_per_contrast_and_padj_global(self) -> None:
+        # heart 2 条反应（p=0.01, 0.80），liver 10 条反应（p=0.80）
+        def fake_row(tissue: str, rxn: str, pval: float) -> dict:
+            return {
+                "tissue": tissue, "reaction": rxn, "k": 2, "n_tracers": 2, "n_tracers_informative": 2,
+                "tracers_informative": "glucose;lactate", "tracers_excluded": "",
+                "tracer_evidence": mt.CONSISTENT, "identifiability": "well_constrained",
+                "n_numerator": 6, "n_denominator": 6, "mean_numerator": 20.0, "mean_denominator": 10.0,
+                "diff": 10.0, "diff_se": 2.0, "log2fc": 1.0, "log2fc_se": 0.2,
+                "effect_size": 1.2, "statistic": 2.5, "permutation_pvalue": pval, "min_achievable_p": 0.005,
+                "heterogeneity_q": 0.1, "heterogeneity_pvalue": 0.75, "i_squared": 0.0,
+                "smd": 1.2, "smd_se": 0.4, "smd_heterogeneity_pvalue": 0.75,
+                "n_tracers_up": 2, "n_tracers_down": 0, "direction_stability": 1.0, "pooled_loo_stability": 1.0,
+            }
+
+        pooled = pd.DataFrame(
+            [fake_row("heart", "R_sig", 0.01), fake_row("heart", "R_null", 0.80)]
+            + [fake_row("liver", f"L_{i}", 0.80) for i in range(10)]
+        )
+        t_tissue = mt.to_differential(pooled, contrast_id="c", contrast_role="other", flux_units=UNITS,
+                                      settings=mt.PoolingSettings(fdr_scope="per_tissue"))
+        t_global = mt.to_differential(pooled, contrast_id="c", contrast_role="other", flux_units=UNITS,
+                                      settings=mt.PoolingSettings(fdr_scope="per_contrast"))
+        r_sig_t = t_tissue[t_tissue["feature_id"] == "R_sig"].iloc[0]
+        r_sig_g = t_global[t_global["feature_id"] == "R_sig"].iloc[0]
+        # 按组织（heart 仅 2 检验）：0.01 * 2 = 0.02；跨全组织（12 检验）：0.01 * 12 = 0.12
+        self.assertAlmostEqual(r_sig_t["padj"], 0.02, places=6)
+        self.assertAlmostEqual(r_sig_t["padj_global"], 0.12, places=6)
+        self.assertEqual(r_sig_t["fdr_scope"], "per_tissue")
+        self.assertAlmostEqual(r_sig_g["padj"], 0.12, places=6)
+        self.assertAlmostEqual(r_sig_g["padj_global"], 0.12, places=6)
+        self.assertEqual(r_sig_g["fdr_scope"], "per_contrast")
+        # differential_flux.fdr_scope 可被 multi_tracer 继承
+        inherited = mt.PoolingSettings.from_analysis({"differential_flux": {"fdr_scope": "per_contrast"}})
+        self.assertEqual(inherited.fdr_scope, "per_contrast")
+
+    def test_relative_permutation_scale_is_invariant_to_stratum_scaling(self) -> None:
+        base_strata = [
+            _stratum("glucose", [12.0, 13.0, 12.5], [10.0, 10.4, 9.9], fit_var=0.2),
+            _stratum("lactate", [11.0, 11.4, 10.8], [9.8, 10.1, 9.7], fit_var=0.1),
+        ]
+        # 把 glucose 的绝对尺度整体放大 1000 倍（fit_var 放大 10^6 倍）
+        scaled_strata = [
+            _stratum("glucose", [12000.0, 13000.0, 12500.0], [10000.0, 10400.0, 9900.0], fit_var=200_000.0),
+            _stratum("lactate", [11.0, 11.4, 10.8], [9.8, 10.1, 9.7], fit_var=0.1),
+        ]
+        rel = mt.PoolingSettings(permutation_scale="relative")
+        p_base = mt._permutation_test(base_strata, rel, seed=0)
+        p_scaled = mt._permutation_test(scaled_strata, rel, seed=0)
+        self.assertAlmostEqual(p_base["pvalue"], p_scaled["pvalue"], places=12)
+        self.assertAlmostEqual(p_base["z"], p_scaled["z"], places=10)
+
+    def test_stratified_direction_and_loo_stability(self) -> None:
+        # 场景 1：两个主示踪剂强同向 + 一个弱示踪剂轻度波动（类似 heart/G3PP_c）→ 分层合并稳定
+        spec_stable = {
+            "glucose": ([4.0, 4.4, 4.2], [7.0, 7.5, 7.2]),
+            "glycerol": ([8.0, 8.6, 8.2], [11.0, 11.5, 11.2]),
+            "alanine": ([9.5, 10.5, 9.2], [10.0, 9.8, 10.4]),
+        }
+        animals, groups = _animals(spec_stable, fit_std=0.1)
+        row_ok = mt.pool_contrast(
+            animals, groups, "treat", "control",
+            _coverage(dict.fromkeys(spec_stable, "well_constrained")),
+            mt.PoolingSettings(n_bootstrap=800, random_state=7),
+        ).iloc[0]
+        self.assertEqual(row_ok["pooled_loo_stability"], 1.0)
+        self.assertGreaterEqual(row_ok["direction_stability"], 0.95)
+        diff_ok = mt.to_differential(pd.DataFrame([row_ok]), contrast_id="c", contrast_role="other",
+                                     flux_units=UNITS, settings=mt.PoolingSettings())
+        for col in ("direction_stability", "pooled_loo_stability", "g_total_var", "smd_weights", "smd_weighting",
+                    "permutation_scale"):
+            self.assertIn(col, diff_ok.columns)
+
+        # 场景 2：单只极端异常值驱动全部合并信号 → 分层 LOO 与自助法稳定性均跌落
+        spec_outlier = {
+            "glucose": ([1.0, 1.0, 25.0], [2.0, 2.1, 1.9]),
+            "lactate": ([2.0, 2.1, 1.9], [2.0, 2.05, 1.95]),
+        }
+        animals2, groups2 = _animals(spec_outlier, fit_std=0.05)
+        row_bad = mt.pool_contrast(
+            animals2, groups2, "treat", "control",
+            _coverage(dict.fromkeys(spec_outlier, "moderate")),
+            mt.PoolingSettings(n_bootstrap=800, random_state=7),
+        ).iloc[0]
+        self.assertLess(row_bad["pooled_loo_stability"], 1.0)
+        self.assertLess(row_bad["direction_stability"], 0.85)
+
     def test_conflicting_tracers_are_not_selected(self) -> None:
         spec = {"glucose": ([16.0, 16.2, 15.9], [20.0, 20.1, 19.8]), "lactate": ([28.0, 28.3, 27.9], [20.0, 20.2, 19.9])}
         animals, groups = _animals(spec)
@@ -310,8 +437,12 @@ class MultiTracerRunTest(unittest.TestCase):
 
     def test_pooled_table_carries_flux_groups_and_standardized_scale(self) -> None:
         # 合并结果也按通量组做 BH（G10）；标准化尺度的异质性列与各示踪剂的 g 一并写出
-        for column in ("flux_group", "flux_group_size", "smd", "smd_heterogeneity_pvalue", "tracer_smd"):
+        for column in ("flux_group", "flux_group_size", "smd", "smd_heterogeneity_pvalue", "tracer_smd", "smd_weights"):
             self.assertIn(column, self.table.columns)
+        pdh_w = self.table.loc[("liver", "PDH_m"), "smd_weights"]
+        parsed = {k: float(v) for k, v in (item.split(":") for item in pdh_w.split(";"))}
+        self.assertEqual(set(parsed), set(TRACERS))
+        self.assertAlmostEqual(sum(parsed.values()), 1.0, delta=0.01)
         self.assertTrue((self.table["flux_group_size"] >= 1).all())
         self.assertTrue((self.mfa / "tables" / "flux_groups.parquet").is_file())
         fits = pd.read_parquet(self.mfa / "tables" / "sample_flux_fits.parquet")

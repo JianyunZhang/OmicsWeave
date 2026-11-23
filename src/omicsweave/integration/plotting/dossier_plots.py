@@ -69,12 +69,40 @@ GLYPHS = {"equivalent": "—", "not_identifiable": "⊘", "insufficient_n": "⚠
           "not_infused": "/", "not_detected": "◌", "no_knowledge": "/", "qc_blocked": "⚠"}
 BLOCK_TITLES = {"flux": "FLUX by tracer", "enzyme": "ENZYME", "regulator": "REGULATOR", "pool": "POOL",
                 "assessment": "ASSESSMENT"}
-AXIS_GLYPHS = {"unchanged": "—", "mixed": "≠", "undetermined": "—", "not_identifiable": "⊘", "insufficient_n": "⚠",
+AXIS_GLYPHS = {"unchanged": "—", "mixed": "≠", "undetermined": "╌", "not_identifiable": "⊘", "insufficient_n": "⚠",
                "not_detected": "◌", "not_measured": "/", "qc_blocked": "⚠", "no_knowledge": "/"}
 IDENTIFIABILITY = dict(IDENTIFIABILITY_COLORS)
 _HEADER_LAYER_ICONS = {"P": "protein", "R": "mrna", "M": "metabolite"}
 _ASSESSMENT_COL_ICONS = {"F": "flux", "C": "protein", "R": "regulation", "M": "metabolite"}
 _CONCORDANT_RE = re.compile(r"\((\d+)\)")
+_ABS_G_RE = re.compile(r"\|g\|\s*=\s*([0-9]+(?:\.[0-9]+)?)")
+_ABS_G_LT_RE = re.compile(r"\|g\|\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*<")
+
+
+def _undetermined_tag(cell: pd.Series) -> str:
+    """F 轴 undetermined 时的精简门控原因标签（纯 ASCII，避免字库缺字），排在虚线下方。"""
+    if str(cell.get("column") or "") != "F" or str(cell.get("display_state") or "") != "undetermined":
+        return ""
+    flags = {f.strip() for f in str(cell.get("flags") or "").split(";") if f.strip() and f.strip() != "nan"}
+    text = str(cell.get("text") or "")
+    if "tracer_expectation_mismatch" in flags:
+        return "mismatch"
+    if "single_subject_driven" in flags or "单只动物驱动" in text:
+        return "1-subj"
+    if "stability_unknown" in flags or "稳定性未知" in text:
+        return "LOO?"
+    m_lt = _ABS_G_LT_RE.search(text)
+    if m_lt:
+        return f"g={float(m_lt.group(1)):.2f}"
+    m_g = _ABS_G_RE.search(text)
+    if m_g:
+        g_val = float(m_g.group(1))
+        return f"g={g_val:.2f}" if g_val < 1.0 else "LOO"
+    if "LOO" in text or "方向稳定性" in text or "不稳定" in text:
+        return "LOO"
+    if "|g| 缺失" in text:
+        return "g=NA"
+    return ""
 
 
 def _size(certainty: float) -> float:
@@ -156,11 +184,15 @@ def _draw_assessment(
         else:
             ax.plot([x - 0.16, x + 0.16], [y, y], color=pal.muted, lw=0.95, solid_capstyle="round", zorder=3.1)
         return
-    s = 0.66
+    tag = _undetermined_tag(cell)
+    s = 0.62 if tag else 0.66
+    cy = (y + 0.10) if tag else y
     draw_status_cell(
-        ax, x - s / 2, y - s * y_scale / 2, s, state, direction,
+        ax, x - s / 2, cy - s * y_scale / 2, s, state, direction,
         palette=pal, font_scale=1.22, zorder=3.0, draw_box=False, y_up=True, y_scale=y_scale,
     )
+    if tag:
+        ax.text(x, y - 0.30, tag, ha="center", va="center", fontsize=4.6, color=pal.muted, zorder=3.1)
 
 
 def _short_label(block: str, column: str, tracer: str) -> str:
@@ -320,22 +352,23 @@ def _matrix_legend(
     lax.axis("off")
 
     sw = 0.165
-    # Row 1 (y = 1.15): 方向与状态矢量图标
-    y1 = 1.14
+    # Row 1 (y = 1.18): 方向与状态矢量图标（显式区分 Unchanged 等效未变 与 Undetermined 证据不足/不稳定）
+    y1 = 1.18
     x = 0.02
     for st_pair, desc in (
         ((("changed", 1), ("changed", -1)), "Sig. (FDR<0.05)"),
-        ((("suggestive", 1), ("suggestive", -1)), "Suggestive (p<0.05)"),
+        ((("suggestive", 1), ("suggestive", -1)), "Suggestive (p<0.05 / |g|≥1)"),
         ((("mixed", 0),), "Mixed"),
-        ((("unchanged", 0),), "Unchanged"),
+        ((("unchanged", 0),), "Unchanged (equiv.)"),
+        ((("undetermined", 0),), "Undetermined"),
         ((("not_measured", 0),), "Not measured"),
         ((("not_identifiable", 0),), "Unident. flux"),
         ((("not_detected", 0),), "Not detected"),
         ((("qc_blocked", 0),), "QC / Low-n"),
     ):
-        item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.20
+        item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.18
         if x > 0.05 and x + item_w > lw_in:
-            y1 -= 0.24
+            y1 -= 0.23
             x = 0.02
         for st, dr in st_pair:
             draw_status_cell(
@@ -344,10 +377,10 @@ def _matrix_legend(
             )
             x += sw + 0.035
         lax.text(x + 0.03, y1, desc, fontsize=5.8, color=pal.ink2, va="center", ha="left")
-        x += 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.20
+        x += 0.04 + estimate_text_width(desc, 5.8, 1.0) + 0.18
 
-    # Row 2 (y = y1 - 0.28): 自解释三点证据徽章 + 4 层图标说明
-    y2 = y1 - 0.28
+    # Row 2 (y = y1 - 0.26): 自解释三点证据徽章 + 4 层图标说明
+    y2 = y1 - 0.26
     x = 0.02
     for lvl, desc in (
         ("L3", "Multi-tracer"),
@@ -369,12 +402,17 @@ def _matrix_legend(
         lax.text(x + 0.17, y2, ilbl, fontsize=5.6, color=pal.ink2, va="center", ha="left")
         x += iw
 
-    # Row 3 & 4: 来源、说明与校准注记
-    y3 = max(0.32, y2 - 0.26)
-    note_parts = ["k/n: changed/quantified members", "dashed box: expected tracer", "number under dot: log2FC"]
+    # Row 3 & 4: 来源、说明（含 Flux 轴判定口径）与校准注记
+    y3 = max(0.32, y2 - 0.25)
+    note_parts = [
+        "Flux: Sig.=≥2 tracers & FDR<0.05; Sugg.=|g|≥1 or (≥2 & p<0.05 & |g|≥0.8); —=equiv.; dashed=undet (tag: gate)",
+        "k/n: changed/quantified",
+        "dashed box: expected tracer",
+        "number under dot: log2FC",
+    ]
     if runs:
         note_parts.insert(0, "Sources: " + "; ".join(f"{k} = {v}" for k, v in runs.items()))
-    lax.text(0.02, y3, "  ·  ".join(note_parts), fontsize=5.5, color=pal.muted, va="center", ha="left")
+    lax.text(0.02, y3, "  ·  ".join(note_parts), fontsize=5.4, color=pal.muted, va="center", ha="left")
     if caption:
         lax.text(0.02, max(0.08, y3 - 0.20), caption, fontsize=5.7, color=pal.ink2, va="center", ha="left")
 

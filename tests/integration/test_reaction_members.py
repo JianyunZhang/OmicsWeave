@@ -88,6 +88,11 @@ class AnnotationTableTest(unittest.TestCase):
         self.assertEqual(member_relations("PYK_c"), {"Pkm": "isozyme", "Pklr": "isozyme"})
         self.assertEqual(member_relations("HEX_c"), {})                 # 未登记：调用方按同工酶处理
         self.assertEqual(DecoyPackage(CuratedNetworkPackage()).member_relations("PDH_m"), {})
+        # 集总多步/不可替代诱导酶反应标为 pathway_step，避免被可替代同工酶丰度规则误杀
+        self.assertEqual(member_relations("THERMOGENESIS_UCP")["Ucp1"], "pathway_step")
+        self.assertEqual(REACTION_MEMBERS["THERMOGENESIS_UCP"].members["Ucp2"].role, "related_isozyme")
+        self.assertEqual(member_relations("FA_esterification_c")["Mogat1"], "pathway_step")
+        self.assertEqual(member_relations("HMGCR")["Hmgcr"], "pathway_step")
 
     def test_schema_errors(self) -> None:
         cases = {
@@ -183,6 +188,20 @@ class ComplexSubunitTest(unittest.TestCase):
                            "log2fc": [-0.1, 0.0, -0.05, 1.5], "padj": [0.8, 0.9, 0.85, 0.001]})
         details = _builder().transcriptomics_evidence(self.flux, tx)
         self.assertNotIn("Dld", details["concordant_genes"])
+        self.assertNotIn("weighted_capacity_change", details)
+
+    def test_pathway_step_is_exempt_from_minor_isozyme_suppression(self) -> None:
+        """FA_esterification_c 中的 Mogat1 与 THERMOGENESIS_UCP 中的 Ucp1 属 pathway_step，不被同工酶丰度压制。"""
+        fa_flux = pd.Series({"flux_id": "FA_esterification_c", "tissue": "liver", "flux_log2fc": 1.0})
+        tx = pd.DataFrame({
+            "gene": ["Mogat1", "Lpin2", "Dgat2"],
+            "base_mean": [20.0, 3000.0, 2500.0],
+            "log2fc": [3.5, -0.4, -0.2],
+            "padj": [0.001, 0.4, 0.5],
+        })
+        details = _builder().transcriptomics_evidence(fa_flux, tx)
+        self.assertEqual(details["concordant_genes"], ["Mogat1"])
+        self.assertFalse(details.get("minor_isozyme_driven", False))
         self.assertNotIn("weighted_capacity_change", details)
 
 

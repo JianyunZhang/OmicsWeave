@@ -27,7 +27,9 @@ from omicsweave.core.delivery import Delivery
 from omicsweave.core.model import Omics
 from omicsweave.integration.dossier.panels import PanelError, load_panels, panel_elements
 from omicsweave.integration.dossier.view import matrix_view, summarize, wide_table
-from omicsweave.integration.plotting.dossier_plots import TITLE_MAX_LINES, TITLE_WIDTH, _panel_title, _text_width
+from omicsweave.integration.plotting.dossier_plots import (
+    TITLE_MAX_LINES, TITLE_WIDTH, _panel_title, _text_width, _undetermined_tag,
+)
 from tests.integration.test_flux_anchored import DIET, FluxAnchoredBundleTest
 from tests.mfa.test_mfa_runner import EXP, build_two_factor_project
 
@@ -117,6 +119,31 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual((cell["display_state"], cell["n_changed"], cell["n_quantified"], cell["ring"]),
                          ("summary", 1, 2, "changed"))
 
+    def test_undetermined_flux_gate_tags(self) -> None:
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "F", "display_state": "undetermined", "flags": "",
+            "text": "可辨识，未达 suggestive/changed（|g| = 0.66 < 1）",
+        })), "g=0.66")
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "F", "display_state": "undetermined", "flags": "single_subject_driven",
+            "text": "可辨识，未达 suggestive/changed（|g| = 0.67 < 1，单只动物驱动）",
+        })), "1-subj")
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "F", "display_state": "undetermined", "flags": "tracer_expectation_mismatch",
+            "text": "有可辨识示踪剂；可辨识的示踪剂与面板声明的预期不符，最高为 undetermined",
+        })), "mismatch")
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "F", "display_state": "undetermined", "flags": "stability_unknown",
+            "text": "可辨识，未达 suggestive/changed（逐只去除后的方向稳定性未知）",
+        })), "LOO?")
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "F", "display_state": "undetermined", "flags": "",
+            "text": "可辨识，但效应小或不稳定（|g| = 1.10）",
+        })), "LOO")
+        self.assertEqual(_undetermined_tag(pd.Series({
+            "column": "C", "display_state": "undetermined", "flags": "", "text": "测到，无变化证据",
+        })), "")
+
 
 class PanelTitleTest(unittest.TestCase):
     """图 B 的面板标题按面板宽度折行，不压到右侧面板上（真实数据中 alanine 通量面板的状态行有 50 个字符）。"""
@@ -144,7 +171,7 @@ class PanelTitleTest(unittest.TestCase):
                 self.assertTrue(all(_text_width(line) <= TITLE_WIDTH for line in lines), lines)
         # 只在分隔符处断开，内容不丢
         self.assertEqual(_panel_title(flux).split("\n"),
-                         ["alanine · flux:dio_project", "not_identifiable  log2FC +1.00", "poorly_constrained"])
+                         ["U-13C-alanine · flux:dio_project", "not_identifiable  log2FC +1.00", "poorly_constrained"])
         self.assertEqual(_panel_title(metabolite).split("\n")[:2], ["Dihydroxyacetone phosphate", "M:dio_project"])
 
 
@@ -250,15 +277,22 @@ class DossierPanelBundleTest(unittest.TestCase):
         cell = view[(view["element_id"] == "HEX_c") & (view["column"] == "R:A")].iloc[0]
         self.assertAlmostEqual(exported.loc[exported["element_id"] == "HEX_c", "enzyme R:A log2fc"].iloc[0],
                                round(cell["value"], 4))
-        # 评估块原样取自评估表
+        # 评估块原样取自评估表，并一并导出判定依据（rule）与标记（flags）
         claim = assessment[1].set_index(["flux_id", "tissue", "contrast_id"]).loc[("HEX_c", "liver", DIET)]
         exported_claim = exported.set_index("element_id").at["HEX_c", "assessment level state"]
         self.assertEqual(exported_claim, claim["flux_claim"])
+        self.assertIn("assessment level phenomena", exported.columns)
         capacity = assessment[0][(assessment[0]["flux_id"] == "HEX_c") & (assessment[0]["axis"] == "capacity")
                                  & (assessment[0]["tissue"] == "liver") & (assessment[0]["contrast_id"] == DIET)].iloc[0]
         self.assertEqual(exported.set_index("element_id").at["HEX_c", "assessment C state"], capacity["state"])
+        self.assertIn("assessment F rule", exported.columns)
+        self.assertIn("assessment F flags", exported.columns)
         keys = ["source", "flux_id", "layer", "role", "member_id", "feature_id", "tracer"]
         exported_members = pd.read_csv(folder / f"matrix_{DIET}_members.tsv", sep="\t", keep_default_na=False)
+        for extra_col in ("effect", "effect_type", "smd_se", "padj_global", "fdr_scope", "heterogeneity_pvalue",
+                          "direction_stability", "pooled_loo_stability", "smd_weights", "tracer_weights",
+                          "g_total_var", "tracer_evidence"):
+            self.assertIn(extra_col, exported_members.columns)
         source = members[(members["tissue"] == "liver") & (members["contrast_id"] == DIET)
                          & members["flux_id"].isin(panel.reactions)].copy()
         source[keys] = source[keys].fillna("").astype(str)

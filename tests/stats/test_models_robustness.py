@@ -215,6 +215,73 @@ class RobustnessTest(StatsCase):
         self.assertGreater(power.at["HFD_vs_LFD", "mde_80"], power.at["GLP1_vs_Saline_in_HFD", "mde_80"] * 0.5)
         self.assertTrue((self.run_dir / "qc" / "contrast_reliability.parquet").is_file())
 
+    def test_multi_tracer_mfa_robustness_stratifies_and_ignores_unconstrained_tracers(self) -> None:
+        """多示踪剂 MFA 的 E5 稳健性只纳入可辨识且成对的示踪剂并按示踪剂分层，不被不可辨识或未成对示踪剂污染。"""
+        exp_dir = self.root / "experiments" / EXP
+        subj = pd.DataFrame([
+            ("lac_h1", "HFD", "Saline"), ("lac_h2", "HFD", "Saline"),
+            ("lac_l1", "LFD", "Saline"), ("lac_l2", "LFD", "Saline"),
+            ("gly_h1", "HFD", "Saline"), ("gly_h2", "HFD", "Saline"), ("gly_h3", "HFD", "Saline"),
+            ("gly_l1", "LFD", "Saline"), ("gly_l2", "LFD", "Saline"), ("gly_l3", "LFD", "Saline"),
+            ("ala_h1", "HFD", "Saline"), ("ala_h2", "HFD", "Saline"), ("ala_h3", "HFD", "Saline"),
+            ("ala_l1", "LFD", "Saline"), ("ala_l2", "LFD", "Saline"), ("ala_l3", "LFD", "Saline"),
+            ("n15_l1", "LFD", "Saline"), ("n15_l2", "LFD", "Saline"),  # 只有 LFD，未成对
+        ], columns=["subject_id", "diet", "treatment"])
+        subj.to_csv(exp_dir / "subjects.tsv", sep="\t", index=False)
+        proto_of = {"lac": "lactate", "gly": "glycerol", "ala": "alanine", "n15": "alanine_13c15n"}
+        samp = pd.DataFrame([
+            {"sample_id": s, "subject_id": s, "omics": "mfa", "tissue": "heart", "protocol": proto_of[s[:3]]}
+            for s in subj["subject_id"]
+        ])
+        samp.to_csv(exp_dir / "samples.tsv", sep="\t", index=False)
+
+        cols = list(subj["subject_id"])
+        # R_STABLE：仅 lactate 可辨识且极稳定；不可辨识的 alanine 与未成对的 alanine_13c15n 含极端离群值
+        r_stable = [154.0, 155.0, 4.0, 7.0,
+                    380.0, 170.0, 330.0, 140.0, 85.0, 320.0,
+                    0.3, -0.6, 1.0, 12.0, 26.0, 57.0,
+                    1.0, 2145.0]
+        # R_OUTLIER：仅 glycerol 可辨识且确实由单只动物 gly_h1=270 驱动；其他不可辨识示踪剂呈反向高值（旧逻辑会掩盖）
+        r_outlier = [100.0, 100.0, 10.0, 10.0,
+                     270.0, 1.0, 1.0, 1.0, 2.0, 1.0,
+                     100.0, 100.0, 100.0, 10.0, 10.0, 10.0,
+                     10.0, 10.0]
+        # R_MULTI：lactate（尺度 ~1）与 glycerol（尺度 ~100）均可辨识且稳定同向
+        r_multi = [2.0, 2.2, 0.9, 1.1,
+                   210.0, 220.0, 215.0, 100.0, 105.0, 95.0,
+                   50.0, -500.0, 50.0, 50.0, 50.0, 50.0,
+                   1.0, 5000.0]
+        mat = pd.DataFrame([r_stable, r_outlier, r_multi], index=["R_STABLE", "R_OUTLIER", "R_MULTI"], columns=cols)
+        write_dataset(self.run_dir / "omics" / "mfa" / "data" / "heart", Dataset(
+            mat, empty_features(mat.index),
+            DatasetMeta(omics=Omics.MFA, tissue="heart", value_type=ValueType.FLUX, scale="linear",
+                        feature_id_type="mfa_reaction", units="nmol"),
+        ))
+        diff = pd.DataFrame({
+            "contrast_id": "HFD_vs_LFD", "contrast_role": "disease_effect", "tissue": "heart", "omics": "mfa",
+            "feature_id": ["R_STABLE", "R_OUTLIER", "R_MULTI"],
+            "log2fc": [4.6, 3.0, 1.1], "lfc_se": [0.5, 1.2, 0.2], "pvalue": [0.33, 0.1, 0.01],
+            "padj": [np.nan, np.nan, 0.03], "padj_method": "fdr_bh",
+            "n_numerator": [2, 3, 5], "n_denominator": [2, 3, 5], "method": "tracer_stratified_permutation",
+            "selected": [True, True, True],
+            "tracers_informative": ["lactate", "glycerol", "glycerol;lactate"],
+        })
+        rob = robustness(self.experiment(), self.run_dir, {"mfa": diff}, {})["mfa"].set_index("feature_id")
+        # R_STABLE 不被不可辨识/未成对示踪剂误伤
+        self.assertFalse(bool(rob.at["R_STABLE", "single_subject_driven"]))
+        self.assertEqual((int(rob.at["R_STABLE", "n_numerator"]), int(rob.at["R_STABLE", "n_denominator"])), (2, 2))
+        self.assertEqual(int(rob.at["R_STABLE", "n_left_out"]), 4)
+        self.assertGreater(float(rob.at["R_STABLE", "loo_min_ratio"]), 0.9)
+        self.assertEqual(rob.at["R_STABLE", "driver_sample"], "")
+        # R_OUTLIER 在有效示踪剂内精准抓出真正驱动离群的动物 gly_h1
+        self.assertTrue(bool(rob.at["R_OUTLIER", "single_subject_driven"]))
+        self.assertEqual(rob.at["R_OUTLIER", "driver_sample"], "gly_h1")
+        self.assertGreaterEqual(int(rob.at["R_OUTLIER", "loo_sign_flips"]), 1)
+        # R_MULTI 跨百倍尺度的两个有效示踪剂保持稳定，且总留一数等于 4 + 6 = 10
+        self.assertFalse(bool(rob.at["R_MULTI", "single_subject_driven"]))
+        self.assertEqual(int(rob.at["R_MULTI", "n_left_out"]), 10)
+        self.assertEqual(int(rob.at["R_MULTI", "loo_sign_flips"]), 0)
+
 
 class ShrinkageTest(unittest.TestCase):
     def test_lfsr_separates_true_effects(self) -> None:

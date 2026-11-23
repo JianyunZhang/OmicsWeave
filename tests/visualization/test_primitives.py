@@ -92,8 +92,8 @@ class PrimitivesTest(unittest.TestCase):
                 draw_layer_icon(ax, kind, 3.0 + idx * 2.2, 13.5, size=0.9, color=pal.ink, zorder=5.0)
             for idx, (st, dr) in enumerate((
                 ("changed", 1), ("changed", -1), ("suggestive", 1), ("suggestive", -1),
-                ("mixed", 0), ("unchanged", 0), ("not_measured", 0), ("not_identifiable", 0),
-                ("not_detected", 0), ("qc_blocked", 0),
+                ("mixed", 0), ("unchanged", 0), ("undetermined", 0), ("not_measured", 0),
+                ("not_identifiable", 0), ("not_detected", 0), ("qc_blocked", 0),
             )):
                 draw_status_cell(ax, 2.0 + idx * 1.4, 15.0, 1.1, st, dr, palette=pal, zorder=5.0)
 
@@ -145,6 +145,20 @@ class PrimitivesTest(unittest.TestCase):
                 self.assertGreater(out2.stat().st_size, 1000)
             plt.close(fig)
             plt.close(fig2)
+
+    def test_unchanged_and_undetermined_render_distinct_glyphs(self) -> None:
+        pal = get_palette("nature_editorial")
+        fig_u, ax_u = plt.subplots()
+        draw_status_cell(ax_u, 0.0, 0.0, 1.0, "unchanged", 0, palette=pal)
+        fig_d, ax_d = plt.subplots()
+        draw_status_cell(ax_d, 0.0, 0.0, 1.0, "undetermined", 0, palette=pal)
+        # unchanged draws 1 solid bar; undetermined draws 2 dashed segments in muted color
+        self.assertEqual(len(ax_u.lines), 1)
+        self.assertEqual(len(ax_d.lines), 2)
+        self.assertEqual(ax_u.lines[0].get_color(), pal.ink2)
+        self.assertTrue(all(ln.get_color() == pal.muted for ln in ax_d.lines))
+        plt.close(fig_u)
+        plt.close(fig_d)
 
 
 if __name__ == "__main__":

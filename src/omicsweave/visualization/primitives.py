@@ -651,9 +651,10 @@ def draw_status_cell(
     """绘制单个多组学状态微格（地图卡片、矩阵图与图例共享同一函数，保证 100% 视觉一致）。
 
     - ``changed`` / ``established``：红/蓝实心三角（显著变化）；
-    - ``suggestive`` / ``nominal``：红/蓝空心粗边三角（提示趋势）；
+    - ``suggestive`` / ``nominal``：红/蓝空心粗边三角（提示趋势；组学为名义 p<0.05，通量为 |Hedges' g|≥1 且方向稳定）；
     - ``mixed`` / ``conflicting``：红蓝对角斜拼方格（多成员方向冲突）；
-    - ``unchanged`` / ``equivalent`` / ``no_evidence`` / ``undetermined``：柔和中灰短横线 ``—``；
+    - ``unchanged`` / ``equivalent``：深灰实线短横 ``—``（通过等效性检验，确证无变化）；
+    - ``undetermined`` / ``no_evidence``：中灰虚线短横 ``╌``（可辨识/已测到，但效应小、不稳定或证据不足）；
     - ``not_measured`` / ``not_infused`` / ``no_knowledge``：浅灰底 + 淡 45° 斜纹 ``/``；
     - ``not_identifiable``：灰蓝禁用约束圆图标 ``⊘``（替代难以理解的 ``×``）；
     - ``not_detected``：浅灰虚线空心圆 ``◌``（替代 ``?``）；
@@ -714,13 +715,22 @@ def draw_status_cell(
             [(x_r, y_top), (x_r, y_bot), (x_l, y_bot)], closed=True,
             facecolor=palette.down, edgecolor="none", alpha=0.84, zorder=zorder + 0.12,
         ))
-    elif st in ("unchanged", "equivalent", "no_evidence", "undetermined"):
+    elif st in ("unchanged", "equivalent"):
         half = cell * 0.24
         ax.add_line(Line2D(
             [cx - half, cx + half], [cy, cy],
-            color=palette.muted if st == "undetermined" else palette.ink2,
-            lw=0.82 * font_scale, solid_capstyle="round", zorder=zorder + 0.12,
+            color=palette.ink2,
+            lw=0.86 * font_scale, solid_capstyle="round", zorder=zorder + 0.12,
         ))
+    elif st in ("undetermined", "no_evidence"):
+        half = cell * 0.27
+        gap = cell * 0.06
+        for x0_seg, x1_seg in ((cx - half, cx - gap), (cx + gap, cx + half)):
+            ax.add_line(Line2D(
+                [x0_seg, x1_seg], [cy, cy],
+                color=palette.muted,
+                lw=0.78 * font_scale, solid_capstyle="round", zorder=zorder + 0.12,
+            ))
     elif st in ("not_measured", "not_infused", "no_knowledge"):
         pad_x = cell * 0.07
         pad_y = cell_y * 0.07

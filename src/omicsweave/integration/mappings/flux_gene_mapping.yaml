@@ -3528,13 +3528,14 @@ THERMOGENESIS_UCP:
   gene_roles:
     catalytic:
     - Ucp1
-    - Ucp2
-    - Ucp3
     - Dio2
     - Cidea
     transcription_factor:
     - Ppargc1a
     - Prdm16
+    related_isozyme:
+    - Ucp2
+    - Ucp3
   pathway: Thermogenesis
   description: Mitochondrial uncoupling proteins and thermogenic program
 PEROX_FAO:

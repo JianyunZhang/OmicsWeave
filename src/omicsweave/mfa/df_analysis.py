@@ -376,6 +376,7 @@ UNCONSTRAINED_LABELS = ("poorly_constrained", "bound_pinned")
 # 时恰为 0，因此 0 与 1.0 是最常见的贴边值。
 _DEFAULT_BOUND_VALUES = (0.0, 1.0)
 _DEFAULT_BOUND_TOLERANCE = 0.05
+_DEFAULT_BOUND_REL_TOLERANCE = 0.02
 _DEFAULT_BOUND_PINNED_MIN_FRACTION = 0.5
 
 
@@ -418,14 +419,55 @@ def _net_bound_values(bound_values, inferred_bounds) -> list[float]:
     return sorted({round(v, 6) for v in values})
 
 
-def _flag_at_bound(values, bound_values, tolerance) -> np.ndarray:
-    """|value| 落在任一贴边值 ± tolerance 内即为 True。"""
+def _has_upper_bound_pileup(flux_all_fits, ub: float, min_hits: int = 3) -> bool:
+    """判断推断上界 ``ub`` 是否确实存在优化器撞顶的点质量（至少 ``min_hits`` 个方向拟合点落在 ``ub`` 的 0.1% 内），
+    避免把无盒约束的高斯尾部极大值误当作上界应用相对容差。"""
+    if not np.isfinite(ub) or ub <= 0:
+        return False
+    tol = max(1.0e-4, 1.0e-3 * abs(ub))
+    hits = 0
+    for fit_df in (flux_all_fits or {}).values():
+        cols = [c for c in fit_df.columns
+                if "--" in str(c) and not str(c).startswith("MIX:")]
+        if not cols:
+            continue
+        values = fit_df[cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+        values = values[np.isfinite(values)]
+        if len(values):
+            hits += int(np.sum(np.abs(values - ub) <= tol))
+            if hits >= min_hits:
+                return True
+    return False
+
+
+def _flag_at_bound(values, bound_values, tolerance, rel_tolerance: float = 0.0) -> np.ndarray:
+    """|value| 落在任一贴边值 ± max(tolerance, rel_tolerance * |bound|) 内即为 True。
+
+    绝对容差（默认 0.05）适用于下界 0 / 1.0；相对容差（默认在 ``sample_flux_matrix`` 中取 0.02）
+    确保大通量上界（如 3000）附近（如 2965–2999.9）同样能被识别为上界贴边。
+    """
     values = np.abs(np.asarray(values, dtype=float))
     bounds = np.asarray(list(bound_values), dtype=float)
     if values.size == 0 or bounds.size == 0:
         return np.zeros(values.shape, dtype=bool)
-    near = np.abs(values[:, None] - bounds[None, :]) <= float(tolerance)
+    eff_tol = np.maximum(float(tolerance), float(rel_tolerance) * np.abs(bounds))
+    near = np.abs(values[:, None] - bounds[None, :]) <= eff_tol[None, :]
     return near.any(axis=1) & np.isfinite(values)
+
+
+def _load_sample_at_bound(output_dir) -> pd.DataFrame | None:
+    """读取 sample_flux_matrix 写出的逐样本贴边表，供各比较按组核查组内贴边比例。"""
+    path = (Path(output_dir) / "01_df_results" / "all_tissues"
+            / "flux_matrix" / "sample_net_flux.csv")
+    if not path.exists():
+        return None
+    try:
+        table = pd.read_csv(path, usecols=lambda c: c in ("sample_id", "flux_id", "at_bound"))
+    except Exception:
+        return None
+    if not {"sample_id", "flux_id", "at_bound"} <= set(table.columns):
+        return None
+    return table
 
 
 def _load_identifiability(output_dir) -> pd.DataFrame | None:
@@ -665,6 +707,9 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
     zero_threshold = float(preprocessing_cfg.get("zero_threshold", 1.0e-10))
     statistic = str(diff_cfg.get("statistic", "auto")).lower()
     multiple_testing = str(diff_cfg.get("multiple_testing", "fdr_bh")).lower()
+    fdr_scope = str(diff_cfg.get("fdr_scope", "per_tissue")).lower()
+    if fdr_scope not in ("per_tissue", "per_contrast"):
+        raise ValueError(f"analysis.differential_flux.fdr_scope 必须为 per_tissue 或 per_contrast，实际为 {fdr_scope!r}")
     thresholds = selection_thresholds(analysis_config)
     pvalue_threshold = thresholds["pvalue"]
     fdr_threshold = thresholds["fdr"]
@@ -853,38 +898,66 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
             df["flux_group"] = [flux_groups.get((str(t), str(r)), "") for t, r in zip(df["tissue"], df["reaction"])]
             df["flux_group_size"] = group_key.map(group_key.value_counts()).astype(int)
 
-        # 样本量下界（与数据无关，同一比较内为常数）
+        # 样本量下界（与数据无关，同一组织内为常数）
         df["min_achievable_pvalue"] = p_floor
         df["rank_test_underpowered"] = rank_test_underpowered
+        df["fdr_scope"] = fdr_scope
         if np.isfinite(p_floor):
             at_floor = df["pvalue_mannwhitney"].le(p_floor + 1e-12)
-            if group_key is None:
-                n_tests, n_at_floor = len(df), int(at_floor.sum())
-            else:   # 通量组只计一次
-                n_tests, n_at_floor = int(group_key.nunique()), int(group_key[at_floor].nunique())
-            df["min_achievable_fdr"] = min_achievable_bh_fdr(
-                p_floor, n_tests, max(1, n_at_floor)
-            )
+            if fdr_scope == "per_tissue":
+                df["min_achievable_fdr"] = np.nan
+                for _, t_idx in df.groupby("tissue", sort=False).groups.items():
+                    if group_key is None:
+                        n_t, n_f = len(t_idx), int(at_floor.loc[t_idx].sum())
+                    else:
+                        tk = group_key.loc[t_idx]
+                        n_t, n_f = int(tk.nunique()), int(tk[at_floor.loc[t_idx]].nunique())
+                    df.loc[t_idx, "min_achievable_fdr"] = min_achievable_bh_fdr(p_floor, n_t, max(1, n_f))
+            else:
+                if group_key is None:
+                    n_tests, n_at_floor = len(df), int(at_floor.sum())
+                else:   # 通量组只计一次
+                    n_tests, n_at_floor = int(group_key.nunique()), int(group_key[at_floor].nunique())
+                df["min_achievable_fdr"] = min_achievable_bh_fdr(
+                    p_floor, n_tests, max(1, n_at_floor)
+                )
         else:
             df["min_achievable_fdr"] = np.nan
 
         if multiple_testing == "fdr_bh":
             from statsmodels.stats.multitest import multipletests
+            from .flux_groups import grouped_bh
             for p_column, fdr_column in (("pvalue_ttest", "fdr_ttest"), ("pvalue_mannwhitney", "fdr_mannwhitney")):
                 mask = df[p_column].notna()
                 if mask.sum() == 0:
                     continue
+                global_col = f"{fdr_column}_global"
                 if group_key is None:
-                    _, fdr, _, _ = multipletests(df.loc[mask, p_column], method="fdr_bh")
-                    df.loc[mask, fdr_column] = fdr
+                    _, fdr_g, _, _ = multipletests(df.loc[mask, p_column], method="fdr_bh")
+                    df.loc[mask, global_col] = fdr_g
                 else:
-                    from .flux_groups import grouped_bh
-                    df.loc[mask, fdr_column] = grouped_bh(df[p_column], group_key)[mask]
+                    df.loc[mask, global_col] = grouped_bh(df[p_column], group_key)[mask]
+                if fdr_scope == "per_tissue":
+                    df[fdr_column] = np.nan
+                    for _, t_idx in df.groupby("tissue", sort=False).groups.items():
+                        sub_mask = mask.loc[t_idx]
+                        if not sub_mask.any():
+                            continue
+                        idx_valid = t_idx[sub_mask.to_numpy()]
+                        if group_key is None:
+                            _, fdr_t, _, _ = multipletests(df.loc[idx_valid, p_column], method="fdr_bh")
+                            df.loc[idx_valid, fdr_column] = fdr_t
+                        else:
+                            df.loc[idx_valid, fdr_column] = grouped_bh(
+                                df.loc[t_idx, p_column], group_key.loc[t_idx]
+                            ).loc[idx_valid]
+                else:
+                    df.loc[mask, fdr_column] = df.loc[mask, global_col]
 
         # BH 校正后的可达下界只有在检验总数已知后才能算。选择规则是
         # "p < 阈值 **且** FDR <= 阈值"，所以 FDR 不可达时整条 p 值
         # 路径同样无效，auto 模式必须一并回退到效应量。
-        fdr_floor = float(df["min_achievable_fdr"].iloc[0])
+        fdr_floor = float(df["min_achievable_fdr"].min()) if df["min_achievable_fdr"].notna().any() else np.nan
         fdr_unreachable = bool(
             multiple_testing == "fdr_bh"
             and np.isfinite(fdr_floor)
@@ -1002,16 +1075,48 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
 
         # 可辨识性标注：拟合迭代的相对 IQR 宽度反映该通量被数据约束的程度。
         # 未被约束的通量即便"显著"也不值得解释，这里让它在结果表里可见。
+        # 同时在当前比较的两组内分别检查贴边比例：若任一组 >= pinned_min_fraction 的动物贴边，
+        # 说明该比较的组均值/方差已被盒约束截断（避免 28 鼠全局稀释掩盖单组上界贴边）。
+        ident_cfg = _section(analysis_config, "identifiability")
+        pinned_min_fraction = float(
+            ident_cfg.get("bound_pinned_min_fraction", _DEFAULT_BOUND_PINNED_MIN_FRACTION)
+        )
         identifiability = _load_identifiability(output_dir)
         if identifiability is not None:
             df = df.merge(identifiability, on="flux_id", how="left")
-            if require_identifiable:
-                unconstrained = df["identifiability"].isin(UNCONSTRAINED_LABELS)
-                df.loc[unconstrained, "is_significant"] = False
         else:
             df["median_rel_iqr"] = np.nan
             df["frac_at_bound"] = np.nan
             df["identifiability"] = "undetermined"
+
+        sample_bound_df = _load_sample_at_bound(output_dir)
+        df["frac_at_bound_numerator"] = np.nan
+        df["frac_at_bound_denominator"] = np.nan
+        df["contrast_frac_at_bound"] = np.nan
+        df["contrast_bound_pinned"] = False
+        if sample_bound_df is not None and not sample_bound_df.empty:
+            s_a, s_b = set(map(str, sids_a)), set(map(str, sids_b))
+            sb = sample_bound_df.copy()
+            sb["sample_id"] = sb["sample_id"].astype(str)
+            sb["at_bound"] = sb["at_bound"].fillna(False).astype(bool)
+            num_frac = sb[sb["sample_id"].isin(s_a)].groupby("flux_id")["at_bound"].mean()
+            den_frac = sb[sb["sample_id"].isin(s_b)].groupby("flux_id")["at_bound"].mean()
+            df["frac_at_bound_numerator"] = df["flux_id"].map(num_frac)
+            df["frac_at_bound_denominator"] = df["flux_id"].map(den_frac)
+            df["contrast_frac_at_bound"] = np.nanmax(
+                np.column_stack([
+                    pd.to_numeric(df["frac_at_bound_numerator"], errors="coerce").to_numpy(dtype=float),
+                    pd.to_numeric(df["frac_at_bound_denominator"], errors="coerce").to_numpy(dtype=float),
+                ]),
+                axis=1,
+            )
+            group_pinned = df["contrast_frac_at_bound"].ge(pinned_min_fraction).fillna(False)
+            df["contrast_bound_pinned"] = group_pinned
+            df.loc[group_pinned, "identifiability"] = "bound_pinned"
+
+        if require_identifiable:
+            unconstrained = df["identifiability"].isin(UNCONSTRAINED_LABELS)
+            df.loc[unconstrained, "is_significant"] = False
 
         # 强制附加标准数据库注释（用于多组学整合稳定映射）
         df = _enforce_standard_reaction_annotations(
@@ -1046,7 +1151,7 @@ def differential_flux(flux_df, flux_all_fits, sample_conditions, conditions,
             print(f"    {len(sig_fc)} fluxes with |log2FC|>={log2fc_threshold}")
         else:
             print(f"    {len(sig)} / {len(df)} fluxes significant ({summary_rule})")
-            fdr_floor = float(df["min_achievable_fdr"].iloc[0])
+            fdr_floor = float(df["min_achievable_fdr"].min()) if df["min_achievable_fdr"].notna().any() else np.nan
             if (multiple_testing == "fdr_bh" and np.isfinite(fdr_floor)
                     and fdr_floor > fdr_threshold):
                 print(f"    [POWER] BH 校正后最小可达 FDR = {fdr_floor:.3g}"
@@ -1653,6 +1758,7 @@ def sample_flux_matrix(flux_df, flux_all_fits, sample_conditions, tissues,
     ident_cfg = _section(analysis_config, "identifiability")
     bound_values = ident_cfg.get("bound_values", list(_DEFAULT_BOUND_VALUES))
     bound_tolerance = float(ident_cfg.get("bound_tolerance", _DEFAULT_BOUND_TOLERANCE))
+    bound_rel_tolerance = float(ident_cfg.get("bound_rel_tolerance", _DEFAULT_BOUND_REL_TOLERANCE))
     infer_bounds = bool(ident_cfg.get("infer_bounds_from_fits", True))
     pinned_min_fraction = float(
         ident_cfg.get("bound_pinned_min_fraction", _DEFAULT_BOUND_PINNED_MIN_FRACTION)
@@ -1739,12 +1845,24 @@ def sample_flux_matrix(flux_df, flux_all_fits, sample_conditions, tissues,
     # 判为"约束良好"；实际上是数据推不动这条通量，优化器把它压在了边界上。
     inferred_bounds = _infer_fit_box_bounds(flux_all_fits) if infer_bounds else None
     net_bounds = _net_bound_values(bound_values, inferred_bounds)
-    matrix_df["at_bound"] = _flag_at_bound(
-        matrix_df["net_flux"].to_numpy(), net_bounds, bound_tolerance
+    net_values = matrix_df["net_flux"].to_numpy()
+    at_bound = _flag_at_bound(net_values, net_bounds, bound_tolerance, rel_tolerance=0.0)
+    has_upper_box = (
+        inferred_bounds is not None
+        and inferred_bounds[1] > max(2.0, abs(inferred_bounds[0]) * 5.0)
+        and _has_upper_bound_pileup(flux_all_fits, inferred_bounds[1])
     )
+    if has_upper_box:
+        ub_bounds = sorted({round(abs(inferred_bounds[1]), 6), round(abs(inferred_bounds[1] - inferred_bounds[0]), 6)})
+        at_upper = _flag_at_bound(net_values, ub_bounds, bound_tolerance, rel_tolerance=bound_rel_tolerance)
+        matrix_df["at_upper_bound"] = at_upper
+        matrix_df["at_bound"] = at_bound | at_upper
+    else:
+        matrix_df["at_upper_bound"] = False
+        matrix_df["at_bound"] = at_bound
     bound_source = (f"inferred box [{inferred_bounds[0]:.6g}, {inferred_bounds[1]:.6g}] + config"
                     if inferred_bounds is not None else "config only")
-    print(f"  Bound check: |net_flux| within {bound_tolerance:g} of "
+    print(f"  Bound check: |net_flux| within max({bound_tolerance:g}, {bound_rel_tolerance:.1%}*bound) of "
           f"{[float(f'{b:.6g}') for b in net_bounds]} ({bound_source})")
 
     save_dir = _ensure_dir(output_dir, "01_df_results", "all_tissues", "flux_matrix")

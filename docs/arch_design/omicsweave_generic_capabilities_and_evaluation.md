@@ -1,7 +1,7 @@
 # OmicsWeave 通用多组学分析与评估能力：从 DIO 案例提炼的改进规划
 
 > 文档类型：调研 + 设计建议
-> 版本：v0.4（2026-11-18，增加 11.7：G10 中不依赖新数据的部分；11.6 记下组学结果包早于批次 2）；v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
+> 版本：v0.5（2026-11-23，增加 11.8：G1 通用转录组 / MFA 样本质检、边界贴边强化与评估规则硬化，更新 11.6 状态）；v0.4（2026-11-18，增加 11.7：G10 中不依赖新数据的部分；11.6 记下组学结果包早于批次 2）；v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
 > 依据：两个 DIO 队列在 2026-11-03 至 11-13 的分析与映射修复（阶段 0–3，提交 `75f0bb8` 至 `d72b2c7`），以及课题工作区中的评估记录
 > （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库；
 > 2026-11-18 起两个课题目录在 `local/projects/` 下）
@@ -469,8 +469,8 @@ E3 的结果说明，在现有样本量下，组学层的单层“支持”大�
 
 | 项目 | 现状 | 出处 |
 |---|---|---|
-| 两个 DIO 课题登记 `qc_flag` | 两个课题的 `samples.tsv` 都还没有 `qc_flag` 列，可靠性表因此不会降权；登记后只需重跑整合 | 11.3 说明 2 |
-| G1 样本身份与组成 QC | 未开始。`qc/sample_quality.parquet` 目前只有读取方（`core/reliability.py`、`flux_anchored`），没有生成方 | 11.1 |
+| 两个 DIO 课题登记 `qc_flag` | 两个课题的 `samples.tsv` 暂未手工登记 `qc_flag`，但 11.8 已在通用流程层面实现转录组与 MFA 的自动 `sample_quality.parquet` 生成与严重异常样本过滤，重跑 `omicsweave run` 即可自动驱动可靠性表（两个课题维持各自独立分析，不合并为双来源） | 11.3 说明 2、11.8 |
+| G1 样本身份与组成 QC | 转录组与 MFA 已落地（11.8）：`transcriptomics/sample_qc.py` 与 `mfa/sample_qc.py` 自动产出 `qc/sample_quality.parquet` 并接入 `core/reliability.py`；蛋白组 / 代谢组样本级组成 QC 与跨组学性别/身份一致性核验待后续按需补齐 | 11.1、11.8 |
 | G5 第 3、4 项 | 锚点类型泛化待 G12；证据画像尚未读取复现结果（`replicated`） | 11.2、11.4 |
 | E7 登记的配置缺口 | 剩 3 项：`defaults.padj_method`、`defaults.random_seed`、`design.stratify_by`（11.2 中的 `factors.*.reference` 已不在缺口表中）；`design.covariates` 在代谢组与 MFA 的两两比较中仍未接入 | `tests/core/test_config_consumers.py` |
 | 代谢物名称查找 | 仍以手写表为主，RefMet 注册表用于审计。审计报出的 22 处不一致已全部处理：10 处修正，12 处登记为可接受的立体异构体或异头物 | 11.4 |
@@ -506,6 +506,31 @@ G10 的 MID 部分不具备条件。以下三项只用到拟合结果，先行�
 验证：新增 9 项测试（`tests/mfa/test_tracer_readouts.py` 8 项，`test_multi_tracer.py` 1 项）：锁死关系的识别（比例与仿射、不变的通量不参与、
 多模型须都锁死）、组内只计一次的 BH、尺度相差 50 倍而同向的示踪剂不判冲突、方向相反仍为冲突、结果包的两张新表与分组校正、档案读入
 误差线与贴边标记、变号时的定号；导出命令的预期文件随结果包增加两张表。
+
+### 11.8 G1 通用样本质检与评估规则硬化（2026-11-23）
+
+在两个独立 DIO / GLP-1RA 课题（各自作为单来源独立分析，不合并双来源）的多组学核验中，暴露出四类具有跨项目普遍性的流程问题：
+转录组解剖混入与组织身份缺失无自动质检过滤、虚拟/边界反应被升为 L2、集总多步/强诱导型酶被可替代同工酶丰度规则误杀、以及 MFA 大队列全局稀释掩盖单组上界贴边与跨批次整鼠通量尺度漂移。上述改进全部以零项目硬编码、可配置参数的方式写入通用流程：
+
+| 类别 | 模块与实现 | 配置项（默认值） |
+|---|---|---|
+| **G1 转录组通用样本 QC 与自动过滤** | `transcriptomics/sample_qc.py` + `transcriptomics/runner.py`：由计数矩阵自动推导成对异源标记与本组织特异标记，检测 `cross_tissue_contamination`（跨组织 RNA 混入）、`own_marker_retention`（组织身份缺失，整组同时失效亦可检出）、`transcriptome_correlation`（全表达 + 高变基因成对相关离群）与 `mitochondrial_fraction`（绝对 ≥ 88% 或相对同组织中位数极端偏移，不误杀天然高线粒体组织）；写出 `omics/transcriptomics/qc/sample_quality.parquet` 与 `sample_qc_metrics.parquet` 供 `core/reliability.py` 自动计算 `contrast_reliability.parquet`；在差异分析前过滤 `flag == "exclude"` 样本（`library_sizes.parquet` 保留过滤前全量原始样本） | `omics.transcriptomics.analysis.sample_qc`（`enabled: true`、`filter_excluded: true` 等阈值） |
+| **虚拟 / 不可评估反应门控** | `integration/dossier/assessment.py`：`decide(..., semantics=...)` 与 `assess()` 增设硬门控——`direction_evidence == "not_assessable"`（如 `BIOMASS_REACTION_*`、`Salvage_c`、`*_protein_input`）禁止升为 `L1` / `L2` / `L3` / `LX`，一律锁在 `L0`（`claim_direction = 0`，`phenomena = "not_assessable_reaction"`） | 内置硬规则（依据反应语义注册表） |
+| **G7 `minor_isozyme` 双层修复** | 1. 生物化学成员关系：`integration/mappings/reaction_members.py` 新增 `pathway_step` 关系；`reaction_members.yaml` 将集总多步/不可替代诱导酶反应（`THERMOGENESIS_UCP`、`FA_esterification_c`、`HMGCR`、`BILE_acid`、`ETHER_LIPID`）标为 `pathway_step`，并将泛表达 `Ucp2`/`Ucp3` 移至 `THERMOGENESIS_UCP.related_isozymes`，同步更新 `flux_gene_mapping.yaml` 与 `flux_protein_mapping.yaml`；<br>2. 算法层：`reaction_dossier.py` 与 `flux_evidence.py` 新增条件活跃丰度占比 `active_abundance_share = max(pooled, share_num, share_den)`；`assessment.py` 的 `_judge_members()` 豁免 `pathway_step` 的同工酶丰度压制，普通 `isozyme` 采用 `eff_share = max(abundance_share, active_abundance_share)` 并在无主要同工酶反向时支持多个同向过 FDR 成员合计占比达标放行，同时保留对痕量反向诱饵（如 `Pkm` 对 `Pklr`）的拦截 | `integration.parameters.reaction_dossier.isozyme.minor_share`（`0.2`） |
+| **G1 / G10 MFA 上界相对容差、单组贴边与尺度漂移 QC** | 1. `mfa/mfa_experiment_config.py` 与 `mfa/df_analysis.py`：新增 `bound_rel_tolerance = 0.02` 与上界点质量检测 `_has_upper_bound_pileup`（捕捉 3000 上界附近的 `2965.6`/`2998.5` 等且不误伤无盒约束拟合），输出 `at_upper_bound`；<br>2. `df_analysis.py`、`mfa/export.py` 与 `mfa/multi_tracer.py`：在每个比较的两组内分别计算 `contrast_frac_at_bound = max(num_frac, den_frac)`，任一组 ≥ `bound_pinned_min_fraction`（0.5）即升级为 `bound_pinned`（标记 `contrast_bound_pinned` / `{tracer}:contrast_bound_pinned`），消除多组全局稀释；<br>3. `mfa/sample_qc.py` 与 `mfa/runner.py`：产出样本级 `omics/mfa/qc/sample_quality.parquet`（`flux_scale_factor`、`upper_bound_saturation`、`fitting_loss`）与比较级 `qc/contrast_scale_qc.parquet`（`|Δlog2_total| ≥ 0.30` 且 `|Δmed_log2| ≥ 0.15` 同号时标记 `flux_scale_drift` 并写入差异表 `flags`）；<br>4. `assessment.py` 与 `reaction_dossier.py`：新增 `rules.flux_scale_drift_gate`（默认 `true`），对存在尺度漂移的比较将 F 轴降级为 `undetermined` 并在 `phenomena` 中明示 | `omics.mfa.analysis.identifiability.bound_rel_tolerance`（`0.02`）；`omics.mfa.analysis.sample_qc`；`integration.parameters.reaction_dossier.rules.flux_scale_drift_gate`（`true`） |
+
+在两个现有课题结果包上的只读实测对照（不改动 `local/projects/`）：
+
+| 核验项 | 改进前 | 改进后（通用规则实测） |
+|---|---|---|
+| 队列 B 转录组样本 QC（89 样本） | 无自动样本过滤与 `sample_quality` | `exclude` 8 例（含 `sq_adipose` Sema 肌混入 `m83/m84`、淋巴结混入 `m118/m125`、`renal_cortex` `m83/m120` 等）、`flag` 7 例（含 `heart` LFD `m129`、Sema 肌混入 `m84`）；`contrast_reliability` 自动阻断 `heart` 全部 LFD/Sema 比较及 `sq_adipose` Sema 比较（`qc_confounded`/`qc_insufficient`），同时保留可恢复比较（`downweighted`） |
+| 队列 A 转录组样本 QC（51 样本） | 无自动样本过滤 | 自动 `exclude` 全部 3 例异常 LFD 心脏（`m63/m64/m65`，保留比 0.13–0.23），健康高线粒体 HFD 心脏零误杀，`heart HFD_vs_LFD` 自动标为 `qc_confounded` |
+| 虚拟反应门控（队列 B `not_assessable`） | 23 格升为 L2 | **0 格**（全部锁为 `L0 / not_assessable_reaction`） |
+| `minor_isozyme` 修复（队列 B） | `sq_adipose THERMOGENESIS_UCP` 4 比较、`liver FA_esterification_c` 3 比较均被误杀为 `L0`；全表 `minor_isozyme_driven` 316 格 | `sq_adipose THERMOGENESIS_UCP`（Mazdu vs Saline/Sema `L1(+1)`、HFD vs LFD `L1(-1)`）与 `liver FA_esterification_c`（HFD vs LFD `L1(+1)`、Sema `L1(-1)`）均恢复；全表降为 240 格，真诱饵（`AMPD_c`/`ENO_c` 等）继续拦截 |
+| MFA 上界贴边与单组贴边（队列 B） | 上界命中 13 次；`liver G6Pase_c [Mazdu_3W_vs_1W]` 判 `well_constrained` → `L2(+1)` | 上界 2% 相对容差命中 **27 次**；`liver G6Pase_c [Mazdu_3W_vs_1W]` 因 3W 组 `2/3` 撞顶（`3000.0`/`2965.6`）升级 `bound_pinned` → `L0`，未贴边比较 `Mazdu_vs_Saline_1W` 保持 `well_constrained` |
+| MFA 尺度漂移 QC（队列 B & A） | 队列 B `3W_vs_1W` 产出 76 个 L2 通量声明 | 队列 B 精准标出 `Mazdu_3W_vs_1W_in_HFD`（`+0.410/+0.174`）与 `Saline_3W_vs_1W_in_HFD`（`+0.342/+0.167`）为 `flux_scale_drift`（L2/L3 降为 **0**），其余 7 个同周期比较全干净；队列 A 8 项中仅标出 `lactate HFD_vs_LFD`（`+1.358/+0.217`），其余 7 项干净 |
+
+验证：新增 `tests/transcriptomics/test_sample_qc.py` 与 `tests/mfa/test_mfa_sample_qc.py`，并扩展 `tests/mfa/test_flux_identifiability_bounds.py`、`tests/integration/test_dossier_assessment.py`、`tests/integration/test_reaction_members.py`、`tests/integration/test_isozyme_decoys.py`；14 个核心测试套件零回归通过。
 
 ---
 

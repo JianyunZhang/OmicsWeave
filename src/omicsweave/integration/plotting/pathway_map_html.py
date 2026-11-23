@@ -266,10 +266,15 @@ def _svg_status_cell(
             f'M{cx - d * 0.55:.2f},{cy + d * 0.95:.2f}L{cx + d * 0.55:.2f},{cy - d * 0.95:.2f}" '
             f'fill="none" stroke="{pal.ink2}" stroke-width="{sw_sym:.3f}" stroke-linecap="round"/>'
         )
-    elif state in ("unchanged", "undetermined", "equivalent"):
-        d = cell * 0.20
-        col = pal.ink2 if state != "undetermined" else pal.muted
-        parts.append(f'<line x1="{cx - d:.2f}" y1="{cy:.2f}" x2="{cx + d:.2f}" y2="{cy:.2f}" stroke="{col}" stroke-width="{sw_sym:.3f}" stroke-linecap="round"/>')
+    elif state in ("unchanged", "equivalent"):
+        d = cell * 0.22
+        parts.append(f'<line x1="{cx - d:.2f}" y1="{cy:.2f}" x2="{cx + d:.2f}" y2="{cy:.2f}" stroke="{pal.ink2}" stroke-width="{sw_sym:.3f}" stroke-linecap="round"/>')
+    elif state in ("undetermined", "no_evidence"):
+        half = cell * 0.26
+        gap = cell * 0.06
+        sw_dash = _pt(0.54, unit_in)
+        parts.append(f'<line x1="{cx - half:.2f}" y1="{cy:.2f}" x2="{cx - gap:.2f}" y2="{cy:.2f}" stroke="{pal.muted}" stroke-width="{sw_dash:.3f}" stroke-linecap="round"/>')
+        parts.append(f'<line x1="{cx + gap:.2f}" y1="{cy:.2f}" x2="{cx + half:.2f}" y2="{cy:.2f}" stroke="{pal.muted}" stroke-width="{sw_dash:.3f}" stroke-linecap="round"/>')
     elif state in ("not_identifiable", "bound_pinned"):
         r = cell * 0.22
         if draw_bg:
@@ -1171,6 +1176,12 @@ def _extract_payload(
                 "R": {"val": _num(row.get("R_value"), 3), "state": str(row.get("R_layer_state") or "")},
                 "M": {"val": _num(row.get("Mx_value"), 3), "state": str(row.get("Mx_state") or "")},
             },
+            "f_rule": str(row.get("text") or "").strip() if pd.notna(row.get("text")) else "",
+            "f_flags": [
+                f.strip() for f in str(row.get("F_flags") or "").split(";")
+                if f.strip() and f.strip() != "nan"
+            ] if pd.notna(row.get("F_flags")) else [],
+            "f_g": _num(row.get("F_g"), 2),
             "xy": [round(hub[0], 2), round(hub[1], 2)],
             "members": [],
         }
@@ -1323,7 +1334,12 @@ def _extract_payload(
                     "relation": str(getattr(r, "member_relation", "") or ""),
                     "reg_effect": str(getattr(r, "regulator_effect", "") or ""),
                     "log2fc": _num(getattr(r, "log2fc", None), 3),
+                    "effect": _num(getattr(r, "effect", None), 2),
+                    "effect_type": str(getattr(r, "effect_type", "") or "") if pd.notna(getattr(r, "effect_type", None)) else "",
+                    "smd_se": _num(getattr(r, "smd_se", None), 3),
                     "padj": _num(getattr(r, "padj", None), 5),
+                    "padj_global": _num(getattr(r, "padj_global", None), 5),
+                    "fdr_scope": str(getattr(r, "fdr_scope", "") or "") if pd.notna(getattr(r, "fdr_scope", None)) else "",
                     "pvalue": _num(getattr(r, "pvalue", None), 5),
                     "lfsr": _num(getattr(r, "lfsr", None), 4),
                     "share": _num(getattr(r, "abundance_share", None), 3),
@@ -1334,6 +1350,14 @@ def _extract_payload(
                     "state": str(getattr(r, "cell_state", "") or ""),
                     "reason": str(getattr(r, "state_reason", "") or ""),
                     "ident": str(getattr(r, "identifiability", "") or ""),
+                    "het_p": _num(getattr(r, "heterogeneity_pvalue", None), 4),
+                    "dir_stab": _num(getattr(r, "direction_stability", None), 3),
+                    "loo_stab": _num(getattr(r, "pooled_loo_stability", None), 3),
+                    "smd_weights": str(getattr(r, "smd_weights", "") or "") if pd.notna(getattr(r, "smd_weights", None)) else "",
+                    "tracer_weights": str(getattr(r, "tracer_weights", "") or "") if pd.notna(getattr(r, "tracer_weights", None)) else "",
+                    "g_total_var": _num(getattr(r, "g_total_var", None), 3),
+                    "smd_weighting": str(getattr(r, "smd_weighting", "") or "") if pd.notna(getattr(r, "smd_weighting", None)) else "",
+                    "flags": str(getattr(r, "flags", "") or "") if pd.notna(getattr(r, "flags", None)) else "",
                     "skey": skey,
                 })
             elements[el_key]["members"] = mem_records
@@ -1726,6 +1750,33 @@ body[data-theme="economist"] .sec-title { color: var(--ink); border-top: 1.5px s
 .ac-lbl { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
 .ac-val { font-size: 12.5px; font-weight: 800; margin-top: 2px; }
 .ac-st { font-size: 10px; color: var(--ink2); margin-top: 1px; }
+
+/* Flux Assessment Gate Checklist */
+.gate-box {
+  background: var(--surface); border: 1px solid var(--card-edge);
+  border-radius: var(--radius); padding: 7px 8px; margin-bottom: 8px;
+}
+body[data-theme="economist"] .gate-box { border-top: 1.5px solid var(--ink); }
+.gate-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10.5px; font-weight: 800; color: var(--ink); margin-bottom: 5px;
+}
+.gate-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+  font-size: 10.5px; padding: 2.5px 0; border-top: 1px solid var(--hairline);
+}
+.gate-pill {
+  display: inline-block; font-size: 9.5px; font-weight: 700; padding: 0.5px 5px;
+  border-radius: var(--radius); white-space: nowrap; flex-shrink: 0;
+}
+.gate-pass { background: #E6F4EA; color: #137333; }
+.gate-fail { background: #FCE8E6; color: #A50E0E; }
+.gate-warn { background: #FEF7E0; color: #9A6700; }
+.gate-na { background: var(--hairline); color: var(--muted); }
+body[data-theme="slide_dark"] .gate-pass { background: #163826; color: #81C995; }
+body[data-theme="slide_dark"] .gate-fail { background: #431B1B; color: #F28B82; }
+body[data-theme="slide_dark"] .gate-warn { background: #3E2F10; color: #FDD663; }
+.gate-meta { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
 
 /* Per-Animal Scatter Small Multiples */
 .layer-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -2440,6 +2491,149 @@ _JS = r"""
     });
   }
 
+  function renderFluxGateChecklist(el) {
+    if (!el || el.kind !== "reaction" || el.draw_style !== "flux" || !el.axes || !el.axes.F) return "";
+    const fState = String(el.axes.F.state || "");
+    const fFlags = Array.isArray(el.f_flags) ? el.f_flags : [];
+    const fRule = String(el.f_rule || "");
+    const mfaMems = (el.members || []).filter(m => m.layer === "mfa");
+    const pooled = mfaMems.find(m => m.tracer === "pooled") || null;
+    const unident = new Set(["not_infused", "not_measured", "not_identifiable", "insufficient_n"]);
+    const ident = mfaMems.filter(m => m.tracer !== "pooled" && !unident.has(m.state));
+    const nIdent = ident.length || (el.flux_tracers ? el.flux_tracers.length : 0);
+    const head = pooled || ident[0] || null;
+    const pill = (cls, txt) => `<span class="gate-pill gate-${cls}">${esc(txt)}</span>`;
+
+    const rows = [];
+    // Gate 1: Identifiable tracers
+    if (nIdent >= 2) {
+      rows.push(["Identifiable tracers", `${nIdent} tracers (Sig. eligible)`, "pass", "PASS"]);
+    } else if (nIdent === 1) {
+      rows.push(["Identifiable tracers", "1 tracer (Suggestive max)", "warn", "1 ONLY"]);
+    } else {
+      rows.push(["Identifiable tracers", "0 identifiable tracers", "fail", "BLOCKED"]);
+    }
+
+    // Gate 2: Direction concordance
+    if (fState === "mixed") {
+      rows.push(["Tracer concordance", "Opposing clear effects (|g| >= 1)", "fail", "CONFLICT"]);
+    } else if (nIdent >= 2 && ident.length >= 2) {
+      const signs = new Set(ident.map(m => (m.log2fc > 0 ? 1 : (m.log2fc < 0 ? -1 : 0))).filter(s => s !== 0));
+      if (signs.size <= 1 && signs.size > 0) {
+        rows.push(["Tracer concordance", "All identifiable tracers agree", "pass", "PASS"]);
+      } else {
+        rows.push(["Tracer concordance", "Minor tracer differs in sign", "warn", "PARTIAL"]);
+      }
+    } else if (nIdent === 1) {
+      rows.push(["Tracer concordance", "Single tracer (no cross-check)", "na", "N/A"]);
+    } else {
+      rows.push(["Tracer concordance", "No identifiable tracer", "na", "N/A"]);
+    }
+
+    // Gate 3: Standardized effect size |Hedges' g|
+    const gVal = (el.f_g !== null && el.f_g !== undefined) ? el.f_g : (head ? head.effect : null);
+    const gVar = pooled && pooled.g_total_var !== null && pooled.g_total_var !== undefined ? pooled.g_total_var : null;
+    const varTxt = gVar !== null ? ` · Var=${fmtNum(gVar, 2)}` : "";
+    const isPermSugg = fFlags.includes("multi_tracer_perm_suggestive");
+    if (gVal !== null && gVal !== undefined) {
+      if (fState === "unchanged") {
+        rows.push(["Effect size |Hedges' g|", `g = ${fmtSigned(gVal, 2)} (TOST 90% CI < 1.0)${varTxt}`, "pass", "EQUIV"]);
+      } else if (Math.abs(gVal) >= 1.0) {
+        rows.push(["Effect size |Hedges' g|", `g = ${fmtSigned(gVal, 2)} (|g| >= 1.0)${varTxt}`, "pass", "PASS"]);
+      } else if (isPermSugg) {
+        rows.push(["Effect size |Hedges' g|", `g = ${fmtSigned(gVal, 2)} (k>=2 & p<0.05 & |g|>=0.8)${varTxt}`, "pass", "PASS (P+G)"]);
+      } else {
+        rows.push(["Effect size |Hedges' g|", `g = ${fmtSigned(gVal, 2)} (|g| < 1.0)${varTxt}`, "fail", "|g| < 1"]);
+      }
+    } else {
+      rows.push(["Effect size |Hedges' g|", "Not available", "na", "N/A"]);
+    }
+
+    // Gate 4: Pooled FDR / p-value & heterogeneity
+    const padj = head ? head.padj : null;
+    const padjGlobal = head ? head.padj_global : null;
+    const fdrScope = head && head.fdr_scope ? String(head.fdr_scope) : "";
+    const pval = head ? head.pvalue : null;
+    const hetP = head ? head.het_p : null;
+    const nMin = head && head.n_num !== null && head.n_den !== null ? Math.min(head.n_num, head.n_den) : null;
+    const hetBad = fFlags.includes("tracer_heterogeneity") || (hetP !== null && hetP < 0.10);
+    const statParts = [];
+    if (padj !== null) {
+      const scopeTag = fdrScope === "per_tissue" ? "(tissue)" : (fdrScope === "per_contrast" ? "(global)" : "");
+      statParts.push(`FDR${scopeTag}=${fmtP(padj)}`);
+    }
+    if (padjGlobal !== null && fdrScope === "per_tissue" && padjGlobal !== padj) {
+      statParts.push(`FDR(global)=${fmtP(padjGlobal)}`);
+    }
+    if (pval !== null) statParts.push(`p=${fmtP(pval)}`);
+    if (hetP !== null) statParts.push(`Q p=${fmtP(hetP)}`);
+    if (nMin !== null) statParts.push(`n_min=${nMin}`);
+    if (padj !== null && padj < 0.05 && !hetBad && (nMin === null || nMin >= 3)) {
+      rows.push(["Significance & Q test", statParts.join(" · "), "pass", "SIG"]);
+    } else if (hetBad) {
+      rows.push(["Significance & Q test", statParts.join(" · "), "warn", "HETERO"]);
+    } else if (pval !== null && pval < 0.05) {
+      rows.push(["Significance & Q test", statParts.join(" · "), "warn", "NOMINAL"]);
+    } else if (statParts.length) {
+      rows.push(["Significance & Q test", statParts.join(" · "), "fail", "NS"]);
+    } else {
+      rows.push(["Significance & Q test", "No pooled test statistics", "na", "N/A"]);
+    }
+
+    // Gate 5: Directional stability & robustness
+    const memFlags = head && head.flags ? String(head.flags) : "";
+    const singleSubj = fFlags.includes("single_subject_driven") || memFlags.includes("single_subject_driven");
+    const mismatch = fFlags.includes("tracer_expectation_mismatch");
+    const stabUnk = fFlags.includes("stability_unknown");
+    const dirStab = pooled ? pooled.dir_stab : (head ? head.dir_stab : null);
+    const looStab = pooled ? pooled.loo_stab : (head ? head.loo_stab : null);
+    const stabInfo = [];
+    if (dirStab !== null && dirStab !== undefined) stabInfo.push(`boot=${fmtNum(dirStab, 2)}`);
+    if (looStab !== null && looStab !== undefined) stabInfo.push(`LOO=${fmtNum(looStab, 2)}`);
+    if (mismatch) {
+      rows.push(["Stability & expectation", "Identifiability mismatches panel expectation", "fail", "MISMATCH"]);
+    } else if (singleSubj) {
+      rows.push(["Stability & expectation", `Single-subject driven${stabInfo.length ? " (" + stabInfo.join(", ") + ")" : ""}`, "fail", "1-SUBJ"]);
+    } else if (stabUnk) {
+      rows.push(["Stability & expectation", "Per-animal stability unavailable", "warn", "UNKNOWN"]);
+    } else if ((dirStab !== null && dirStab < 0.8) || (looStab !== null && looStab < 1.0) || fRule.includes("LOO") || fRule.includes("不稳定")) {
+      rows.push(["Stability & expectation", stabInfo.length ? stabInfo.join(" · ") : "Direction flips on LOO", "fail", "UNSTABLE"]);
+    } else if (fState === "changed" || fState === "suggestive" || (dirStab !== null && dirStab >= 0.8 && (looStab === null || looStab >= 1.0))) {
+      rows.push(["Stability & expectation", stabInfo.length ? stabInfo.join(" · ") : "Passed stratified LOO", "pass", "STABLE"]);
+    } else {
+      rows.push(["Stability & expectation", stabInfo.length ? stabInfo.join(" · ") : "Not blocking", "na", "N/A"]);
+    }
+
+    const stateTag = fState === "changed" ? pill("pass", "Sig. (Established)")
+      : (fState === "suggestive" ? pill("warn", "Suggestive")
+      : (fState === "unchanged" ? pill("pass", "Unchanged (Equiv.)")
+      : (fState === "mixed" ? pill("fail", "Conflicting")
+      : pill("na", fState.replace(/_/g, " ") || "undetermined"))));
+    let out = `<div class="gate-box"><div class="gate-hdr"><span>Flux Assessment Gate Checklist</span>${stateTag}</div>`;
+    rows.forEach(([lbl, detail, cls, badge]) => {
+      out += `<div class="gate-row"><span><strong>${esc(lbl)}:</strong> <span style="color:var(--ink2);">${esc(detail)}</span></span>${pill(cls, badge)}</div>`;
+    });
+    const meta = [];
+    if (pooled && pooled.smd_weights) {
+      const modeLbl = pooled.smd_weighting ? ` (${pooled.smd_weighting})` : "";
+      meta.push(`<strong>SMD weights${esc(modeLbl)}:</strong> ${esc(pooled.smd_weights)}`);
+    }
+    if (pooled && pooled.tracer_weights) {
+      meta.push(`<strong>Abs IVW weights:</strong> ${esc(pooled.tracer_weights)}`);
+    }
+    if (fFlags.length) {
+      meta.push(`<strong>Flags:</strong> ${esc(fFlags.join(", "))}`);
+    }
+    if (fRule) {
+      meta.push(`<strong>Rule:</strong> ${esc(fRule)}`);
+    }
+    if (meta.length) {
+      out += `<div class="gate-meta">${meta.join("<br>")}</div>`;
+    }
+    out += `</div>`;
+    return out;
+  }
+
   function renderDrawer(elKey) {
     const el = DATA.elements[elKey];
     if (!el) return renderOverview();
@@ -2497,6 +2691,7 @@ _JS = r"""
         </div>`;
       });
       body += `</div>`;
+      body += renderFluxGateChecklist(el);
       if (el.flux_tracers && el.flux_tracers.length) {
         const tList = el.flux_tracers.join(", ");
         let modeDesc = "";
@@ -2610,10 +2805,13 @@ _JS = r"""
         const barW = fc !== null ? Math.min(34, Math.abs(fc) * 14) : 0;
         const barCol = fc > 0 ? pal.up : pal.down;
         const pv = m.padj !== null ? fmtP(m.padj) : (m.pvalue !== null ? fmtP(m.pvalue) + "*" : "—");
+        const gSub = (m.layer === "mfa" && m.effect !== null && m.effect !== undefined)
+          ? `<div style="font-size:9.5px;color:var(--muted);font-family:var(--font-mono);">g=${fmtSigned(m.effect, 2)}</div>`
+          : "";
         body += `<tr>
           <td><span class="tag">${lShort[m.layer] || m.layer}</span></td>
           <td title="${esc(m.role)} ${esc(m.relation)} ${esc(m.reason)}"><strong>${esc(m.name)}</strong>${m.share !== null ? ` <span style="color:var(--muted);font-size:10px;">(${Math.round(m.share * 100)}%)</span>` : ""}</td>
-          <td><span class="fc-bar-wrap">${fc !== null ? `<span class="fc-bar" style="width:${barW.toFixed(0)}px;background:${barCol};"></span>` : ""}<span style="color:${fc !== null ? barCol : "var(--muted)"};font-weight:700;">${fmtSigned(fc, 2)}</span></span></td>
+          <td><span class="fc-bar-wrap">${fc !== null ? `<span class="fc-bar" style="width:${barW.toFixed(0)}px;background:${barCol};"></span>` : ""}<span style="color:${fc !== null ? barCol : "var(--muted)"};font-weight:700;">${fmtSigned(fc, 2)}</span></span>${gSub}</td>
           <td style="font-family:var(--font-mono);font-size:10px;">${pv}</td>
           <td style="color:var(--muted);font-size:10px;">${esc(m.state.replace(/_/g, " "))}</td>
         </tr>`;
@@ -2708,6 +2906,7 @@ _JS = r"""
         <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="1" y1="5" x2="31" y2="5" stroke="${pal.edge_grey}" stroke-width="3"/><text x="7" y="8" font-size="9" fill="${pal.card_bg}">&lt;</text><text x="22" y="8" font-size="9" fill="${pal.card_bg}">&gt;</text></svg></span><span><strong>Opposing &lt; &gt; grey rail:</strong> Reversible reaction without single net direction (or multi-tracer conflict)</span></div>
         <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="2" y1="5" x2="30" y2="5" stroke="${pal.coupled_track}" stroke-width="8" stroke-linecap="round"/><line x1="2" y1="5" x2="30" y2="5" stroke="${pal.up}" stroke-width="3"/></svg></span><span><strong>Linked flux (Shared 1 DOF — NOT extra confidence):</strong> Per-fit |r| ≥ 1−1e-6 across fits (mass balance); 1 hypothesis in grouped BH-FDR</span></div>
         <div class="lg-row"><span class="lg-swatch"><span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:${pal.sign_change_bg};border:1px solid ${pal.sign_change_edge};color:${pal.sign_change_ink};text-align:center;line-height:14px;font-size:10px;font-weight:700;">&#8644;</span></span><span><strong>Amber &#8644; badge:</strong> Net flux reverses direction between experimental &amp; control groups</span></div>
+        <div class="lg-row"><span class="lg-swatch"><svg width="32" height="12"><line x1="2" y1="6" x2="12" y2="6" stroke="${pal.ink2}" stroke-width="2" stroke-linecap="round"/><line x1="19" y1="6" x2="24" y2="6" stroke="${pal.muted}" stroke-width="1.8" stroke-linecap="round"/><line x1="26" y1="6" x2="31" y2="6" stroke="${pal.muted}" stroke-width="1.8" stroke-linecap="round"/></svg></span><span><strong>Cell states (solid vs dashed):</strong> Solid <code>—</code> = equivalence-tested <em>Unchanged</em>; dashed <code>--</code> = <em>Undetermined</em> (weak / unstable / insufficient evidence). Flux: <em>Sig.</em> = ≥2 tracers &amp; FDR&lt;0.05; <em>Suggestive</em> = |Hedges' g|≥1 &amp; LOO-stable</span></div>
         <div class="lg-row"><span class="lg-swatch"><i class="sc-dot" style="background:${pal.numerator};"></i><i class="sc-dot" style="background:${pal.denominator};"></i></span><span><strong>Per-animal scatter:</strong> ${esc(DATA.meta.num_label)} (Exp) vs ${esc(DATA.meta.den_label)} (Ctrl) · Grey = Other · ◇ = bound-pinned</span></div>
       </div>
       <div style="margin-top:7px;padding-top:6px;border-top:1px solid var(--hairline);font-size:10.5px;color:var(--muted);line-height:1.4;">

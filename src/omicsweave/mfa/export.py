@@ -26,8 +26,9 @@ from .df_analysis import UNCONSTRAINED_LABELS
 _PASSTHROUGH = ("identifiability", "frac_at_bound", "selection_probability", "direction_stability",
                 "permutation_pvalue")
 _EXTRA = ("flux_id", "diff", "diff_se", "log2fc_se", "cohen_d", "pvalue_ttest", "pvalue_mannwhitney",
-          "fdr_ttest", "fdr_mannwhitney", "kegg_reaction", "kegg_pathway", "reactome_id", "ec_number",
-          "flux_group", "flux_group_size")
+          "fdr_ttest", "fdr_mannwhitney", "fdr_scope", "kegg_reaction", "kegg_pathway", "reactome_id", "ec_number",
+          "flux_group", "flux_group_size", "contrast_frac_at_bound", "frac_at_bound_numerator",
+          "frac_at_bound_denominator")
 
 
 def _column(table: pd.DataFrame, name: str, default) -> pd.Series:
@@ -50,6 +51,8 @@ def differential_flux_to_contract(table: pd.DataFrame, *, numerator: str, denomi
             raise ContractError(f"差异通量表缺少列 {column}")
     primary = _column(table, "primary_pvalue_column", "").fillna("").astype(str)
     fdr_name = primary.str.replace("pvalue_", "fdr_", regex=False)
+    fdr_global_name = np.where(fdr_name != "", fdr_name + "_global", "")
+    fdr_global_name = pd.Series(fdr_global_name, index=table.index)
 
     def pick(names: pd.Series) -> pd.Series:
         values = [table.at[i, n] if n and n in table.columns else np.nan for i, n in names.items()]
@@ -71,6 +74,8 @@ def differential_flux_to_contract(table: pd.DataFrame, *, numerator: str, denomi
             marks.append("underpowered")
         if row.get("identifiability") in UNCONSTRAINED_LABELS:
             marks.append(f"identifiability:{row['identifiability']}")
+        if bool(row.get("contrast_bound_pinned", False)):
+            marks.append("contrast_bound_pinned")
         flags.append(";".join(marks))
 
     out = pd.DataFrame({
@@ -85,6 +90,7 @@ def differential_flux_to_contract(table: pd.DataFrame, *, numerator: str, denomi
         "statistic": statistic,
         "pvalue": pick(primary),
         "padj": pick(fdr_name),
+        "padj_global": pick(fdr_global_name),
         "padj_method": multiple.where(primary != "", "none"),
         "n_numerator": pd.to_numeric(_group_column(table, "n_bio", numerator)).astype("int64"),
         "n_denominator": pd.to_numeric(_group_column(table, "n_bio", denominator)).astype("int64"),

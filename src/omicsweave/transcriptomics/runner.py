@@ -27,6 +27,8 @@
     data/<组织>/                  基因水平计数（分析层数据集；行 = 基因，列 = 样本）
     qc/library_sizes.parquet      每个样本的总计数与检出基因数
     qc/quant_summary.parquet      kallisto 的比对率（kallisto 输入时）
+    qc/sample_quality.parquet     通用样本质检结果（表达谱离群、线粒体占比、组织标记保留度、跨组织污染）
+    qc/sample_qc_metrics.parquet  逐样本质检诊断指标汇总
     tables/differential.parquet   统一差异结果表
     tables/enrichment.parquet     ORA 与预排序 GSEA
     figures/                      火山图 volcano_<组织>_<比较>.pdf / .png（``figures`` 步骤，见
@@ -62,6 +64,7 @@ from .rnaseq_pipeline import (
     run_pydeseq2_analysis,
 )
 from .run_wilcoxon_de import run_wilcoxon_analysis
+from .sample_qc import evaluate_sample_quality, resolve_sample_qc_config
 
 STEPS = ("qc", "differential", "enrichment", "figures")
 # 与旧流程（enrichment/_run.py、gsea/_run.py）使用的 Enrichr 库相同
@@ -287,9 +290,54 @@ def run(ctx: RunContext) -> OmicsRun:
     tissues = rows.set_index("sample_id")["tissue"]
     record.parameters["input_format"] = ctx.experiment.config.omics.transcriptomics.input.format
 
+    # ── 通用样本质量控制（表达谱离群、线粒体异常、本组织标记保留度、跨组织 RNA 污染） ──
+    raw_counts = counts
+    qc_cfg = resolve_sample_qc_config(ctx.experiment.config.omics.transcriptomics.analysis.get("sample_qc"))
+    manual_flags = (
+        dict(zip(rows["sample_id"].astype(str), rows["qc_flag"].fillna("").astype(str)))
+        if "qc_flag" in rows.columns else {}
+    )
+    qc_result = evaluate_sample_quality(raw_counts, tissues, qc_cfg, manual_flags=manual_flags)
+
+    if ctx.wants("qc") or (qc_cfg.get("enabled", True) and (qc_result.excluded or qc_result.flagged)):
+        (out / "qc").mkdir(parents=True, exist_ok=True)
+    if ctx.wants("qc"):
+        pd.DataFrame({"sample_id": raw_counts.columns, "tissue": tissues[raw_counts.columns].to_numpy(),
+                      "total_counts": raw_counts.sum().to_numpy(),
+                      "detected_genes": (raw_counts > 0).sum().to_numpy()}).to_parquet(
+            out / "qc" / "library_sizes.parquet", index=False)
+        if quant is not None:
+            quant.to_parquet(out / "qc" / "quant_summary.parquet", index=False)
+        if qc_cfg.get("enabled", True):
+            qc_result.metrics.to_parquet(out / "qc" / "sample_qc_metrics.parquet", index=False)
+    if qc_cfg.get("enabled", True) and (ctx.wants("qc") or qc_result.excluded or qc_result.flagged):
+        qc_result.quality.to_parquet(out / "qc" / "sample_quality.parquet", index=False)
+
+    if qc_cfg.get("filter_excluded", True) and qc_result.excluded:
+        kept = [c for c in raw_counts.columns if str(c) not in qc_result.excluded]
+        counts = raw_counts[kept]
+        record.notes.append(
+            f"转录组通用质检过滤 {len(qc_result.excluded)} 个严重异常样本（{_preview(sorted(qc_result.excluded))}），"
+            f"不参与差异与下游稳健性分析；明细见 omics/transcriptomics/qc/sample_quality.parquet"
+        )
+    if qc_result.flagged:
+        record.notes.append(
+            f"转录组通用质检标记 {len(qc_result.flagged)} 个可疑样本（{_preview(sorted(qc_result.flagged))}），"
+            f"已写入 omics/transcriptomics/qc/sample_quality.parquet 供比较可靠性评估"
+        )
+    if qc_result.excluded or qc_result.flagged:
+        record.parameters["sample_qc"] = {
+            "enabled": bool(qc_cfg.get("enabled", True)),
+            "filter_excluded": bool(qc_cfg.get("filter_excluded", True)),
+            "excluded_samples": sorted(qc_result.excluded),
+            "flagged_samples": sorted(qc_result.flagged),
+        }
+
     id_type = getattr(ctx.experiment.config.omics.transcriptomics.input, "feature_id_type", None) or "gene_symbol"
     for tissue in dict.fromkeys(tissues[counts.columns]):
         samples = [s for s in counts.columns if tissues[s] == tissue]
+        if not samples:
+            continue
         matrix = counts[samples]
         meta = DatasetMeta(omics=Omics.TRANSCRIPTOMICS, tissue=str(tissue), value_type=ValueType.COUNTS,
                            scale="linear", feature_id_type=id_type,
@@ -298,17 +346,8 @@ def run(ctx: RunContext) -> OmicsRun:
                                       if "gene_aggregation" in record.parameters else {})})
         write_dataset(out / "data" / str(tissue), Dataset(matrix, empty_features(matrix.index), meta))
 
-    if ctx.wants("qc"):
-        (out / "qc").mkdir(parents=True, exist_ok=True)
-        pd.DataFrame({"sample_id": counts.columns, "tissue": tissues[counts.columns].to_numpy(),
-                      "total_counts": counts.sum().to_numpy(),
-                      "detected_genes": (counts > 0).sum().to_numpy()}).to_parquet(
-            out / "qc" / "library_sizes.parquet", index=False)
-        if quant is not None:
-            quant.to_parquet(out / "qc" / "quant_summary.parquet", index=False)
-
     if ctx.wants("differential") or ctx.wants("enrichment"):
-        results = _differential(ctx, counts, rows, record)
+        results = _differential(ctx, counts, rows, record) if counts.shape[1] >= 2 else []
         if results:
             write_differential(pd.concat([r[3] for r in results], ignore_index=True),
                                out / "tables" / "differential.parquet")

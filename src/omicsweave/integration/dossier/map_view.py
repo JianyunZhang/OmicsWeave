@@ -39,7 +39,8 @@ POINTING = ("changed", "suggestive")
 MAP_COLUMNS = ["tissue", "contrast_id", "element_type", "element_id", "region", "label", "draw_style", "reversible",
                "physio_sign", "sign_change", "flux_group", "flux_tracers", "flux_pooling_mode",
                "kegg_pathway", "kegg_reaction", "ec_number",
-               "F_state", "F_direction", "C_state", "C_direction", "R_state", "R_direction", "M_state", "M_direction",
+               "F_state", "F_direction", "F_g", "F_flags", "C_state", "C_direction", "R_state", "R_direction",
+               "M_state", "M_direction",
                "flux_claim", "claim_direction", "n_concordant_axes", "rank", "key",
                "value", "certainty", "display_state", "ring", "n_changed", "n_quantified",
                "P_value", "P_state", "R_value", "R_layer_state", "Mx_value", "Mx_state", "members", "text"]
@@ -116,16 +117,44 @@ def _registry(flux_id: str) -> dict[str, Any]:
             "ec_number": entry.get("ec_number") or ""}
 
 
-def _axis(axes: pd.DataFrame, flux_id: str) -> dict[str, tuple[str, int, float, str]]:
+def _axis(axes: pd.DataFrame, flux_id: str) -> dict[str, tuple[str, int, float, str, str]]:
     here = axes[axes["flux_id"] == flux_id]
     out = {}
     for axis in AXES:
         row = here[here["axis"] == axis]
-        out[axis] = ("not_measured", 0, np.nan, "") if row.empty else \
-            (str(row["state"].iloc[0]), int(row["direction"].iloc[0] or 0), float(pd.to_numeric(row["effect"].iloc[0],
-                                                                                                    errors="coerce")),
-             str(row["rule"].iloc[0] or ""))
+        if row.empty:
+            out[axis] = ("not_measured", 0, np.nan, "", "")
+        else:
+            raw_flags = row["flags"].iloc[0] if "flags" in row.columns else ""
+            flags_str = str(raw_flags) if pd.notna(raw_flags) else ""
+            out[axis] = (
+                str(row["state"].iloc[0]),
+                int(row["direction"].iloc[0] or 0),
+                float(pd.to_numeric(row["effect"].iloc[0], errors="coerce")),
+                str(row["rule"].iloc[0] or ""),
+                flags_str,
+            )
     return out
+
+
+def _flux_pooled_g(flux_rows: pd.DataFrame) -> float:
+    """提取 F 轴判定使用的标准化效应量（合并估计或单可辨识示踪剂的 Hedges' g）。"""
+    if flux_rows.empty or "effect" not in flux_rows.columns:
+        return np.nan
+    pooled = flux_rows[flux_rows["tracer"].astype(str).str.lower() == "pooled"]
+    if not pooled.empty:
+        val = pd.to_numeric(pooled["effect"].iloc[0], errors="coerce")
+        if pd.notna(val):
+            return float(val)
+    ident = flux_rows[
+        (flux_rows["tracer"].astype(str).str.lower() != "pooled")
+        & ~flux_rows["cell_state"].astype(str).isin(["not_infused", "not_measured", "not_identifiable", "insufficient_n"])
+    ]
+    if not ident.empty:
+        vals = pd.to_numeric(ident["effect"], errors="coerce").dropna()
+        if not vals.empty:
+            return float(vals.iloc[0])
+    return np.nan
 
 
 def _executors(rows: pd.DataFrame) -> pd.DataFrame:
@@ -275,7 +304,8 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
         style = "flux" if has_flux else ("omics_only" if not knowledge.empty else "not_assessed")
         physio, change = physiological_sign(flux_rows) if has_flux else (0, False)
         ax = _axis(here_axes, flux_id)
-        f_state, f_dir, f_effect, f_rule = ax["flux"]
+        f_state, f_dir, f_effect, f_rule, f_flags = ax["flux"]
+        f_g = _flux_pooled_g(flux_rows) if has_flux else np.nan
         f_tracers, f_pool_mode = _flux_tracer_provenance(flux_rows, f_state) if has_flux else ("", "")
         f_phys = f_dir * physio if physio else f_dir
         value = abs(f_effect) * f_phys if f_state in POINTING and pd.notna(f_effect) else np.nan
@@ -290,7 +320,8 @@ def map_view(layout: Layout, members: pd.DataFrame, axes: pd.DataFrame, assessed
                         "physio_sign": physio, "sign_change": change, "flux_group": _flux_group(flux_rows),
                         "flux_tracers": f_tracers, "flux_pooling_mode": f_pool_mode,
                         **_registry(flux_id),
-                        "F_state": f_state, "F_direction": f_phys, "C_state": ax["capacity"][0],
+                        "F_state": f_state, "F_direction": f_phys, "F_g": f_g, "F_flags": f_flags,
+                        "C_state": ax["capacity"][0],
                         "C_direction": ax["capacity"][1], "R_state": ax["regulation"][0],
                         "R_direction": ax["regulation"][1], "M_state": ax["pool"][0], "M_direction": m_dir,
                         **claim_fields(flux_id, physio), "value": value, "certainty": np.nan,
