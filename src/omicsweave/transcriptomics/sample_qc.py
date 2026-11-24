@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -70,6 +70,7 @@ DEFAULT_SAMPLE_QC_CONFIG: dict[str, Any] = {
     "mt_exclude_robust_z": 5.0,
     "mt_flag_robust_z": 4.0,
     "mt_flag_min_delta": 0.25,
+    "mt_flag_low": False,
 }
 
 
@@ -82,6 +83,7 @@ class SampleQCResult:
     excluded: set[str]             # 需过滤的严重异常样本（flag == "exclude"）
     flagged: set[str]              # 标记但不过滤的样本（flag == "flag"，且不在 excluded 中）
     parameters: dict[str, Any]
+    foreign_genes: dict[tuple[str, str], tuple[str, ...]] = field(default_factory=dict)
 
 
 def resolve_sample_qc_config(raw: dict[str, Any] | None) -> dict[str, Any]:
@@ -131,11 +133,14 @@ def _derive_own_markers(med_log: pd.DataFrame, cfg: dict[str, Any]) -> dict[str,
     return markers
 
 
-def _derive_pair_markers(med_log: pd.DataFrame, cfg: dict[str, Any]) -> dict[tuple[str, str], list[str]]:
-    """自动推导 (目标组织 T, 异源组织 F) 的成对特异标记：在 F 中高表达、全组织特异、在 T 中近零。"""
+def _derive_pair_marker_sets(
+    med_log: pd.DataFrame,
+    cfg: dict[str, Any],
+) -> tuple[dict[tuple[str, str], list[str]], dict[tuple[str, str], tuple[str, ...]]]:
+    """自动推导 (目标组织 T, 异源组织 F) 的成对特异标记（用于样本污染打分与特征级标记）。"""
     tissues = list(med_log.columns)
     if len(tissues) < 2:
-        return {}
+        return {}, {}
     min_log = float(cfg["marker_min_log_cpm"])
     min_global_gap = float(cfg["marker_min_global_gap"])
     min_pair_gap = float(cfg["marker_min_pair_gap"])
@@ -145,6 +150,7 @@ def _derive_pair_markers(med_log: pd.DataFrame, cfg: dict[str, Any]) -> dict[tup
 
     other_max = {f: med_log[[o for o in tissues if o != f]].max(axis=1) for f in tissues}
     pairs: dict[tuple[str, str], list[str]] = {}
+    foreign_genes: dict[tuple[str, str], tuple[str, ...]] = {}
     for target in tissues:
         for foreign in tissues:
             if foreign == target:
@@ -157,10 +163,16 @@ def _derive_pair_markers(med_log: pd.DataFrame, cfg: dict[str, Any]) -> dict[tup
                 & (gap_pair >= min_pair_gap)
                 & (med_log[target] <= max_target)
             )
-            chosen = [str(g) for g in gap_pair[mask].sort_values(ascending=False).head(top_n).index]
-            if len(chosen) >= min_count:
-                pairs[(target, foreign)] = chosen
-    return pairs
+            ordered = [str(g) for g in gap_pair[mask].sort_values(ascending=False).index]
+            if len(ordered) >= min_count:
+                pairs[(target, foreign)] = ordered[:top_n]
+                foreign_genes[(target, foreign)] = tuple(ordered)
+    return pairs, foreign_genes
+
+
+def _derive_pair_markers(med_log: pd.DataFrame, cfg: dict[str, Any]) -> dict[tuple[str, str], list[str]]:
+    """自动推导 (目标组织 T, 异源组织 F) 的成对特异标记：在 F 中高表达、全组织特异、在 T 中近零。"""
+    return _derive_pair_marker_sets(med_log, cfg)[0]
 
 
 def evaluate_sample_quality(
@@ -169,6 +181,7 @@ def evaluate_sample_quality(
     config: dict[str, Any] | None = None,
     *,
     manual_flags: dict[str, str] | None = None,
+    groups: pd.Series | dict[str, str] | None = None,
 ) -> SampleQCResult:
     """对多组织或单组织计数矩阵执行通用样本质检。
 
@@ -182,10 +195,15 @@ def evaluate_sample_quality(
         覆盖 :data:`DEFAULT_SAMPLE_QC_CONFIG` 的参数。
     manual_flags : dict[str, str], optional
         来自 ``samples.tsv`` 的人工 ``qc_flag``（仅用于合并 ``excluded`` 集合，不重复写入质量表）。
+    groups : pd.Series or dict[str, str], optional
+        ``sample_id -> 实验分组标签`` 映射；提供时，高变基因成对相关离群判定仅对同实验组内部
+        同样偏离的样本生效，避免强药物或饮食表型重塑被误判为技术离群。
     """
     cfg = resolve_sample_qc_config(config)
     sample_ids = [str(c) for c in counts.columns]
     tissue_map = {s: str(tissues[s]) for s in sample_ids if s in tissues}
+    groups_dict = groups.to_dict() if isinstance(groups, pd.Series) else (groups or {})
+    group_map = {str(s): str(groups_dict[s]).strip() for s in sample_ids if s in groups_dict and str(groups_dict[s]).strip()}
     manual = {str(k): str(v).strip().lower() for k, v in (manual_flags or {}).items() if str(v).strip()}
 
     if not cfg.get("enabled", True) or counts.empty or not sample_ids:
@@ -211,7 +229,7 @@ def evaluate_sample_quality(
     med_cpm = pd.DataFrame({t: cpm[by_tissue[t]].median(axis=1) for t in eligible_tissues}) if eligible_tissues else pd.DataFrame(index=cpm.index)
 
     own_markers = _derive_own_markers(med_log, cfg) if len(eligible_tissues) >= 2 else {}
-    pair_markers = _derive_pair_markers(med_log, cfg) if len(eligible_tissues) >= 2 else {}
+    pair_markers, foreign_genes = _derive_pair_marker_sets(med_log, cfg) if len(eligible_tissues) >= 2 else ({}, {})
 
     mt_mask = counts.index.astype(str).map(lambda g: bool(MT_GENE_PATTERN.match(g))).to_numpy(dtype=bool)
     has_mt = bool(mt_mask.any())
@@ -249,6 +267,7 @@ def evaluate_sample_quality(
             continue
 
         # ── 1. 转录组整体与高变基因相关系数 ─────────────────────────────────
+        within_ok: dict[str, bool] = {}
         ref_log = log_cpm[sids].median(axis=1)
         expr_genes = ref_log.index[ref_log >= 1.0]
         if len(expr_genes) >= min_genes:
@@ -268,6 +287,14 @@ def evaluate_sample_quality(
             )
             dist_var = 1.0 - r_var_pw
             rz_var = _robust_z(dist_var, floor=0.005)
+            for s in sids:
+                grp = group_map.get(s)
+                peers = [p for p in sids if p != s and group_map.get(p) == grp] if grp else []
+                if peers:
+                    r_within = float(corr_mat.loc[s, peers].median())
+                    within_ok[s] = bool(np.isfinite(r_within) and r_within >= float(cfg["var_corr_flag_min"]))
+                else:
+                    within_ok[s] = False
 
             for s in sids:
                 metric_summary[s]["corr_median"] = float(r_all[s])
@@ -283,7 +310,12 @@ def evaluate_sample_quality(
                 elif np.isfinite(r_all[s]) and r_all[s] < float(cfg["corr_flag_min"]) and rz_all[s] >= float(cfg["corr_flag_robust_z"]):
                     flag = "flag"
                     reason = f"表达谱偏离同组织中位谱（r={r_all[s]:.3f}, z={rz_all[s]:.1f}）"
-                elif np.isfinite(r_var_pw[s]) and r_var_pw[s] < float(cfg["var_corr_flag_min"]) and rz_var[s] >= float(cfg["var_corr_flag_robust_z"]):
+                elif (
+                    not within_ok.get(s, False)
+                    and np.isfinite(r_var_pw[s])
+                    and r_var_pw[s] < float(cfg["var_corr_flag_min"])
+                    and rz_var[s] >= float(cfg["var_corr_flag_robust_z"])
+                ):
                     flag = "flag"
                     value, rz = float(r_var_pw[s]), float(rz_var[s])
                     reason = f"高变基因表达谱偏离同组织群体（r_var={r_var_pw[s]:.3f}, z={rz_var[s]:.1f}）"
@@ -313,7 +345,13 @@ def evaluate_sample_quality(
                 ):
                     flag = "exclude"
                     reason = f"线粒体读数占比相对同组织中位数（{med_mt:.1%}）极端偏高（{val:.1%}, z={rz:+.1f}）"
-                elif abs(rz) >= float(cfg["mt_flag_robust_z"]) and abs(delta) >= float(cfg["mt_flag_min_delta"]):
+                elif (
+                    rz >= float(cfg["mt_flag_robust_z"]) and delta >= float(cfg["mt_flag_min_delta"])
+                ) or (
+                    bool(cfg.get("mt_flag_low", False))
+                    and rz <= -float(cfg["mt_flag_robust_z"])
+                    and delta <= -float(cfg["mt_flag_min_delta"])
+                ):
                     flag = "flag"
                     direction = "偏高" if delta > 0 else "偏低"
                     reason = f"线粒体读数占比相对同组织中位数（{med_mt:.1%}）异常{direction}（{val:.1%}, z={rz:+.1f}）"
@@ -346,7 +384,8 @@ def evaluate_sample_quality(
                     r_var_val = metric_summary[s]["var_pairwise_corr"]
                     r_var_z = metric_summary[s]["var_pairwise_corr_rz"]
                     if (
-                        np.isfinite(val) and np.isfinite(r_var_val) and np.isfinite(r_var_z)
+                        not within_ok.get(s, False)
+                        and np.isfinite(val) and np.isfinite(r_var_val) and np.isfinite(r_var_z)
                         and val < float(cfg["joint_degradation_retention_max"])
                         and rz <= float(cfg["joint_degradation_retention_z"])
                         and r_var_val < float(cfg["joint_degradation_var_corr_max"])
@@ -437,4 +476,4 @@ def evaluate_sample_quality(
         metric_summary[s]["qc_reasons"] = "；".join(dict.fromkeys(reasons_by_sample.get(s, [])))
 
     metrics_df = pd.DataFrame([metric_summary[s] for s in sample_ids])
-    return SampleQCResult(quality_df, metrics_df, excluded, flagged, cfg)
+    return SampleQCResult(quality_df, metrics_df, excluded, flagged, cfg, foreign_genes)

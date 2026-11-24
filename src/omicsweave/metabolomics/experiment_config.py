@@ -63,6 +63,7 @@ class MetabolomicsConfig:
     # 派生特征（脂质类别总量、质量作用比，见 omicsweave.metabolomics.derived_features）；只用于统一运行器
     derived_features: bool = True
     lipid_class_min_species: int = 3
+    run_gsea: bool = False
 
 
 # ---------------------------------------------------------------------------

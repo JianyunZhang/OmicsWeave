@@ -133,6 +133,51 @@ class SampleQCAnomalyDetectionTest(unittest.TestCase):
         self.assertEqual(res.excluded & muscle_ids, set())
         self.assertEqual(res.flagged & muscle_ids, set())
 
+    def test_low_mitochondrial_fraction_not_flagged_by_default(self) -> None:
+        counts, tissue_map = _make_multi_tissue_counts(n_per_tissue=8, n_bg=300, seed=10)
+        mt_genes = [g for g in counts.index if g.startswith("mt-")]
+        for s, t in tissue_map.items():
+            if t == "muscle":
+                non_mt_sum = counts.loc[~counts.index.isin(mt_genes), s].sum()
+                counts.loc[mt_genes, s] = (non_mt_sum * 0.56) / len(mt_genes)  # ~36% MT
+        # 单只样本线粒体占比偏低（~6.5% vs 同组织中位数 ~36%）：默认不罚为异常
+        non_mt_m0 = counts.loc[~counts.index.isin(mt_genes), "rna_muscle_0"].sum()
+        counts.loc[mt_genes, "rna_muscle_0"] = (non_mt_m0 * 0.07) / len(mt_genes)
+        res_default = evaluate_sample_quality(counts, tissue_map)
+        self.assertNotIn("rna_muscle_0", res_default.flagged | res_default.excluded)
+        q_def = res_default.quality[
+            (res_default.quality["sample_id"] == "rna_muscle_0")
+            & (res_default.quality["metric"] == "mitochondrial_fraction")
+        ].iloc[0]
+        self.assertEqual(q_def["flag"], "")
+        res_strict = evaluate_sample_quality(counts, tissue_map, config={"mt_flag_low": True})
+        self.assertIn("rna_muscle_0", res_strict.flagged)
+        q_str = res_strict.quality[
+            (res_strict.quality["sample_id"] == "rna_muscle_0")
+            & (res_strict.quality["metric"] == "mitochondrial_fraction")
+        ].iloc[0]
+        self.assertEqual(q_str["flag"], "flag")
+
+    def test_group_consistent_remodeling_not_flagged_as_var_outlier(self) -> None:
+        counts, tissue_map = _make_multi_tissue_counts(n_per_tissue=8, seed=11)
+        liver_cols = [s for s, t in tissue_map.items() if t == "liver"]
+        # 两组（4 ctrl vs 4 treated）在部分背景基因上存在强烈一致性生物学重塑，使全群体 r_var_pw 降低
+        sub = counts[liver_cols].copy()
+        rng = np.random.default_rng(12)
+        shift_genes = [f"Bg{i:04d}" for i in range(90)]
+        for s in liver_cols[4:]:
+            sub.loc[shift_genes[:45], s] = sub.loc[shift_genes[:45], s] * 12.0
+            sub.loc[shift_genes[45:], s] = sub.loc[shift_genes[45:], s] * 0.08
+        # 加入组内极小噪声，使组内相关极高（r_within >= 0.95）而跨组 r_var_pw 降低
+        groups = {s: ("ctrl" if i < 4 else "treated") for i, s in enumerate(liver_cols)}
+        sub.loc["Bg0000", liver_cols[4]] *= rng.uniform(0.98, 1.02)
+        res_grouped = evaluate_sample_quality(
+            sub, {s: "liver" for s in liver_cols},
+            config={"var_corr_flag_min": 0.99, "var_corr_flag_robust_z": 0.5},
+            groups=groups,
+        )
+        self.assertEqual(res_grouped.flagged & set(liver_cols[4:]), set())
+
 
 class TranscriptomicsRunnerSampleQCTest(unittest.TestCase):
     def _build_project(self, root: Path, *, filter_excluded: bool = True) -> Path:
@@ -229,6 +274,57 @@ class TranscriptomicsRunnerSampleQCTest(unittest.TestCase):
             self.assertIn("rna_liver_3", liver_ds.matrix.columns)
             sq = pd.read_parquet(tx / "qc" / "sample_quality.parquet")
             self.assertIn("rna_liver_3", set(sq.loc[sq["flag"] == "exclude", "sample_id"]))
+
+    def test_trace_contamination_downweights_contrast_and_flags_foreign_markers(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            counts, tissue_map = _make_multi_tissue_counts(n_per_tissue=6, seed=13)
+            subjects, sample_rows = [], []
+            for i in range(6):
+                diet = "LFD" if i < 3 else "HFD"
+                subjects.append({"subject_id": f"m{i}", "diet": diet})
+                for tissue in ("liver", "muscle", "adipose"):
+                    sid = f"rna_{tissue}_{i}"
+                    sample_rows.append({"sample_id": sid, "subject_id": f"m{i}",
+                                        "omics": "transcriptomics", "tissue": tissue})
+                    if diet == "HFD":
+                        counts.loc[[f"Bg{k:04d}" for k in range(15)], sid] *= 4.0
+            # 在 liver HFD 的 2 只样本中注入 0.25% 肌肉 RNA -> 仅标 flag（不 exclude）
+            counts["rna_liver_3"] = counts["rna_liver_3"] * 0.9975 + counts["rna_muscle_3"] * 0.0025
+            counts["rna_liver_4"] = counts["rna_liver_4"] * 0.9975 + counts["rna_muscle_4"] * 0.0025
+
+            exp = "trace_exp"
+            exp_dir = root / "experiments" / exp
+            exp_dir.mkdir(parents=True)
+            counts.to_csv(exp_dir / "counts.csv")
+            pd.DataFrame(subjects).to_csv(exp_dir / "subjects.tsv", sep="\t", index=False)
+            pd.DataFrame(sample_rows).to_csv(exp_dir / "samples.tsv", sep="\t", index=False)
+            (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                               encoding="utf-8")
+            (exp_dir / "experiment.yaml").write_text(yaml.safe_dump({
+                "schema_version": 1,
+                "experiment": {"id": exp},
+                "design": {
+                    "factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"], "reference": "LFD"}},
+                    "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD", "denominator": "LFD"}],
+                },
+                "omics": {"transcriptomics": {
+                    "enabled": True,
+                    "input": {"level": "table", "format": "counts_matrix", "files": [f"experiments/{exp}/counts.csv"]},
+                    "analysis": {"sample_qc": {"filter_excluded": True}},
+                }},
+            }, sort_keys=False), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                run_dir, _ = run_experiment(exp, ["transcriptomics"], steps=["qc", "differential"], root=root)
+
+            rel = pd.read_parquet(run_dir / "qc" / "contrast_reliability.parquet").set_index("tissue")
+            self.assertEqual(rel.at["liver", "status"], "downweighted")
+
+            diff = read_differential(run_dir / "omics" / "transcriptomics" / "tables" / "differential.parquet")
+            liver_diff = diff[diff["tissue"] == "liver"].set_index("feature_id")
+            self.assertIn("foreign_tissue_marker", str(liver_diff.at["MusM00", "flags"]).split(";"))
+            self.assertNotIn("foreign_tissue_marker", str(liver_diff.at["Bg0000", "flags"]).split(";"))
 
 
 if __name__ == "__main__":

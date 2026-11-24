@@ -10,12 +10,15 @@
 - 各组学的样本质量表 ``omics/<组学>/qc/sample_quality.parquet``（列 ``sample_id``、``metric``、``value``、``robust_z``、
   ``flag``、``reason``），由样本身份与组成 QC 生成，``flag`` 非空的样本视为已标记。
 
-对每个（组学, 组织, 比较），统计两组中被标记的样本数，按以下规则给出可靠性：
+对每个（组学, 组织, 比较），结合当前组学实际进入差异分析的保留样本集合（``omics/<组学>/data/<组织>/matrix.parquet``）
+与标记分级（严重/人工标记 vs 仅轻度自动提示 ``flag``），按以下规则给出可靠性：
 
 - ``ok``：两组都没有标记样本，可靠性 1；
-- ``qc_confounded``：两组的标记比例相差不小于 ``imbalance``（默认 0.5），质量问题与比较混杂，方向证据不可评估，可靠性 0；
-- ``qc_insufficient``：去掉标记样本后有一组少于 2 只，可靠性 0；
-- ``downweighted``：标记样本在两组间大致均衡，可靠性 = 可用样本数 / 总样本数。
+- ``qc_confounded``：仍留在差异模型中的严重/人工标记样本在两组间的比例相差不小于 ``imbalance``（默认 0.5），
+  质量问题与比较混杂，可靠性 0（已在差异分析前被 ``filter_excluded=True`` 剔除的样本不再算作当前比较的混杂源）；
+- ``qc_insufficient``：存在严重/人工标记样本，且扣除后可用样本有一组少于 2 只，可靠性 0；
+- ``downweighted``：已剔除样本后两组仍各 ≥ 2 只、或仅有轻度自动提示（``flag``）留存，按有效保留样本占比温和降权
+  （轻度提示样本折算 0.5 权重，下限 0.25），保留真实差异评估结果并附注风险。
 
 ``omicsweave run`` 结束时写出该表，并在不可评估的比较的差异结果行的 ``flags`` 中加上 ``qc_confounded`` 或
 ``qc_insufficient``；``flux_anchored`` 与 ``reversal`` 整合按当前样本表重新计算，结果写入整合结果包。
@@ -49,6 +52,26 @@ def sample_quality_paths(run_dir: str | Path) -> list[Path]:
     return sorted(Path(run_dir).glob(f"omics/*/{QC_DIR}/{SAMPLE_QUALITY_FILE}"))
 
 
+def analyzed_sample_sets(run_dir: str | Path | None) -> dict[tuple[str, str], set[str]]:
+    """读取各组学实际参与分析的数据集样本列集合 ``{(omics, tissue): {sample_id, ...}}``。"""
+    if run_dir is None:
+        return {}
+    out: dict[tuple[str, str], set[str]] = {}
+    for path in sorted(Path(run_dir).glob("omics/*/data/*/matrix.parquet")):
+        omics = path.parent.parent.parent.name
+        tissue = path.parent.name
+        try:
+            import pyarrow.parquet as pq
+            names = pq.read_schema(path).names
+        except Exception:
+            names = list(pd.read_parquet(path).columns)
+        out[(omics, tissue)] = {
+            str(col) for col in names
+            if str(col) != "feature_id" and not str(col).startswith("__index_level_")
+        }
+    return out
+
+
 def sample_flags(experiment: Experiment, run_dir: str | Path | None = None) -> pd.DataFrame:
     """被标记的样本：``sample_id``、``flag``、``reason``、``source``，每个样本一行（多个来源的原因合并）。"""
     rows = []
@@ -76,11 +99,25 @@ def sample_flags(experiment: Experiment, run_dir: str | Path | None = None) -> p
 
 
 def contrast_reliability(experiment: Experiment, keys: pd.DataFrame, flags: pd.DataFrame,
-                         imbalance: float = DEFAULT_IMBALANCE) -> pd.DataFrame:
+                         imbalance: float = DEFAULT_IMBALANCE, *,
+                         analyzed_samples: dict[tuple[str, str], set[str]] | None = None) -> pd.DataFrame:
     """``keys``：差异结果中出现的（``omics``, ``tissue``, ``contrast_id``）。不在当前配置中的比较跳过。"""
     contrasts = {c.id: c for c in experiment.config.design.contrasts}
     tissue_of = dict(zip(experiment.samples["sample_id"], experiment.samples["tissue"]))
     flagged = dict(zip(flags["sample_id"], flags["reason"]))
+    hard_set: set[str] = set()
+    soft_set: set[str] = set()
+    if not flags.empty:
+        has_source = "source" in flags.columns
+        has_flag = "flag" in flags.columns
+        for row in flags.itertuples(index=False):
+            sid = str(row.sample_id)
+            flag_val = str(getattr(row, "flag", "") or "").strip() if has_flag else "exclude"
+            sources = [s.strip() for s in str(getattr(row, "source", "") or "").split(";") if s.strip()] if has_source else []
+            if not has_source or flag_val == "exclude" or "samples.tsv" in sources:
+                hard_set.add(sid)
+            else:
+                soft_set.add(sid)
     groups_cache: dict[tuple[str, str], dict[str, str]] = {}
     rows = []
     for omics, tissue, contrast_id in keys[["omics", "tissue", "contrast_id"]].drop_duplicates().itertuples(index=False):
@@ -95,24 +132,47 @@ def contrast_reliability(experiment: Experiment, keys: pd.DataFrame, flags: pd.D
         members = {s: g for s, g in groups.items() if tissue_of.get(s) == tissue} or groups
         num = [s for s, g in members.items() if g == contrast.numerator]
         den = [s for s, g in members.items() if g == contrast.denominator]
+        kept = (analyzed_samples or {}).get((str(omics), str(tissue)))
         bad_num = [s for s in num if s in flagged]
         bad_den = [s for s in den if s in flagged]
-        usable_num, usable_den = len(num) - len(bad_num), len(den) - len(bad_den)
+        pre_filtered_num = [s for s in bad_num if s in hard_set and kept is not None and s not in kept]
+        pre_filtered_den = [s for s in bad_den if s in hard_set and kept is not None and s not in kept]
+        unfiltered_hard_num = [s for s in bad_num if s in hard_set and (kept is None or s in kept)]
+        unfiltered_hard_den = [s for s in bad_den if s in hard_set and (kept is None or s in kept)]
+        soft_num = [s for s in bad_num if s in soft_set and (kept is None or s in kept)]
+        soft_den = [s for s in bad_den if s in soft_set and (kept is None or s in kept)]
+        usable_num = len(num) - len(pre_filtered_num) - len(unfiltered_hard_num)
+        usable_den = len(den) - len(pre_filtered_den) - len(unfiltered_hard_den)
         if not bad_num and not bad_den:
             status, reliability, reason = "ok", 1.0, ""
         else:
-            frac_num = len(bad_num) / len(num) if num else 0.0
-            frac_den = len(bad_den) / len(den) if den else 0.0
-            if abs(frac_num - frac_den) >= imbalance:
+            act_num = max(len(num) - len(pre_filtered_num), 0)
+            act_den = max(len(den) - len(pre_filtered_den), 0)
+            frac_num = len(unfiltered_hard_num) / act_num if act_num else 0.0
+            frac_den = len(unfiltered_hard_den) / act_den if act_den else 0.0
+            if (unfiltered_hard_num or unfiltered_hard_den) and abs(frac_num - frac_den) >= imbalance:
                 status, reliability = "qc_confounded", 0.0
-            elif (bad_num and usable_num < 2) or (bad_den and usable_den < 2):
+            elif ((pre_filtered_num or unfiltered_hard_num) and usable_num < 2) or (
+                (pre_filtered_den or unfiltered_hard_den) and usable_den < 2
+            ):
                 status, reliability = "qc_insufficient", 0.0
             else:
                 status = "downweighted"
-                reliability = (usable_num + usable_den) / max(len(num) + len(den), 1)
+                eff_usable = usable_num + usable_den - 0.5 * (len(soft_num) + len(soft_den))
+                reliability = max(0.25, eff_usable / max(len(num) + len(den), 1))
             causes = "；".join(dict.fromkeys(flagged[s] for s in bad_num + bad_den if flagged[s]))
+            detail_parts: list[str] = []
+            if pre_filtered_num or pre_filtered_den:
+                detail_parts.append(f"DE 前已剔除 {len(pre_filtered_num)}+{len(pre_filtered_den)} 个")
+            if unfiltered_hard_num or unfiltered_hard_den:
+                detail_parts.append(f"未过滤严重/人工标记 {len(unfiltered_hard_num)}+{len(unfiltered_hard_den)} 个")
+            if soft_num or soft_den:
+                detail_parts.append(f"轻度提示 {len(soft_num)}+{len(soft_den)} 个")
+            if causes:
+                detail_parts.append(causes)
             reason = (f"{contrast.numerator} 组 {len(bad_num)}/{len(num)}、{contrast.denominator} 组 "
-                      f"{len(bad_den)}/{len(den)} 个样本有 QC 标记" + (f"（{causes}）" if causes else ""))
+                      f"{len(bad_den)}/{len(den)} 个样本有 QC 标记"
+                      + (f"（{'；'.join(detail_parts)}）" if detail_parts else ""))
         rows.append((str(omics), str(tissue), contrast.id, contrast.numerator, contrast.denominator, len(num),
                      len(den), len(bad_num), len(bad_den), usable_num, usable_den, round(reliability, 4), status,
                      reason, ";".join(sorted(bad_num + bad_den))))
@@ -132,7 +192,11 @@ def build_reliability(experiment: Experiment, run_dir: str | Path, tables: dict[
                       imbalance: float = DEFAULT_IMBALANCE) -> tuple[pd.DataFrame, list[Path]]:
     """由结果包的差异结果与当前样本表计算可靠性表；返回 (表, 读取的样本质量表)。"""
     flags = sample_flags(experiment, run_dir)
-    return contrast_reliability(experiment, differential_keys(tables), flags, imbalance), sample_quality_paths(run_dir)
+    analyzed = analyzed_sample_sets(run_dir)
+    return (
+        contrast_reliability(experiment, differential_keys(tables), flags, imbalance, analyzed_samples=analyzed),
+        sample_quality_paths(run_dir),
+    )
 
 
 def summary_note(table: pd.DataFrame) -> str | None:

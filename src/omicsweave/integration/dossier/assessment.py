@@ -49,6 +49,8 @@ RULES: dict[str, Any] = {"alpha": 0.05, "equivalence_bound": 0.58, "flux_min_abs
                          "flux_scale_drift_gate": True}
 MEASURED = ("changed", "nominal", "no_evidence", "equivalent")
 MISSING_ORDER = ("qc_blocked", "not_detected", "not_measured", "no_knowledge")
+_CAUTION_FLAGS = ("single_subject_driven", "foreign_tissue_marker", "qc_caution")
+_LAYER_QC_CAUTION = ("foreign_tissue_marker", "qc_caution")
 AXIS_COLUMNS = ["flux_id", "tissue", "contrast_id", "axis", "direction", "state", "effect", "ci_lower", "ci_upper",
                 "sign_probability", "pvalue_one_sided", "n_expected", "n_measured", "n_sources", "replicated", "basis",
                 "rule", "flags"]
@@ -138,6 +140,40 @@ def _missing_state(rows: pd.DataFrame) -> str:
 
 def _flags(rows: pd.DataFrame) -> set[str]:
     return {f for value in rows["flags"].fillna("") for f in str(value).split(";") if f}
+
+
+def _caution_info(rows: pd.DataFrame, target_flags: tuple[str, ...] = _CAUTION_FLAGS) -> tuple[pd.Series, list[str]]:
+    """检查给定行集合是否全由带警示标记的行驱动，并返回出现的警示标记列表。"""
+    if rows.empty:
+        return pd.Series(dtype=bool), []
+    raw_flags = rows["flags"].fillna("").astype(str) if "flags" in rows.columns else pd.Series("", index=rows.index)
+    qc_conf = (
+        rows["qc_status"].astype(str).eq("qc_confounded")
+        if "qc_status" in rows.columns else pd.Series(False, index=rows.index)
+    )
+    masks: dict[str, pd.Series] = {}
+    for flag in target_flags:
+        hit = raw_flags.str.split(";").map(lambda fs, target=flag: target in fs)
+        if flag == "qc_caution":
+            hit = hit | qc_conf
+        masks[flag] = hit
+    any_caution = pd.Series(False, index=rows.index)
+    for hit in masks.values():
+        any_caution = any_caution | hit
+    present = [flag for flag in target_flags if bool(masks[flag].any())]
+    return any_caution, present
+
+
+def _cap_if_cautioned(axis: Axis, driving: pd.DataFrame, target_flags: tuple[str, ...] = _CAUTION_FLAGS) -> None:
+    """若支撑 changed 判定的全部成员均带有风险标记，则软封顶降级为 suggestive 并保留警示标记。"""
+    if axis.state != "changed" or driving.empty:
+        return
+    caution_mask, caution_flags = _caution_info(driving, target_flags)
+    if bool(caution_mask.all()) and caution_flags:
+        axis.state = "suggestive"
+        for flag in caution_flags:
+            if flag not in axis.flags:
+                axis.flags.append(flag)
 
 
 def _describe(rows: pd.DataFrame, label: str = "member_id") -> str:
@@ -437,7 +473,6 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
         return axis
     fc = pd.to_numeric(quantified["log2fc"], errors="coerce")
     states = quantified["cell_state"]
-    single_subject = quantified["flags"].fillna("").str.contains("single_subject_driven")
     if (quantified["member_relation"] == "complex_subunit").any():
         direction = _sign(fc.median())
         same = int((np.sign(fc) == direction).sum())
@@ -446,8 +481,7 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
         if direction and same >= len(quantified) / 2 and changed.any():
             axis.state, axis.direction = "changed", direction
             axis.rule = f"复合体：{same}/{len(quantified)} 个已定量亚基同向，{int(changed.sum())} 个通过 FDR"
-            if (changed & single_subject).all():
-                axis.state, axis.flags = "suggestive", ["single_subject_driven"]
+            _cap_if_cautioned(axis, quantified[changed])
         elif states.eq("equivalent").all():
             axis.state, axis.rule = "unchanged", "复合体：已定量亚基全部等效"
         elif states.isin(["changed", "nominal"]).any():
@@ -468,9 +502,7 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
             axis.effect = float(pd.to_numeric(changed["log2fc"], errors="coerce").median())
             names = "、".join(str(m) for m in changed["member_id"])
             axis.rule = f"多步/诱导反应：{names} 通过 FDR"
-            if bool(single_subject[changed.index].all()):
-                axis.state = "suggestive"
-                axis.flags.append("single_subject_driven")
+            _cap_if_cautioned(axis, changed)
         elif states.eq("equivalent").all():
             axis.state, axis.effect, axis.rule = "unchanged", float(fc.median()), "多步/集总反应：已定量成员全部等效"
         elif states.eq("nominal").any():
@@ -509,9 +541,7 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
             axis.state, axis.direction = "changed", next(iter(directions))
             names = "、".join(f"{r.member_id}（占比 {eff_share[i]:.0%}）" for i, r in changed_majors.iterrows())
             axis.rule = f"主要成员 {names} 通过 FDR"
-            if bool(single_subject[changed_majors.index].all()):
-                axis.state = "suggestive"
-                axis.flags.append("single_subject_driven")
+            _cap_if_cautioned(axis, changed_majors)
         elif majors["cell_state"].eq("equivalent").all():
             axis.state, axis.rule = "unchanged", "主要成员全部等效"
         elif states.eq("changed").any():
@@ -531,9 +561,7 @@ def _judge_members(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
                 axis.effect = float(pd.to_numeric(changed_all["log2fc"], errors="coerce").median())
                 names = "、".join(str(m) for m in changed_all["member_id"])
                 axis.rule = f"多个同向成员 {names}（合计占比 {combined_share:.0%}）通过 FDR"
-                if bool(single_subject[changed_all.index].all()):
-                    axis.state = "suggestive"
-                    axis.flags.append("single_subject_driven")
+                _cap_if_cautioned(axis, changed_all)
             else:
                 axis.state, axis.rule = "undetermined", "只有次要同工酶通过 FDR"
                 axis.flags.append("minor_isozyme_driven")
@@ -633,6 +661,9 @@ def regulation_axis(rows: pd.DataFrame, rules: dict[str, Any]) -> Axis:
         axis.state = "changed" if activity_data else "suggestive"
         axis.rule = "测得的别构效应物有变化" if activity_data else \
             ("由调控因子的量推断，最多到 suggestive" if changed.any() else "调控因子只有名义 p")
+        if axis.state == "changed":
+            eff_changed = quantified[changed & (quantified["role"] == "effector") & (implied == axis.direction)]
+            _cap_if_cautioned(axis, eff_changed, _LAYER_QC_CAUTION)
         support = quantified[evidence & (implied == axis.direction)]
         axis.effect = float((pd.to_numeric(support["log2fc"], errors="coerce") * signs[support.index]).median())
         axis.pvalue_one_sided = simes([one_sided(r.pvalue, r.log2fc, axis.direction * signs[i])
@@ -664,6 +695,8 @@ def pool_axis(rows: pd.DataFrame, rules: dict[str, Any], direction_evidence: str
     if direction_evidence != "directional":
         axis.state = "changed" if changed.any() else ("suggestive" if evidence.any() else "undetermined")
         axis.rule, axis.flags = "只表示容量的反应：池的变化不提示净方向", ["capacity_reaction"]
+        if axis.state == "changed":
+            _cap_if_cautioned(axis, quantified[changed], _LAYER_QC_CAUTION)
         return axis
     if len(pointing) > 1:
         axis.state, axis.rule = "mixed", "底物与产物的指向相反"
@@ -671,6 +704,8 @@ def pool_axis(rows: pd.DataFrame, rules: dict[str, Any], direction_evidence: str
         axis.direction = int(next(iter(pointing)))
         axis.state = "changed" if changed.any() else "suggestive"
         axis.rule = "产物升 / 底物降指向通量升，反之指向通量降"
+        if axis.state == "changed":
+            _cap_if_cautioned(axis, quantified[changed & (implied == axis.direction)], _LAYER_QC_CAUTION)
         support = quantified[evidence & (implied == axis.direction)]
         axis.effect = float((pd.to_numeric(support["log2fc"], errors="coerce") * factor[support.index]).median())
         axis.pvalue_one_sided = simes([one_sided(r.pvalue, r.log2fc, axis.direction * factor[i])
@@ -713,7 +748,7 @@ def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = No
         # 实测通量已通过等效性检验（未变化）：不能再由酶容量外推为 L1 通量变化
         claim, direction = "L0", 0
     else:
-        robust = c.state == "changed" and "single_subject_driven" not in c.flags
+        robust = c.state == "changed" and not (set(_CAUTION_FLAGS) & set(c.flags))
         opposite = any(ax.state in vetoing and ax.direction == -c.direction for ax in (r, m))
         claim, direction = ("L1", c.direction) if robust and not opposite else ("L0", 0)
     concordant = [name for name, ax in others.items() if direction and ax.pointing and ax.direction == direction]
@@ -730,8 +765,12 @@ def decide(f: Axis, c: Axis, r: Axis, m: Axis, rules: dict[str, Any] | None = No
         phenomena.append("regulator_inhibitory_up")
     if c.pointing and m.pointing and c.direction == -m.direction:
         phenomena.append("capacity_pool_opposed")
-    for flag in ("rna_protein_discordant", "tracer_expectation_mismatch", "rna_single_source", "flux_scale_drift"):
-        if flag in c.flags + f.flags:
+    all_axis_flags = c.flags + f.flags + r.flags + m.flags
+    for flag in (
+        "rna_protein_discordant", "tracer_expectation_mismatch", "rna_single_source",
+        "flux_scale_drift", "foreign_tissue_marker", "qc_caution",
+    ):
+        if flag in all_axis_flags:
             phenomena.append(flag)
     return {"flux_claim": claim, "claim_direction": direction, "n_concordant_axes": len(concordant),
             "concordant": concordant, "discordant_axes": ";".join(discordant), "phenomena": ";".join(phenomena)}

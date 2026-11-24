@@ -91,6 +91,47 @@ class ReliabilityRulesTest(ReliabilityCase):
         messages = [i.message for i in validate_project(self.root).errors]
         self.assertTrue(any("qc_flag" in m for m in messages), messages)
 
+    def test_pre_filtered_exclude_samples_are_not_confounded_or_double_counted(self) -> None:
+        self.set_flags({})
+        exp = self.experiment()
+        keys = pd.DataFrame({"omics": ["mfa"], "tissue": ["liver"], "contrast_id": [DIET]})
+        flags = pd.DataFrame([
+            {"sample_id": "m6", "flag": "exclude", "reason": "跨组织混入",
+             "source": "omics/mfa/qc/sample_quality.parquet"},
+            {"sample_id": "m0", "flag": "flag", "reason": "轻度偏离",
+             "source": "omics/mfa/qc/sample_quality.parquet"},
+        ])
+        # m6 已在 DE 前过滤（不在 analyzed_samples 中），剩余 HFD 2 只 vs LFD 3 只（其中 m0 带软 flag）
+        analyzed = {("mfa", "liver"): {"m7", "m8", "m0", "m1", "m2"}}
+        row = contrast_reliability(exp, keys, flags, analyzed_samples=analyzed).iloc[0]
+        self.assertEqual(row["status"], "downweighted")
+        self.assertEqual((row["n_usable_numerator"], row["n_usable_denominator"]), (2, 3))
+        self.assertAlmostEqual(row["reliability"], (2 + 3 - 0.5) / 6, places=4)
+        self.assertIn("DE 前已剔除 1+0 个", row["reason"])
+
+        # 若已剔除 2/3 导致剩余不足 2 只，则判定 qc_insufficient
+        flags2 = pd.DataFrame([
+            {"sample_id": "m6", "flag": "exclude", "reason": "离群", "source": "omics/mfa/qc/sample_quality.parquet"},
+            {"sample_id": "m7", "flag": "exclude", "reason": "离群", "source": "omics/mfa/qc/sample_quality.parquet"},
+        ])
+        analyzed2 = {("mfa", "liver"): {"m8", "m0", "m1", "m2"}}
+        row2 = contrast_reliability(exp, keys, flags2, analyzed_samples=analyzed2).iloc[0]
+        self.assertEqual((row2["status"], row2["n_usable_numerator"], row2["reliability"]), ("qc_insufficient", 1, 0.0))
+
+    def test_auto_soft_flags_only_never_block(self) -> None:
+        self.set_flags({})
+        exp = self.experiment()
+        keys = pd.DataFrame({"omics": ["mfa"], "tissue": ["liver"], "contrast_id": [DIET]})
+        flags = pd.DataFrame([
+            {"sample_id": "m6", "flag": "flag", "reason": "轻度混入", "source": "omics/mfa/qc/sample_quality.parquet"},
+            {"sample_id": "m7", "flag": "flag", "reason": "轻度混入", "source": "omics/mfa/qc/sample_quality.parquet"},
+        ])
+        analyzed = {("mfa", "liver"): {"m6", "m7", "m8", "m0", "m1", "m2"}}
+        row = contrast_reliability(exp, keys, flags, analyzed_samples=analyzed).iloc[0]
+        self.assertEqual(row["status"], "downweighted")
+        self.assertEqual((row["n_usable_numerator"], row["n_usable_denominator"]), (3, 3))
+        self.assertGreaterEqual(row["reliability"], 0.25)
+
 
 class RunReliabilityTest(ReliabilityCase):
     def test_run_writes_table_and_flags_confounded_rows(self) -> None:

@@ -34,7 +34,7 @@ input:
 
 其余数值列为样本，列名即 `sample_id`，不同时写在 `data_column`。矩阵不做 q 值过滤；同名特征按 `analysis.protein_aggregation` 合并，之后的预处理与检验与 DIA-NN 报告相同（同一份数据两种输入的结果一致，见回归测试）。已归一化的矩阵会再做一次样本中位数居中。
 
-预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致。富集（`enrichment`）：预排序 GSEA 与旧流程相同（按调节 t 排序，每个库分别检验，库由 `analysis.gene_sets` 指定，默认 KEGG_2019_Mouse），另做按方向的本地 ORA。`.raw` 搜库、图件与 ssGSEA 暂时仍用下文的旧流程。
+预处理与 limma 检验沿用本模块的函数，同一份报告与旧流程的结果逐值一致。富集（`enrichment`）：默认按方向运行本地 ORA（不依赖 GSEA）；预排序 GSEA（按调节 t 排序，每个库分别检验，库由 `analysis.gene_sets` 指定，默认 KEGG_2019_Mouse）由 `analysis.run_gsea`（兼容旧键 `run_prerank_gsea`）控制，默认 `false`，可用配置或 `omicsweave run/pipeline --gsea` 开启。`.raw` 搜库、图件与 ssGSEA 暂时仍用下文的旧流程。
 结果写入结果包的 `omics/proteomics/`，可用 `omicsweave export` 导出为 Excel。
 
 ## 统计契约

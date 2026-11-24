@@ -6,7 +6,7 @@
 
 计算沿用旧流程的函数（预处理、PLS-DA、Welch t 检验、ORA），只是分组与比较改由样本表和
 ``design.contrasts`` 给出。样本按数据表中的列顺序参与计算，所以同一份数据与旧流程
-（``omicsweave metabolomics run``）的结果逐值一致。富集分析包括 KEGG ORA 与代谢物集预排序 GSEA（``gsea_rank_metric`` 默认 Welch t，种子固定为 42，与旧流程相同）。旧流程的图件暂未接入。
+（``omicsweave metabolomics run``）的结果逐值一致。富集分析默认仅执行本地 KEGG ORA；代谢物集预排序 GSEA（``gsea_rank_metric`` 默认 Welch t，种子固定为 42）由 ``analysis.run_gsea`` 控制（默认 ``false``，可通过配置或命令行 ``--gsea`` 开启）。旧流程的图件暂未接入。
 
 输入（``omics.metabolomics.input``，``format: peak_table``）::
 
@@ -43,9 +43,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from omicsweave.adapters.enrichment import resolve_run_gsea
 from omicsweave.adapters.gseapy_results import prerank_to_contract
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
-from omicsweave.contract.tables import write_differential, write_enrichment
+from omicsweave.contract.tables import empty_enrichment, write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.idmap.metabolite_id_mapping import annotate_metabolites
 from omicsweave.core.model import Omics
@@ -318,6 +319,11 @@ def run(ctx: RunContext) -> OmicsRun:
     out = ctx.omics_dir(Omics.METABOLOMICS)
     record = OmicsRun(Omics.METABOLOMICS)
     settings, record.notes = _settings(experiment.config.omics.metabolomics.analysis)
+    try:
+        do_gsea = resolve_run_gsea(experiment.config.omics.metabolomics.analysis, override=ctx.run_gsea)
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+    settings["run_gsea"] = do_gsea
     blocks, record.inputs, notes, applied_aliases = _blocks(ctx.project, experiment, spec)
     record.notes += notes
     if applied_aliases:
@@ -338,6 +344,7 @@ def run(ctx: RunContext) -> OmicsRun:
     )
     want_differential = ctx.wants("differential") or ctx.wants("enrichment")
     differential, enrichment, contrasts_run, derived_rows = [], [], [], []
+    attempted_enrichment = False
     derived_counts: dict[str, dict[str, int]] = {}
 
     for block in blocks:
@@ -431,6 +438,7 @@ def run(ctx: RunContext) -> OmicsRun:
                 derived_rows += _derived_differential(derived, tissue, groups, contrast, options,
                                                       fdr_method=fdr_method, settings=settings)
             if ctx.wants("enrichment") and "kegg_map" in result.combined.columns:
+                attempted_enrichment = True
                 ora = calculate_pathway_enrichment(
                     result.combined, significance_col=f"Significant_{contrast.id}", feature_col=feature_id,
                     min_set_size=int(settings["ora_min_set_size"]), max_set_size=int(settings["ora_max_set_size"]),
@@ -440,12 +448,13 @@ def run(ctx: RunContext) -> OmicsRun:
                     enrichment.append(ora_to_contract(ora, contrast_id=contrast.id, contrast_role=contrast.role.value,
                                                       tissue=tissue, query="all", gene_set_library="KEGG",
                                                       padj_method=normalize_fdr_method(fdr_method)))
-                gsea = _gsea(result.combined, feature_id, contrast.id, tissue, details, settings)
-                if gsea is not None:
-                    enrichment.append(prerank_to_contract(
-                        gsea, contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
-                        omics=Omics.METABOLOMICS.value, gene_set_library="KEGG",
-                        permutation_num=int(settings["gsea_permutation_num"])).pipe(_split_kegg_terms))
+                if do_gsea:
+                    gsea = _gsea(result.combined, feature_id, contrast.id, tissue, details, settings)
+                    if gsea is not None:
+                        enrichment.append(prerank_to_contract(
+                            gsea, contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
+                            omics=Omics.METABOLOMICS.value, gene_set_library="KEGG",
+                            permutation_num=int(settings["gsea_permutation_num"])).pipe(_split_kegg_terms))
         pd.DataFrame(validation).to_csv(details / "plsda_validation.csv", index=False, encoding="utf-8-sig")
 
     if differential:
@@ -456,7 +465,11 @@ def run(ctx: RunContext) -> OmicsRun:
     if enrichment:
         write_enrichment(pd.concat(enrichment, ignore_index=True), out / "tables" / "enrichment.parquet")
     elif ctx.wants("enrichment") and differential:
-        record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA 与 GSEA")
+        write_enrichment(empty_enrichment(), out / "tables" / "enrichment.parquet")
+        if attempted_enrichment:
+            record.notes.append("代谢组富集分析没有可报告的结果（入选或排序代谢物过少，无显著 KEGG 通路）")
+        else:
+            record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA 与 GSEA")
     if ctx.wants("figures"):
         # 要求 VIP 时，阈值线外的点也可能未入选；入选规则写在图下方
         record.notes += write_bundle_volcanoes(

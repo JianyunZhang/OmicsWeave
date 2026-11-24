@@ -12,11 +12,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
+import numpy as np
 import pandas as pd
 
-from omicsweave.contract.tables import ENRICHMENT_COLUMNS
+from omicsweave.contract.tables import empty_enrichment
 from omicsweave.core.statistics.ora import over_representation
 
 from .gseapy_results import prerank_to_contract
@@ -33,7 +34,9 @@ class EnrichmentSettings:
     ora_min_set_size: int = 5
     ora_max_set_size: int = 2000
     fdr_method: str = "fdr_bh"
-    # GSEA：排序特征不足 gsea_min_ranked 个时不做
+    # GSEA：默认关闭耗时的预排序置换检验，可通过 analysis.run_gsea: true 或命令行 --gsea 开启
+    run_gsea: bool = False
+    # 排序特征不足 gsea_min_ranked 个时不做
     gsea_min_ranked: int = 100
     gsea_min_set_size: int = 15
     gsea_max_set_size: int = 500
@@ -43,8 +46,29 @@ class EnrichmentSettings:
     gsea_joint_libraries: bool = True
 
 
+def resolve_run_gsea(
+    analysis: Mapping[str, Any],
+    *,
+    override: bool | None = None,
+    aliases: tuple[str, ...] = (),
+    default: bool = False,
+) -> bool:
+    """解析是否执行预排序 GSEA：命令行显式覆盖 > ``analysis.run_gsea`` > 兼容别名 > ``default``。"""
+    for key in ("run_gsea", *aliases):
+        if key in analysis and analysis[key] is not None and not isinstance(analysis[key], bool):
+            raise ValueError(f"{key} 应为布尔值 true 或 false")
+    if override is not None:
+        return bool(override)
+    if "run_gsea" in analysis and analysis["run_gsea"] is not None:
+        return analysis["run_gsea"]
+    for key in aliases:
+        if key in analysis and analysis[key] is not None:
+            return analysis[key]
+    return bool(default)
+
+
 def _empty() -> pd.DataFrame:
-    return pd.DataFrame(columns=[c.name for c in ENRICHMENT_COLUMNS])
+    return empty_enrichment()
 
 
 def ora_rows(differential: pd.DataFrame, libraries: Libraries, settings: EnrichmentSettings, *,
@@ -73,8 +97,8 @@ def ora_rows(differential: pd.DataFrame, libraries: Libraries, settings: Enrichm
                 "overlap_size": result["overlap_size"].astype("Int64"), "set_size": result["set_size"].astype("Int64"),
                 "query_size": result["query_size"].astype("Int64"),
                 "universe_size": result["universe_size"].astype("Int64"),
-                "odds_ratio": result["odds_ratio"], "hit_features": result["hit_features"],
-                "tool": "omicsweave.ora",
+                "odds_ratio": result["odds_ratio"], "es": np.nan, "nes": np.nan,
+                "hit_features": result["hit_features"], "tool": "omicsweave.ora", "flags": "",
             }))
     return pd.concat(parts, ignore_index=True) if parts else _empty()
 

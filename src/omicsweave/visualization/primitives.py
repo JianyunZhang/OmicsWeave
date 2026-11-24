@@ -663,7 +663,7 @@ def draw_status_cell(
     - ``not_measured`` / ``not_infused`` / ``no_knowledge``：浅灰底 + 淡 45° 斜纹 ``/``；
     - ``not_identifiable``：灰蓝禁用约束圆图标 ``⊘``（替代难以理解的 ``×``）；
     - ``not_detected``：浅灰虚线空心圆 ``◌``（替代 ``?``）；
-    - ``qc_blocked`` / ``insufficient_n``：琥珀色极简警示三角 ``⚠``（替代 ``Q`` / ``!``）。
+    - ``qc_blocked`` / ``insufficient_n``：低对比度冷灰双斜线 ``//``（低样本量或无可评估数据，避免满图高显著度警示干扰）。
 
     ``y_up=True`` 时适配标准 Matplotlib y 轴向上坐标系；``y_scale`` 为 ``x_unit_in / y_unit_in`` 修正纵横比。
     """
@@ -772,26 +772,21 @@ def draw_status_cell(
             lw=0.58 * font_scale, linestyle=(0, (1.4, 1.2)), zorder=zorder + 0.12,
         ))
     elif st in ("qc_blocked", "insufficient_n"):
-        # 柔和琥珀色微型警示三角 ⚠（QC 拦截或低样本量）
-        rx = cell * 0.29
-        ry = cell_y * 0.29
-        verts = [
-            (cx, cy + up_s * ry),
-            (cx + rx * 0.96, cy - up_s * ry * 0.80),
-            (cx - rx * 0.96, cy - up_s * ry * 0.80),
-        ]
-        ax.add_patch(Polygon(
-            verts, closed=True, facecolor=palette.sign_change_bg,
-            edgecolor=palette.sign_change_edge, lw=0.58 * font_scale, zorder=zorder + 0.12,
+        # 低对比度冷灰双斜线 //（低样本量或无可评估数据，避免满图高显著度琥珀感叹号干扰阅读）
+        pad_x = cell * 0.07
+        pad_y = cell_y * 0.07
+        ax.add_patch(Rectangle(
+            (cell_x + pad_x, cells_y + pad_y), cell - 2 * pad_x, cell_y - 2 * pad_y,
+            facecolor=palette.missing_fill, edgecolor="none", zorder=zorder,
         ))
-        ax.add_line(Line2D(
-            [cx, cx], [cy + up_s * ry * 0.36, cy - up_s * ry * 0.18],
-            color=palette.sign_change_ink, lw=0.55 * font_scale, solid_capstyle="round", zorder=zorder + 0.15,
-        ))
-        ax.add_patch(Ellipse(
-            (cx, cy - up_s * ry * 0.46), 2 * rx * 0.10, 2 * ry * 0.10,
-            facecolor=palette.sign_change_ink, edgecolor="none", zorder=zorder + 0.15,
-        ))
+        y_lo = cells_y + cell_y * (0.25 if y_up else 0.75)
+        y_hi = cells_y + cell_y * (0.75 if y_up else 0.25)
+        for dx_off in (-0.09 * cell, 0.09 * cell):
+            ax.add_line(Line2D(
+                [cell_x + cell * 0.27 + dx_off, cell_x + cell * 0.73 + dx_off],
+                [y_lo, y_hi],
+                color=palette.muted, lw=0.48 * font_scale, solid_capstyle="round", zorder=zorder + 0.08,
+            ))
     else:
         half = cell * 0.22
         ax.add_line(Line2D(

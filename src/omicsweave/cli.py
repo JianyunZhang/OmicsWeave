@@ -127,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
                      help="要运行的组学，可重复或用逗号分隔；默认 all（全部已启用且已接入统一运行的组学）")
     run.add_argument("--steps", action="append", default=None,
                      help="只运行这些步骤，可重复或用逗号分隔，如 qc,differential；默认全部")
+    run_gsea_group = run.add_mutually_exclusive_group()
+    run_gsea_group.add_argument(
+        "--gsea", dest="run_gsea", action="store_true", default=None,
+        help="启用预排序 GSEA（覆盖配置中的默认关闭设置）",
+    )
+    run_gsea_group.add_argument(
+        "--no-gsea", dest="run_gsea", action="store_false",
+        help="跳过耗时的预排序 GSEA，仅保留快速本地 ORA（默认已关闭 GSEA，此项可强制覆盖配置中的 run_gsea: true）",
+    )
 
     integrate = modules.add_parser("integrate", help="读取统一结果表做多组学整合，结果写入新的结果包")
     integrate.add_argument("--experiment", required=True, help="experiments/ 下的实验 ID")
@@ -226,6 +235,15 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--integration-run", help="从 scripts 续跑时固定与 --source 对应的整合包")
     pipeline.add_argument("--tag", default=None, help="给本次交付目录附加人类可读标签（如 v1、manuscript）")
     pipeline.add_argument("--pin", action="store_true", help="锁定本次交付（写入 .keep 与 pinned 标记），避免被保留策略清理")
+    pipeline_gsea_group = pipeline.add_mutually_exclusive_group()
+    pipeline_gsea_group.add_argument(
+        "--gsea", dest="run_gsea", action="store_true", default=None,
+        help="启用预排序 GSEA（覆盖配置中的默认关闭设置）",
+    )
+    pipeline_gsea_group.add_argument(
+        "--no-gsea", dest="run_gsea", action="store_false",
+        help="跳过耗时的预排序 GSEA，仅保留快速本地 ORA（默认已关闭 GSEA，此项可强制覆盖配置中的 run_gsea: true）",
+    )
     pipeline.add_argument("--dry-run", action="store_true", help="只做检查并列出各步命令，不运行")
 
     latest = modules.add_parser("latest", help="通过 results/latest.json 指针查询、列出或打开最新一次成功交付")
@@ -325,7 +343,8 @@ def _run_run(args: argparse.Namespace) -> int:
 
     try:
         run_dir, notes = run_experiment(args.experiment, _split(args.omics) or [ALL], _split(args.steps) or None,
-                                        root=project_dir(), command=["omicsweave", *args.argv])
+                                        root=project_dir(), command=["omicsweave", *args.argv],
+                                        run_gsea=args.run_gsea)
     except RunError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
@@ -594,7 +613,8 @@ def _run_pipeline(args: argparse.Namespace) -> int:
         results = run_pipeline(project_dir(), args.experiment, _split(args.omics) or None, start=start,
                                source=args.source, dry_run=args.dry_run, results_dir=args.results_dir,
                                integration_run=args.integration_run, tag=args.tag, pin=args.pin,
-                               retention=_ENTRY_RETENTION.get(), command=["omicsweave", *args.argv])
+                               retention=_ENTRY_RETENTION.get(), run_gsea=args.run_gsea,
+                               command=["omicsweave", *args.argv])
     except RunError as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1

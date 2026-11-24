@@ -121,7 +121,7 @@ omicsweave integrate --experiment <id> --mode flux_anchored        # 读取最�
 
 - `pathway_convergence`（已接入）：同一组织、同一比较下各组学通路富集结果的融合（组学内 Bonferroni、组学间 Fisher、BH 校正，
   与本模块 `PathwayConvergenceAnalyzer` 相同），附各组学的效应方向与方向一致性，以及显著通路的两两交集；自动套用实验级与组学级
-  `tissue_aliases`，并支持可选参数 `tissue_map`。
+  `tissue_aliases`，并支持可选参数 `tissue_map`。默认关闭各组学预排序 GSEA（`run_gsea: false`，仅跑本地 ORA）；若源结果包中已有至少 2 个非 MFA 组学执行了 `enrichment` 步骤但非空 `enrichment.parquet` 不足 2 份（无显著 ORA 命中），将温和写出空通路融合表并附运行提示，不阻断后续整合与通路绘图。
 - `flux_anchored`（已接入）：以 MFA 差异通量为锚点，读取各组学的统一差异结果表（`differential.parquet`），
   按反应 → 基因/蛋白/代谢物映射提取证据，输出多维证据画像 `flux_evidence_profile`、证据长表 `flux_evidence_table`
   与通路汇总 `flux_pathway_profile`。需要 MFA 与至少 1 个其他组学。参数 `pval_cutoff`、`log2fc_cutoff`、`omics_cutoffs`、
@@ -453,10 +453,14 @@ rna_liver_m63    m63         transcriptomics  liver   flag     线粒体读数�
 ```
 
 `qc_flag` 取 `flag` 或 `exclude`（留空为正常）；各组学的 `qc/sample_quality.parquet`（样本身份与组成 QC 的输出）中
-`flag` 非空的样本同样计入。规则：两组都没有标记 → `ok`；两组标记比例相差 ≥ `qc_imbalance`（默认 0.5）→ `qc_confounded`；
-去掉标记样本后有一组少于 2 只 → `qc_insufficient`；否则 `downweighted`，可靠性为可用样本占比。后两种不可评估的状态使该层
-不判支持或冲突（MFA 层则锚点不成立）。`omicsweave run` 结束时写出结果包的 `qc/contrast_reliability.parquet`，并在不可评估的
-差异结果行的 `flags` 中加上状态；整合按当前样本表重新计算，所以改样本表后只需重跑整合。
+`flag` 非空的样本同样计入。`omicsweave.core.reliability` 会同步读取各组学实际参与差异分析的保留样本集合
+（`omics/<组学>/data/<组织>/matrix.parquet` 的样本列），将标记按“是否仍在模型中”及“严重程度”分级：
+已在差异分析前通过 `filter_excluded=true` 预过滤剔除的 `exclude` 样本不重复触发混杂阻断，若剩余每组有效样本仍 ≥ 2 只则记为 `downweighted`（按有效样本占比降权）；
+仍留在模型中的轻度自动提示（`sample_quality.parquet` 中的 `flag`，不含严重 `exclude` 或人工 `samples.tsv` 标记）不计为不可评估阻断，而是按 0.5 权重折算（可靠性下限 0.25）记为 `downweighted`；
+仅当**未过滤**的严重/人工标记样本在两组间比例相差 ≥ `qc_imbalance`（默认 0.5）时判为 `qc_confounded`，或扣除后有一组少于 2 只时判为 `qc_insufficient`（可靠性均为 0）。
+
+上游规则在整合层的体现：`flux_anchored` 中 `qc_insufficient` / 未过滤严重 `qc_confounded` 使对应层锚点不成立；而在 `reaction_dossier` 分轴评估中，`qc_insufficient` 或 `n < 2` 记为 `insufficient_n`，而已有有效差异统计输出（`log2fc` / `pvalue` / `padj`）的未过滤 `qc_confounded` 比较不再整组抹除为 `qc_blocked`，而是保留真实统计状态（禁用 `equivalent`）、附加 `qc_caution` 标记（与基因级 `foreign_tissue_marker`、单动物 `single_subject_driven` 一并做 `changed` → `suggestive` 软封顶与 `L1` 门控）。
+`omicsweave run` 结束时写出结果包的 `qc/contrast_reliability.parquet`，并在不可评估的差异结果行的 `flags` 中加上状态；整合按当前样本表与保留矩阵重新计算，所以改样本表后只需重跑整合。
 
 审核人员在配置中显式给出的层级因子作为覆盖项，替换可靠性表中该层的数值（不解除不可评估）：
 

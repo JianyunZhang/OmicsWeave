@@ -12,12 +12,14 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
 import yaml
 
 from omicsweave.contract.dataset import read_dataset
+from omicsweave.contract.manifest import read_manifest
 from omicsweave.contract.tables import read_differential, read_enrichment
 from omicsweave.core.migrate import migrate_experiment, write_migration
 from omicsweave.core.project import project_context
@@ -90,7 +92,7 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
         cls.legacy_dir = Path(cfg.output_dir)
 
         write_migration(_quiet(migrate_experiment, EXP, root), root)
-        cls.run_dir, cls.notes = _quiet(run_experiment, EXP, ["metabolomics"], root=root)
+        cls.run_dir, cls.notes = _quiet(run_experiment, EXP, ["metabolomics"], root=root, run_gsea=True)
         tables = cls.run_dir / "omics" / "metabolomics" / "tables"
         cls.differential = read_differential(tables / "differential.parquet")
         cls.enrichment = read_enrichment(tables / "enrichment.parquet")
@@ -213,6 +215,44 @@ class PeakTableInputTest(unittest.TestCase):
         self.assertEqual(sorted(liver.matrix.columns), sorted(f"liver_{m}" for m in animals))
         self.assertEqual(table.loc[table["feature_id"] == "MW0000", "feature_name"].iloc[0], "metabolite_0")
         self.assertTrue(any("7_liver" in n for n in notes))
+
+    def test_run_gsea_defaults_to_false_and_preserves_ora(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            exp_dir = root / "experiments" / EXP
+            exp_dir.mkdir(parents=True)
+            animals = {f"m{i}": ("LFD" if i <= 4 else "HFD") for i in range(1, 9)}
+            columns = [f"liver_{m}" for m in animals]
+            hfd = {f"liver_{m}" for m, g in animals.items() if g == "HFD"}
+            peak_table(columns, hfd, seed=5).to_csv(exp_dir / "peaks.tsv", sep="\t", index=False)
+            (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                               encoding="utf-8")
+            (exp_dir / "experiment.yaml").write_text(yaml.safe_dump({
+                "schema_version": 1, "experiment": {"id": EXP},
+                "design": {"factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"]}},
+                           "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD",
+                                          "denominator": "LFD", "role": "disease_effect"}]},
+                "omics": {"metabolomics": {
+                    "enabled": True,
+                    "input": {"level": "table", "format": "peak_table", "files": [f"experiments/{EXP}/peaks.tsv"]},
+                    "analysis": {"plsda_permutation_num": 5, "derived_features": False},
+                }},
+            }, sort_keys=False), encoding="utf-8")
+            pd.DataFrame({"subject_id": list(animals), "diet": list(animals.values())}).to_csv(
+                exp_dir / "subjects.tsv", sep="\t", index=False)
+            pd.DataFrame([{"sample_id": f"liver_{m}", "subject_id": m, "omics": "metabolomics", "tissue": "liver"}
+                          for m in animals]).to_csv(exp_dir / "samples.tsv", sep="\t", index=False)
+
+            with mock.patch("omicsweave.metabolomics.runner._gsea") as gsea_mock:
+                run_dir, _ = _quiet(run_experiment, EXP, ["metabolomics"],
+                                    steps=["differential", "enrichment"], root=root)
+            gsea_mock.assert_not_called()
+            enr_path = run_dir / "omics" / "metabolomics" / "tables" / "enrichment.parquet"
+            self.assertTrue({"es", "nes", "flags"}.issubset(pd.read_parquet(enr_path).columns))
+            enr = read_enrichment(enr_path)
+            self.assertEqual(set(enr["method"]), {"ora"})
+            self.assertIn("ko00010", set(enr["term_id"]))
+            self.assertFalse(read_manifest(run_dir).parameters["metabolomics"]["analysis"]["run_gsea"])
 
 
 if __name__ == "__main__":

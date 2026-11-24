@@ -40,11 +40,18 @@ class CellStateTest(unittest.TestCase):
             ({"padj": 0.9, "pvalue": 0.6, "log2fc": 0.05, "se": 0.1, "lfc_shrinkage": "apeglm", **n}, "no_evidence"),
             # 没有自由度（样本数）时不做等效判定
             ({"padj": 0.9, "pvalue": 0.6, "log2fc": 0.05, "se": 0.1}, "no_evidence"),
-            ({"padj": 0.001, "pvalue": 0.0001, "log2fc": 2.0, "qc_status": "qc_confounded"}, "qc_blocked"),
+            # 未过滤样本的 qc_confounded 保留统计判定并附加风险说明；无统计量时才记 qc_blocked
+            ({"padj": 0.001, "pvalue": 0.0001, "log2fc": 2.0, "qc_status": "qc_confounded"}, "changed"),
+            ({"qc_status": "qc_confounded"}, "qc_blocked"),
+            # 低样本量（n<2）或 qc_insufficient 统一记为 insufficient_n
+            ({"n_numerator": 1, "n_denominator": 3, "log2fc": 2.0}, "insufficient_n"),
+            ({"padj": 0.001, "pvalue": 0.0001, "log2fc": 2.0, "qc_status": "qc_insufficient"}, "insufficient_n"),
         ]
         for row, expected in cases:
             with self.subTest(row=row):
                 self.assertEqual(_state(row, RULES)[0], expected)
+        _, reason = _state({"padj": 0.001, "pvalue": 0.0001, "log2fc": 2.0, "qc_status": "qc_confounded"}, RULES)
+        self.assertIn("混杂风险", reason)
 
     def test_flux_states(self) -> None:
         self.assertEqual(_mfa_state({"n_numerator": 1, "n_denominator": 2, "identifiability": "bound_pinned"},

@@ -9,7 +9,7 @@
 （旧流程的 ``~batch + condition`` 即其特例）；样本量不足或拟合失败时退回秩和检验，有协变量时不退回，
 不做未校正的检验。样本按计数矩阵的列顺序参与计算，所以同一份计数与旧流程
 （``omicsweave transcriptomics run``）的差异结果逐值一致。
-富集分析（``enrichment`` 步骤）对每个比较做 ORA 与预排序 GSEA（见 :mod:`omicsweave.adapters.enrichment`）：GSEA 的排序指标、参数与默认基因集库与旧流程相同（log2FC × −log10 p，多个库合并检验）；ORA 改为本地计算，背景为该比较中有 p 值的基因，不再把基因列表上传到 Enrichr。基因集库由 ``analysis.gene_sets`` 指定（本地 GMT 或 Enrichr 库名，见 :mod:`omicsweave.core.genesets`）。
+富集分析（``enrichment`` 步骤）默认对每个比较仅运行本地 ORA（背景为该比较中有 p 值的基因，不上传 Enrichr）；预排序 GSEA（``gseapy.prerank``，log2FC × −log10 p，多个库合并检验）由 ``analysis.run_gsea`` 控制（默认 ``false``，可用配置或命令行 ``--gsea`` 开启，见 :mod:`omicsweave.adapters.enrichment`）。基因集库由 ``analysis.gene_sets`` 指定（本地 GMT 或 Enrichr 库名，见 :mod:`omicsweave.core.genesets`）。
 原始层 FASTQ 的质控、修剪与 kallisto 定量在阶段 3 接入。
 
 输入（``omics.transcriptomics.input``）::
@@ -43,9 +43,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows
+from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows, resolve_run_gsea
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, empty_features, write_dataset
-from omicsweave.contract.tables import write_differential, write_enrichment
+from omicsweave.contract.tables import empty_enrichment, write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
@@ -64,7 +64,7 @@ from .rnaseq_pipeline import (
     run_pydeseq2_analysis,
 )
 from .run_wilcoxon_de import run_wilcoxon_analysis
-from .sample_qc import evaluate_sample_quality, resolve_sample_qc_config
+from .sample_qc import SampleQCResult, evaluate_sample_quality, resolve_sample_qc_config
 
 STEPS = ("qc", "differential", "enrichment", "figures")
 # 与旧流程（enrichment/_run.py、gsea/_run.py）使用的 Enrichr 库相同
@@ -216,8 +216,59 @@ def _load_counts(ctx: RunContext, rows: pd.DataFrame,
     return counts.rename(columns=columns), quant, applied_aliases
 
 
+def _flag_foreign_markers(
+    contract: pd.DataFrame,
+    tissue: str,
+    samples: list[str],
+    groups: dict[str, str],
+    contrast,
+    qc_result: SampleQCResult | None,
+) -> pd.DataFrame:
+    """对保留在 DE 中且含轻度跨组织污染标记样本的比较，给方向吻合的异源组织特异基因标上 ``foreign_tissue_marker``。"""
+    if qc_result is None or qc_result.quality.empty or not qc_result.foreign_genes or contract.empty:
+        return contract
+    q = qc_result.quality
+    hit = q[
+        (q["metric"] == "cross_tissue_contamination")
+        & (q["flag"].fillna("").astype(str).str.strip() != "")
+        & (q["tissue"].astype(str) == str(tissue))
+        & (q["sample_id"].astype(str).isin(set(samples)))
+    ]
+    if hit.empty:
+        return contract
+    pos_genes: set[str] = set()
+    neg_genes: set[str] = set()
+    for row in hit.itertuples(index=False):
+        genes = qc_result.foreign_genes.get((str(tissue), str(row.foreign_tissue)), ())
+        if not genes:
+            continue
+        side = groups.get(str(row.sample_id))
+        if side == contrast.numerator:
+            pos_genes.update(genes)
+        elif side == contrast.denominator:
+            neg_genes.update(genes)
+    if not pos_genes and not neg_genes:
+        return contract
+    pos_lower = {g.lower() for g in pos_genes}
+    neg_lower = {g.lower() for g in neg_genes}
+    fids = contract["feature_id"].astype(str)
+    fcs = pd.to_numeric(contract["log2fc"], errors="coerce")
+    hit_pos = (fids.isin(pos_genes) | fids.str.lower().isin(pos_lower)) & fcs.gt(0)
+    hit_neg = (fids.isin(neg_genes) | fids.str.lower().isin(neg_lower)) & fcs.lt(0)
+    mask = (hit_pos | hit_neg).to_numpy()
+    if not mask.any():
+        return contract
+    flags = contract["flags"].fillna("").astype(str) if "flags" in contract.columns else pd.Series("", index=contract.index)
+    joined = [
+        ";".join(p for p in (f, "foreign_tissue_marker") if p)
+        if m and "foreign_tissue_marker" not in f.split(";") else f
+        for f, m in zip(flags, mask)
+    ]
+    return contract.assign(flags=joined)
+
+
 def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
-                  record: OmicsRun) -> list[tuple[object, str, pd.DataFrame, pd.DataFrame]]:
+                  record: OmicsRun, qc_result: SampleQCResult | None = None) -> list[tuple[object, str, pd.DataFrame, pd.DataFrame]]:
     """返回每个比较、每个组织的 (比较, 组织, 原工具结果, 统一差异结果行)。"""
     experiment = ctx.experiment
     design = experiment.config.design
@@ -272,9 +323,10 @@ def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
             designs[f"{contrast.id}/{tissue}"] = f"~{formula}" if "pydeseq2" in set(result["test_method"]) \
                 else str(result["test_method"].iloc[0])
             result.rename_axis("gene").to_csv(details / f"de_{contrast.id}.csv", encoding="utf-8-sig")
-            tables.append((contrast, tissue, result,
-                           de_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
-                                          tissue=tissue)))
+            contract = de_to_contract(result, contrast_id=contrast.id, contrast_role=contrast.role.value,
+                                      tissue=tissue)
+            contract = _flag_foreign_markers(contract, tissue, samples, groups, contrast, qc_result)
+            tables.append((contrast, tissue, result, contract))
     record.parameters["designs"] = designs
     return tables
 
@@ -297,7 +349,15 @@ def run(ctx: RunContext) -> OmicsRun:
         dict(zip(rows["sample_id"].astype(str), rows["qc_flag"].fillna("").astype(str)))
         if "qc_flag" in rows.columns else {}
     )
-    qc_result = evaluate_sample_quality(raw_counts, tissues, qc_cfg, manual_flags=manual_flags)
+    factor_cols = [c for c in ctx.experiment.config.design.factors if c in rows.columns]
+    sample_groups = (
+        {
+            str(r["sample_id"]): "/".join(str(r.get(c, "") or "") for c in factor_cols)
+            for r in rows[["sample_id", *factor_cols]].to_dict("records")
+        }
+        if factor_cols else None
+    )
+    qc_result = evaluate_sample_quality(raw_counts, tissues, qc_cfg, manual_flags=manual_flags, groups=sample_groups)
 
     if ctx.wants("qc") or (qc_cfg.get("enabled", True) and (qc_result.excluded or qc_result.flagged)):
         (out / "qc").mkdir(parents=True, exist_ok=True)
@@ -347,7 +407,7 @@ def run(ctx: RunContext) -> OmicsRun:
         write_dataset(out / "data" / str(tissue), Dataset(matrix, empty_features(matrix.index), meta))
 
     if ctx.wants("differential") or ctx.wants("enrichment"):
-        results = _differential(ctx, counts, rows, record) if counts.shape[1] >= 2 else []
+        results = _differential(ctx, counts, rows, record, qc_result=qc_result) if counts.shape[1] >= 2 else []
         if results:
             write_differential(pd.concat([r[3] for r in results], ignore_index=True),
                                out / "tables" / "differential.parquet")
@@ -370,7 +430,14 @@ def _ranking(result: pd.DataFrame) -> pd.Series:
 
 def _enrichment(ctx: RunContext, results: list, record: OmicsRun) -> None:
     analysis = ctx.experiment.config.omics.transcriptomics.analysis
-    settings = EnrichmentSettings(**{f.name: analysis[f.name] for f in fields(EnrichmentSettings) if f.name in analysis})
+    try:
+        do_gsea = resolve_run_gsea(analysis, override=ctx.run_gsea)
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+    settings = EnrichmentSettings(
+        **{f.name: analysis[f.name] for f in fields(EnrichmentSettings) if f.name in analysis and f.name != "run_gsea"},
+        run_gsea=do_gsea,
+    )
     try:
         libraries, files = load_libraries(ctx.project, list(analysis.get("gene_sets", DEFAULT_GENE_SETS)))
     except GeneSetError as exc:
@@ -381,12 +448,14 @@ def _enrichment(ctx: RunContext, results: list, record: OmicsRun) -> None:
     for contrast, tissue, raw, contract in results:
         keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
                     omics=Omics.TRANSCRIPTOMICS.value)
-        parts += [ora_rows(contract, libraries, settings, **keys),
-                  prerank_rows(_ranking(raw), libraries, settings, **keys)]
+        parts.append(ora_rows(contract, libraries, settings, **keys))
+        if settings.run_gsea:
+            parts.append(prerank_rows(_ranking(raw), libraries, settings, **keys))
     parts = [p for p in parts if not p.empty]
+    enr_path = ctx.omics_dir(Omics.TRANSCRIPTOMICS) / "tables" / "enrichment.parquet"
     if parts:
-        write_enrichment(pd.concat(parts, ignore_index=True),
-                         ctx.omics_dir(Omics.TRANSCRIPTOMICS) / "tables" / "enrichment.parquet")
+        write_enrichment(pd.concat(parts, ignore_index=True), enr_path)
     else:
+        write_enrichment(empty_enrichment(), enr_path)
         record.notes.append("转录组富集分析没有可报告的结果（入选基因或排序基因过少，或基因集与数据的基因名不匹配）")
     record.parameters["enrichment"] = {"gene_sets": list(libraries), **settings.__dict__}

@@ -262,6 +262,48 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("尚未接入", output)
         self.assertFalse((root / "results").exists())
 
+    def test_dry_run_forwards_gsea_flags_and_sparse_ora_resume(self) -> None:
+        code_no, out_no = self.pipeline("--dry-run", "--no-gsea")
+        self.assertEqual(code_no, 0, out_no)
+        self.assertIn(f"omicsweave run --experiment {EXP} --omics all --no-gsea", out_no)
+
+        code_yes, out_yes = self.pipeline("--dry-run", "--gsea")
+        self.assertEqual(code_yes, 0, out_yes)
+        self.assertIn(f"omicsweave run --experiment {EXP} --omics all --gsea", out_yes)
+
+        # 已对 >=2 个非 MFA 组学执行完整 steps="all"，即使关闭 GSEA 后暂无 2 个非空富集表，续跑也不被预检阻断
+        from omicsweave.contract.manifest import RunManifest, write_manifest
+        from omicsweave.core.model import Omics
+        from omicsweave.core.pipeline import _plan
+        from omicsweave.core.run import RunError
+
+        self.assertEqual(self.pipeline()[0], 0)
+        (run_dir,) = self.bundles("omics")
+        manifest = read_manifest(run_dir)
+        self.edit("experiments/" + EXP + "/experiment.yaml",
+                  lambda doc: doc.update(integration={"enabled": True, "modes": ["pathway_convergence", "reversal"]}))
+        project = load_project(self.root)
+
+        # 未包含 enrichment 步骤且无富集表 -> 仍拒绝
+        write_manifest(RunManifest(
+            run_id=manifest.run_id, project_id=manifest.project_id, experiment_id=manifest.experiment_id,
+            created_at=manifest.created_at, command=manifest.command, config_sha256=manifest.config_sha256,
+            omics=[Omics.TRANSCRIPTOMICS, Omics.PROTEOMICS, Omics.MFA],
+            parameters={**manifest.parameters, "steps": ["qc", "differential"]}, files=manifest.files,
+        ), run_dir)
+        with self.assertRaisesRegex(RunError, "富集结果"):
+            _plan(project, [EXP], ["all"], "integrate", run_dir.name, None)
+
+        # 包含 steps="all"（两个非 MFA 组学已尝试富集）-> 放行
+        write_manifest(RunManifest(
+            run_id=manifest.run_id, project_id=manifest.project_id, experiment_id=manifest.experiment_id,
+            created_at=manifest.created_at, command=manifest.command, config_sha256=manifest.config_sha256,
+            omics=[Omics.TRANSCRIPTOMICS, Omics.PROTEOMICS, Omics.MFA],
+            parameters={**manifest.parameters, "steps": "all"}, files=manifest.files,
+        ), run_dir)
+        plans = _plan(project, [EXP], ["all"], "integrate", run_dir.name, None)
+        self.assertEqual(len(plans), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

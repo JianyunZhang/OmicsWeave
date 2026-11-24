@@ -9,7 +9,7 @@
 （``analysis.dp_method: wilcoxon`` 时用旧版秩和检验），协变量取 ``design.covariates`` 与
 ``analysis.design_covariates``。样本按矩阵中的列顺序参与计算，所以同一份报告与旧流程
 （``omicsweave proteomics run``）的结果逐值一致。
-富集分析（``enrichment`` 步骤）：预排序 GSEA 与旧流程相同（按调节 t 排序，每个基因集库分别检验，默认 KEGG_2019_Mouse）；另做按方向的 ORA（本地计算，背景为有 p 值的蛋白，见 :mod:`omicsweave.adapters.enrichment`）。原始 ``.raw`` 的 DIA-NN 搜库、图件与 ssGSEA 暂未接入。
+富集分析（``enrichment`` 步骤）：默认按方向运行本地 ORA（背景为有 p 值的蛋白，见 :mod:`omicsweave.adapters.enrichment`）；预排序 GSEA（按调节 t 排序，每个基因集库分别检验，默认 KEGG_2019_Mouse）由 ``analysis.run_gsea``（兼容旧键 ``run_prerank_gsea``）控制，默认 ``false``，可通过配置或命令行 ``--gsea`` 开启。原始 ``.raw`` 的 DIA-NN 搜库、图件与 ssGSEA 暂未接入。
 
 输入（``omics.proteomics.input``，``format: diann_report``）::
 
@@ -49,9 +49,9 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows
+from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows, prerank_rows, resolve_run_gsea
 from omicsweave.contract.dataset import Dataset, DatasetMeta, ValueType, write_dataset
-from omicsweave.contract.tables import write_differential, write_enrichment
+from omicsweave.contract.tables import empty_enrichment, write_differential, write_enrichment
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.genesets import GeneSetError, load_libraries
 from omicsweave.core.model import Omics
@@ -73,7 +73,8 @@ _DEFAULTS: dict[str, Any] = {
     "pval_cutoff": 0.05, "log2fc_cutoff": 0.58, "fdr_method": "fdr_bh", "dp_method": "limma",
     "min_total_observations": 2, "min_observations_per_group": 2, "imputation_seed": 42,
     "protein_aggregation": "log2_mean", "design_covariates": [],
-    "gene_sets": [DEFAULT_GENE_SETS["kegg"]], "run_prerank_gsea": True, "gsea_ranking_metric": "moderated_t",
+    "gene_sets": [DEFAULT_GENE_SETS["kegg"]], "run_prerank_gsea": False, "run_gsea": False,
+    "gsea_ranking_metric": "moderated_t",
 }
 _AGGREGATIONS = ("log2_mean", "linear_mean")
 _MATRIX_SCALES = ("log2", "linear")
@@ -261,6 +262,12 @@ def run(ctx: RunContext) -> OmicsRun:
     if spec.format not in _LOADERS:
         raise RunError(f"蛋白组输入格式 {spec.format} 尚未接入统一运行（可用 {'、'.join(_LOADERS)}）")
     settings = {**_DEFAULTS, **settings_block.analysis}
+    try:
+        do_gsea = resolve_run_gsea(settings_block.analysis, override=ctx.run_gsea, aliases=("run_prerank_gsea",))
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+    settings["run_gsea"] = do_gsea
+    settings["run_prerank_gsea"] = do_gsea
     if settings["protein_aggregation"] not in _AGGREGATIONS:
         raise RunError(f"protein_aggregation 应为 {' / '.join(_AGGREGATIONS)}")
     fdr_method = normalize_fdr_method(str(settings["fdr_method"]))
@@ -346,9 +353,10 @@ def _enrichment(ctx: RunContext, settings: dict[str, Any], inputs: list, record:
     min_size = int(settings.get("gsea_min_set_size", 10))
     defaults = {"gsea_min_ranked": min_size, "gsea_min_set_size": min_size,
                 "gsea_seed": int(settings.get("imputation_seed", 42)), "gsea_threads": 1,
-                "gsea_joint_libraries": False, "fdr_method": "fdr_bh"}
+                "gsea_joint_libraries": False, "fdr_method": "fdr_bh",
+                "run_gsea": bool(settings["run_gsea"])}
     enrichment = EnrichmentSettings(**{**defaults, **{f.name: settings[f.name] for f in fields(EnrichmentSettings)
-                                                      if f.name in settings}})
+                                                      if f.name in settings and f.name != "run_gsea"}})
     try:
         libraries, files = load_libraries(ctx.project, [str(s) for s in settings["gene_sets"]])
     except GeneSetError as exc:
@@ -362,13 +370,14 @@ def _enrichment(ctx: RunContext, settings: dict[str, Any], inputs: list, record:
         keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
                     omics=Omics.PROTEOMICS.value)
         parts.append(ora_rows(contract, libraries, enrichment, **keys))
-        if settings["run_prerank_gsea"]:
+        if enrichment.run_gsea:
             ranked = build_ranked_list(combined, contrast.id, metric=str(settings["gsea_ranking_metric"]))
             parts.append(prerank_rows(ranked.set_index("Protein")["ranking_score"], libraries, enrichment, **keys))
     parts = [p for p in parts if not p.empty]
+    enr_path = ctx.omics_dir(Omics.PROTEOMICS) / "tables" / "enrichment.parquet"
     if parts:
-        write_enrichment(pd.concat(parts, ignore_index=True),
-                         ctx.omics_dir(Omics.PROTEOMICS) / "tables" / "enrichment.parquet")
+        write_enrichment(pd.concat(parts, ignore_index=True), enr_path)
     else:
+        write_enrichment(empty_enrichment(), enr_path)
         record.notes.append("蛋白组富集分析没有可报告的结果（入选或排序蛋白过少，或基因集与蛋白名不匹配）")
     record.parameters["enrichment"] = {"gene_sets": list(libraries), **enrichment.__dict__}

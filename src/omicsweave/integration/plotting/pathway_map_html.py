@@ -291,12 +291,16 @@ def _svg_status_cell(
             f'stroke-width="{sw_sym:.3f}" stroke-dasharray="{_pt(1.2, unit_in):.3f} {_pt(1.0, unit_in):.3f}"/>'
         )
     elif state in ("insufficient_n", "qc_blocked"):
-        h = cell * 0.23
-        pts = f"{cx:.2f},{cy - h:.2f} {cx - h * 1.02:.2f},{cy + h * 0.82:.2f} {cx + h * 1.02:.2f},{cy + h * 0.82:.2f}"
+        d = cell * 0.21
+        off = cell * 0.09
+        sw_dbl = _pt(0.50, unit_in)
         if draw_bg:
-            parts.append(f'<rect x="{x + 0.02:.2f}" y="{y + 0.02:.2f}" width="{cell - 0.04:.2f}" height="{cell - 0.04:.2f}" fill="{pal.sign_change_bg}"/>')
-        parts.append(f'<polygon points="{pts}" fill="none" stroke="{pal.sign_change_edge}" stroke-width="{sw_sym:.3f}"/>')
-        parts.append(f'<line x1="{cx:.2f}" y1="{cy - h * 0.30:.2f}" x2="{cx:.2f}" y2="{cy + h * 0.26:.2f}" stroke="{pal.sign_change_ink}" stroke-width="{sw_sym:.3f}"/>')
+            parts.append(f'<rect x="{x + 0.02:.2f}" y="{y + 0.02:.2f}" width="{cell - 0.04:.2f}" height="{cell - 0.04:.2f}" fill="{pal.missing_fill}"/>')
+        for dx_off in (-off, off):
+            parts.append(
+                f'<line x1="{cx - d + dx_off:.2f}" y1="{cy + d:.2f}" x2="{cx + d + dx_off:.2f}" y2="{cy - d:.2f}" '
+                f'stroke="{pal.muted}" stroke-width="{sw_dbl:.3f}" stroke-linecap="round"/>'
+            )
     else:  # not_measured / no_knowledge / not_infused
         d = cell * 0.19
         if draw_bg:
@@ -847,12 +851,13 @@ def _build_svg(
                             f'stroke-width="{_pt(0.62 * font_scale, unit_in):.3f}" stroke-dasharray="{_pt(1.5, unit_in):.3f} {_pt(1.2, unit_in):.3f}"/>'
                         )
                     elif state in ("qc_blocked", "insufficient_n"):
-                        r_q = station_r * 0.48
-                        qpts = f"{nx:.2f},{ny - r_q:.2f} {nx + r_q * 0.96:.2f},{ny + r_q * 0.78:.2f} {nx - r_q * 0.96:.2f},{ny + r_q * 0.78:.2f}"
-                        svg.append(
-                            f'<polygon points="{qpts}" fill="{palette.sign_change_bg}" stroke="{palette.sign_change_edge}" stroke-width="{_pt(0.60, unit_in):.3f}"/>'
-                            f'<line x1="{nx:.2f}" y1="{ny - r_q * 0.34:.2f}" x2="{nx:.2f}" y2="{ny + r_q * 0.16:.2f}" stroke="{palette.sign_change_ink}" stroke-width="{_pt(0.55, unit_in):.3f}"/>'
-                        )
+                        d = station_r * 0.38
+                        off = station_r * 0.16
+                        for dx_off in (-off, off):
+                            svg.append(
+                                f'<line x1="{nx - d + dx_off:.2f}" y1="{ny + d:.2f}" x2="{nx + d + dx_off:.2f}" y2="{ny - d:.2f}" '
+                                f'stroke="{palette.muted}" stroke-width="{_pt(0.54 * font_scale, unit_in):.3f}" stroke-linecap="round"/>'
+                            )
                 svg.append(
                     f'<text class="ow-node-lbl" x="{lx:.2f}" y="{ly:.2f}" font-size="{node_lbl_fs:.3f}" '
                     f'font-weight="{700 if sig else 500}" fill="{palette.ink if (sig or measured) else palette.muted}" '

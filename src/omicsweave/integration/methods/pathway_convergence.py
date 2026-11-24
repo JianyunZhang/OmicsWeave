@@ -72,13 +72,16 @@ def rra_probability(rank_fractions: np.ndarray) -> float:
     return float(min(1.0, min(probabilities) * n_values))
 
 
+_FUSION_COLUMNS = [
+    "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
+    "fusion_method", "fused_pvalue", "omics_probabilities", "omics_rank_fractions", "fused_fdr",
+]
+
+
 def fuse_pathway_evidence(evidence_df: pd.DataFrame) -> pd.DataFrame:
     """按（组织, 比较, 通路）融合各组学证据：组学内 Bonferroni，组学间 Fisher；只有排序时用 RRA。"""
     if evidence_df.empty:
-        return pd.DataFrame(columns=[
-            "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
-            "fusion_method", "fused_pvalue", "fused_fdr",
-        ])
+        return pd.DataFrame(columns=_FUSION_COLUMNS)
 
     # comparison 是 estimand 身份的一部分，禁止跨比较池化。
     per_omics_rows: list[dict[str, Any]] = []
@@ -139,10 +142,7 @@ def fuse_pathway_evidence(evidence_df: pd.DataFrame) -> pd.DataFrame:
 
     fused = pd.DataFrame(fused_rows)
     if fused.empty:
-        return pd.DataFrame(columns=[
-            "tissue", "comparison", "pathway_term", "n_omics", "contributing_omics",
-            "fusion_method", "fused_pvalue", "fused_fdr",
-        ])
+        return pd.DataFrame(columns=_FUSION_COLUMNS)
     fused["fused_fdr"] = np.nan
     for _, indices in fused.groupby(["tissue", "comparison"]).groups.items():
         fused.loc[indices, "fused_fdr"] = bh_fdr(

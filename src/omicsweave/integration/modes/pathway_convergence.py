@@ -26,8 +26,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from omicsweave.contract.tables import read_enrichment
-from omicsweave.core.model import IntegrationMode
+from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
+from omicsweave.contract.tables import empty_enrichment, read_enrichment
+from omicsweave.core.model import IntegrationMode, Omics
 from omicsweave.core.run import RunContext, RunError
 from omicsweave.core.tissues import merge_tissue_aliases, remap_table_tissues, validate_tissue_aliases
 
@@ -112,10 +113,20 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         raise RunError(f"integration.parameters.{MODE.value} 中有无法识别的参数：{'、'.join(unknown)}"
                        f"（可用：{'、'.join(DEFAULTS)}）")
     paths = sorted(source.glob("omics/*/tables/enrichment.parquet"))
+    sparse_note: str | None = None
     if len(paths) < 2:
+        src_manifest = read_manifest(source) if (source / MANIFEST_FILE).is_file() else None
+        non_mfa = [o for o in (src_manifest.omics if src_manifest else []) if o != Omics.MFA]
+        steps = src_manifest.parameters.get("steps") if src_manifest else None
+        ran_enr = steps == "all" or (isinstance(steps, list) and "enrichment" in steps)
         found = "、".join(p.parent.parent.name for p in paths) or "没有"
-        raise RunError(f"{MODE.value} 需要至少 2 个组学的富集结果；结果包 {source.name} 中只有：{found}。"
-                       f"请先对启用的组学运行 omicsweave run（含 enrichment 步骤）")
+        if not (ran_enr and len(non_mfa) >= 2):
+            raise RunError(f"{MODE.value} 需要至少 2 个组学的富集结果；结果包 {source.name} 中只有：{found}。"
+                           f"请先对启用的组学运行 omicsweave run（含 enrichment 步骤）")
+        sparse_note = (
+            f"源结果包 {source.name} 中非空富集表不足 2 个组学（当前：{found}；"
+            "默认关闭 GSEA 时若入选差异特征较少可无 ORA 输出），已写出空通路融合表"
+        )
     try:
         tissue_map = validate_tissue_aliases(params["tissue_map"] or {}, f"integration.parameters.{MODE.value}.tissue_map")
         parts = []
@@ -131,7 +142,7 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
             parts.append(part)
     except ValueError as exc:
         raise RunError(str(exc)) from exc
-    enrichment = pd.concat(parts, ignore_index=True)
+    enrichment = pd.concat(parts, ignore_index=True) if parts else empty_enrichment()
 
     evidence = evidence_table(enrichment)
     fusion = fusion_table(evidence)
@@ -147,6 +158,8 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
     if zero.any():
         record.notes.append(f"有 {int(zero.sum())} 条 GSEA 结果的 padj 为 0（结果包早于置换下限 1/(n+1) 的修正），"
                             "相关通路的融合 p 值会趋近 0；请重新运行 omicsweave run 的 enrichment 步骤")
-    if fusion.empty:
+    if sparse_note:
+        record.notes.append(sparse_note)
+    elif fusion.empty:
         record.notes.append("没有在两个及以上组学中同时出现的通路（通路名不同、或富集结果过少）")
     return record

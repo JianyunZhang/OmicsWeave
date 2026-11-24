@@ -16,9 +16,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from omicsweave.adapters.enrichment import EnrichmentSettings, ora_rows
 from omicsweave.adapters.gseapy_results import enrichr_to_contract, prerank_to_contract
 from omicsweave.contract import (
+    ENRICHMENT_COLUMNS,
     ContractError,
+    empty_enrichment,
     read_enrichment,
     validate_differential,
     validate_enrichment,
@@ -189,6 +192,39 @@ class EnrichmentRulesTest(unittest.TestCase):
         table = prerank_to_contract(res2d, tissue="liver", omics="transcriptomics", gene_set_library="L", **CONTRAST)
         self.assertEqual(validate_enrichment(table), [])
         self.assertTrue(any("NES 的符号" in p for p in validate_enrichment(table.assign(effect_direction="down"))))
+
+    def test_enrichment_parquet_always_preserves_full_contract_columns(self) -> None:
+        expected = [c.name for c in ENRICHMENT_COLUMNS]
+        ora_diff = pd.DataFrame({
+            "feature_id": [f"G{i}" for i in range(10)],
+            "selected": [i < 5 for i in range(10)],
+            "log2fc": [2.0] * 10,
+            "pvalue": [0.001] * 10,
+        })
+        ora_df = ora_rows(
+            ora_diff, {"L": {"S": [f"G{i}" for i in range(8)]}},
+            EnrichmentSettings(ora_min_selected=5, ora_min_query=3, ora_min_set_size=5),
+            tissue="liver", omics="transcriptomics", **CONTRAST,
+        )
+        met_ora = ora_to_contract(
+            pd.DataFrame({"ID": ["ko00010"], "Name": ["Glycolysis"], "P-value": [0.01], "FDR": [0.02],
+                          "SigCount": [3], "BgCount": [5]}),
+            tissue="liver", query="all", **CONTRAST,
+        )
+        gsea_df = prerank_to_contract(
+            pd.DataFrame({"Term": ["S"], "ES": [0.4], "NES": [1.5], "NOM p-val": [0.01], "FDR q-val": [0.1]}),
+            tissue="liver", omics="transcriptomics", gene_set_library="L", **CONTRAST,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            for label, df in (("empty", empty_enrichment()), ("enrichr", self._base()),
+                              ("ora_rows", ora_df), ("met_ora", met_ora), ("prerank", gsea_df)):
+                with self.subTest(label):
+                    out = write_enrichment(df, Path(tmp) / f"{label}.parquet")
+                    raw = pd.read_parquet(out)
+                    self.assertEqual(list(raw.columns), expected)
+                    self.assertTrue(pd.api.types.is_numeric_dtype(raw["es"]))
+                    self.assertTrue(pd.api.types.is_numeric_dtype(raw["nes"]))
+                    self.assertEqual(validate_enrichment(read_enrichment(out)), [])
 
 
 if __name__ == "__main__":

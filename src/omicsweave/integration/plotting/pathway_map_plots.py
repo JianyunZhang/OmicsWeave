@@ -1330,14 +1330,13 @@ def _draw_unmeasured_node_marker(
             lw=0.62 * font_scale, linestyle=(0, (1.5, 1.2)), zorder=zorder,
         ))
     elif state in ("qc_blocked", "insufficient_n"):
-        r = radius * 0.48
-        verts = [(x, y - r), (x + r * 0.96, y + r * 0.78), (x - r * 0.96, y + r * 0.78)]
-        ax.add_patch(Polygon(
-            verts, closed=True, facecolor=palette.sign_change_bg,
-            edgecolor=palette.sign_change_edge, lw=0.60 * font_scale, zorder=zorder,
-        ))
-        ax.add_line(Line2D([x, x], [y - r * 0.34, y + r * 0.16], color=palette.sign_change_ink, lw=0.55 * font_scale, zorder=zorder + 0.03))
-        ax.add_patch(Circle((x, y + r * 0.44), r * 0.10, facecolor=palette.sign_change_ink, edgecolor="none", zorder=zorder + 0.03))
+        d = radius * 0.38
+        off = radius * 0.16
+        for dx_off in (-off, off):
+            ax.add_line(Line2D(
+                [x - d + dx_off, x + d + dx_off], [y + d, y - d],
+                color=palette.muted, lw=0.54 * font_scale, solid_capstyle="round", zorder=zorder,
+            ))
     elif state in ("not_measured", "no_knowledge"):
         d = radius * 0.44
         ax.add_line(Line2D([x - d, x + d], [y + d, y - d], color=palette.missing_hatch, lw=0.58, zorder=zorder))
@@ -1957,7 +1956,7 @@ def _legend_atlas(
         ("not_measured", "Not measured"),
         ("not_identifiable", "Unident. flux"),
         ("not_detected", "Not detected"),
-        ("qc_blocked", "QC / Low-n"),
+        ("qc_blocked", "Low-n (n<2)"),
     ):
         draw_status_cell(ax, ix, ry2 - sw / 2, sw, st, 0, palette=palette, font_scale=1.1, zorder=2.5, draw_box=True)
         ax.text(ix + sw + 0.40, ry2, desc, fontsize=3.50, color=palette.ink2, va="center")
@@ -2189,7 +2188,7 @@ def _pub_legend_plan(
         ]
     a_pos, a_rows = _flow_rows([w for _, _, w in a_items], inner_w, gap=2.2)
 
-    # Row-group B: 4 Omics Layer Icons + Real Colored Cell State Swatches (Solid ▲▼, Hollow △▽, Mixed, —, /, ⊘, ◌, ⚠)
+    # Row-group B: 4 Omics Layer Icons + Real Colored Cell State Swatches (Solid ▲▼, Hollow △▽, Mixed, —, /, ⊘, ◌, //)
     layer_defs = (
         (("flux", "Flux"), ("protein", "Protein"), ("mrna", "mRNA"), ("metabolite", "Metab"))
         if strip_mode == "omics" else
@@ -2207,7 +2206,7 @@ def _pub_legend_plan(
         ("cell_na", "Not measured", sw + 0.50 + _text_width("Not measured", fs, unit=unit_in)),
         ("cell_unident", "Unident. flux", sw + 0.50 + _text_width("Unident. flux", fs, unit=unit_in)),
         ("cell_nodet", "Not detected", sw + 0.50 + _text_width("Not detected", fs, unit=unit_in)),
-        ("cell_qc", "QC / Low-n", sw + 0.50 + _text_width("QC / Low-n", fs, unit=unit_in)),
+        ("cell_qc", "Low-n (n<2)", sw + 0.50 + _text_width("Low-n (n<2)", fs, unit=unit_in)),
     ])
     b_pos, b_rows = _flow_rows([w for _, _, w in b_items], inner_w, gap=1.8)
 

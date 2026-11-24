@@ -529,6 +529,28 @@ class AssessTest(unittest.TestCase):
         self.assertEqual(ax_open.state, "suggestive")
         self.assertIn("flux_scale_drift", ax_open.flags)
 
+    def test_foreign_tissue_marker_and_qc_caution_soft_cap_capacity_and_block_l1(self) -> None:
+        single_rna_rules = {**RULES, "rna_single_source_changed": True}
+        for flag in ("foreign_tissue_marker", "qc_caution"):
+            with self.subTest(flag=flag):
+                rna = frame(changed(1.8, layer="transcriptomics", flags=flag))
+                ax_c = capacity_axis(rna, single_rna_rules, ["A"])
+                self.assertEqual((ax_c.state, ax_c.direction), ("suggestive", 1))
+                self.assertIn(flag, ax_c.flags)
+                dec = decide(Axis("flux", "not_measured"), ax_c,
+                             Axis("regulation", "no_knowledge"), Axis("pool", "not_measured"), single_rna_rules)
+                self.assertEqual(dec["flux_claim"], "L0")
+                self.assertIn(flag, dec["phenomena"])
+
+        # 若同时存在未标记的干净主要同工酶，则不被单个外源标记误降级
+        mixed_clean = frame(
+            changed(1.5, layer="transcriptomics", member_id="CleanIso", abundance_share=0.6, flags=""),
+            changed(2.2, layer="transcriptomics", member_id="ForeignIso", abundance_share=0.4, flags="foreign_tissue_marker"),
+        )
+        ax_clean = capacity_axis(mixed_clean, single_rna_rules, ["A"])
+        self.assertEqual((ax_clean.state, ax_clean.direction), ("changed", 1))
+        self.assertNotIn("foreign_tissue_marker", ax_clean.flags)
+
 
 if __name__ == "__main__":
     unittest.main()

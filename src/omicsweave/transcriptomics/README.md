@@ -22,7 +22,7 @@ input: {level: table, format: kallisto, files: [experiments/<id>/quant], tx2gene
 数据中的样本名即 `sample_id`，不同时在 samples.tsv 的 `data_column` 列写出。差异表达沿用本模块的 PyDESeq2（apeGLM 收缩）与秩和检验，
 设计为 `~[协变量 +] condition`；同一份计数与旧流程的结果逐值一致。
 
-富集（`enrichment`）：预排序 GSEA 与旧流程相同（log2FC × −log10 p，默认 6 个 Enrichr 库合并检验），结果逐值一致；ORA 改为本地计算，上调、下调基因分别检验，背景为有 p 值的基因，不再把基因列表上传到 Enrichr。基因集库用 `analysis.gene_sets` 指定，可写本地 GMT 路径或 Enrichr 库名；按库名时首次下载后缓存在项目的 `references/gene_sets/` 下。
+富集（`enrichment`）：默认仅执行本地 Fisher ORA（上调、下调基因分别检验，背景为有 p 值的基因，不上传 Enrichr）；预排序 GSEA（log2FC × −log10 p，默认 6 个 Enrichr 库合并检验）由 `analysis.run_gsea` 控制，默认 `false`（关闭以消除 ~76%–94% 的置换耗时），可通过配置 `analysis.run_gsea: true` 或命令行 `--gsea` 开启并获得与旧流程逐值一致的结果。基因集库用 `analysis.gene_sets` 指定，可写本地 GMT 路径或 Enrichr 库名；按库名时首次下载后缓存在项目的 `references/gene_sets/` 下。
 
 FASTQ 的质控、修剪与 kallisto 定量（阶段 3）、图件与多批次联合模型，暂时仍用下文的旧流程。结果写入结果包的 `omics/transcriptomics/`，可用 `omicsweave export` 导出为 Excel。
 

@@ -1,7 +1,7 @@
 # OmicsWeave 通用多组学分析与评估能力：从 DIO 案例提炼的改进规划
 
 > 文档类型：调研 + 设计建议
-> 版本：v0.5（2026-11-23，增加 11.8：G1 通用转录组 / MFA 样本质检、边界贴边强化与评估规则硬化，更新 11.6 状态）；v0.4（2026-11-18，增加 11.7：G10 中不依赖新数据的部分；11.6 记下组学结果包早于批次 2）；v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
+> 版本：v0.7（2026-11-24，增加 11.10：预排序 GSEA 双层开关与 `run_gsea: false` 默认关闭优化）；v0.6（2026-11-24，增加 11.9：G1 / G2 / G18 转录组样本质控双重惩罚修正、分级风险标注、统计保留与通路图去感叹号降噪）；v0.5（2026-11-23，增加 11.8：G1 通用转录组 / MFA 样本质检、边界贴边强化与评估规则硬化，更新 11.6 状态）；v0.4（2026-11-18，增加 11.7：G10 中不依赖新数据的部分；11.6 记下组学结果包早于批次 2）；v0.3（2026-11-17，增加 11.6 未完成事项，删除文末误贴的对话文字；同日随反应档案 S1–S5 更新 11.6 与第 12 节；v0.2 为 2026-11-15，增加第 11 节实施记录；v0.1 为 2026-11-14）
 > 依据：两个 DIO 队列在 2026-11-03 至 11-13 的分析与映射修复（阶段 0–3，提交 `75f0bb8` 至 `d72b2c7`），以及课题工作区中的评估记录
 > （`examples/dio_project/analysis/focus_targets/INTEGRATION_ASSESSMENT.md`、`midterm_report/midterm_key_pathways.md`，未纳入版本库；
 > 2026-11-18 起两个课题目录在 `local/projects/` 下）
@@ -531,6 +531,68 @@ G10 的 MID 部分不具备条件。以下三项只用到拟合结果，先行�
 | MFA 尺度漂移 QC（队列 B & A） | 队列 B `3W_vs_1W` 产出 76 个 L2 通量声明 | 队列 B 精准标出 `Mazdu_3W_vs_1W_in_HFD`（`+0.410/+0.174`）与 `Saline_3W_vs_1W_in_HFD`（`+0.342/+0.167`）为 `flux_scale_drift`（L2/L3 降为 **0**），其余 7 个同周期比较全干净；队列 A 8 项中仅标出 `lactate HFD_vs_LFD`（`+1.358/+0.217`），其余 7 项干净 |
 
 验证：新增 `tests/transcriptomics/test_sample_qc.py` 与 `tests/mfa/test_mfa_sample_qc.py`，并扩展 `tests/mfa/test_flux_identifiability_bounds.py`、`tests/integration/test_dossier_assessment.py`、`tests/integration/test_reaction_members.py`、`tests/integration/test_isozyme_decoys.py`；14 个核心测试套件零回归通过。
+
+### 11.9 G1 / G2 / G18 转录组样本质控双重惩罚修正、分级风险标注与通路图降噪（2026-11-24）
+
+#### 问题背景与实测影响
+
+对两个独立课题结果包的只读核查发现，11.8 引入自动质检与过滤后，上游差异分析与整合可靠性之间存在评价口径错位，导致大量具备强统计显著性的转录组比较被整组抹除为 `qc_blocked`，并在通路图全部反应卡片上反复绘制琥珀色感叹号（`⚠`），严重干扰整体生物学判读：
+
+1. **剔除后双重惩罚（`core/reliability.py`）**：转录组已启用 `filter_excluded: true` 在 PyDESeq2 建模前移除 `exclude` 样本，但 `contrast_reliability()` 仍按全量 `samples.tsv` 分组计数计算 `flagged_num` / `flagged_den`，导致已洁净建模的比较（每组均 ≥ 2 只）再次因“原始设计两组标记率不均”被判 `qc_confounded` 封杀。
+2. **轻度提示按严重污染同等封杀**：任何未达 `exclude` 的自动提示（`flag`）与人工剔除等价扣除 `usable` 并触发 `qc_confounded`，例如某单侧样本出现极轻微异源组织痕量表达，整个组织成百上千个完全不相关的代谢基因全部丧失评估资格。
+3. **`mtRNA` 双侧误标与全池高变基因相关性混淆**：`sample_qc.py` 原先对 `mitochondrial_fraction` 做双侧 `abs(rz)` 判定，把线粒体占比偏低的正常样本（如队列 B `heart m80`，mtRNA `6.5%` 对同组织中位数 `36%`）误判 `flag`；同时 `var_pairwise_corr` 与 `joint_degradation` 在计算全组织中位相关性时未参考实验分组 `design.factors`，将强处理效应导致的组间分化误判为 `flag`（如队列 A `liver` / `kidney` HFD 对 LFD）。
+4. **“阻断即抹除”覆盖真实统计，且通路图遍布 `⚠` 噪声**：`reaction_dossier.py` 对 `qc_confounded` 不区分是否存在有效 `log2fc` / `padj` 一律强制覆写为 `qc_blocked`（清空 `implied_direction` 并禁止参考）；`primitives.py`、`pathway_map_plots.py`、`pathway_map_html.py` 与 `dossier_plots.py` 对每个 `qc_blocked` 卡片均绘制高对比度琥珀色 `⚠`，淹没通量与蛋白层主信号。
+
+受上述过严门控影响的真实显著差异转录组比较（只读统计结果包，仅列 `padj < 0.05` 且 `|log2FC| >= 0.58` 的显著 DEG 数）：
+
+| 队列结果包（只读） | 受阻比较 | 建模样本数 | 显著 DEG 数 | 原触发原因 |
+|---|---|--:|--:|---|
+| 队列 A（`run_20261124_155042_tracer-views`） | `liver HFD_vs_LFD` | 3v2 | 2,740 | LFD `m65` 已被 PyDESeq2 剔除（4v3 → 3v2）仍遭双重惩罚 |
+| 队列 A | `liver HSD_vs_LFD` | 3v2 | 1,111 | 同上（已剔除样本导致原始组间标记率失衡） |
+| 队列 A | `kidney HFD_vs_LFD` | 3v3 | 2,319 | 强 HFD 处理效应拉低全池 `var_pairwise_corr` 触发软 `flag` |
+| 队列 B（`run_20261123_124248`） | `liver Mazdu_vs_Sema_in_HFD_3W` | 2v3 | 3,915 | `m125` 已被剔除仍触发双重惩罚（部分组兼有 `mt_flag`） |
+| 队列 B | `heart Sema_vs_Saline_in_LFD_3W` | 3v2 | 1,830 | `heart m80` mtRNA 偏低（6.5%）被双侧 `abs(rz)` 误标 + 已剔除混杂 |
+| 队列 B | `heart Mazdu_vs_Saline_in_LFD_3W` | 2v2 | 1,257 | `heart m80` 低 mtRNA 误标与组间相关性误标 |
+| 队列 B | `heart Saline_in_HFD_vs_LFD_3W` | 3v2 | 581 | 同上（已剔除后可用样本 ≥ 2 只仍被整组阻断） |
+| 队列 B | `liver Sema_vs_Saline_in_HFD_3W` | 3v4 | 146 | 痕量异源标记 / 轻度 `flag` 导致整层归零 |
+| 队列 B | `sq_adipose Mazdu_vs_Saline_in_LFD_3W` | 2v2 | 95 | 已剔除肌组织混入样本 `m83/m84` 后仍遭双重惩罚 |
+
+#### 四层通用改进实施
+
+| 层次与编号 | 模块与实现 | 配置项 / 契约变更 |
+|---|---|---|
+| **G2 剔除后双重惩罚修复与软硬标记分级** | `core/reliability.py`：新增 `analyzed_sample_sets(run_dir)` 读取 `omics/*/data/*/matrix.parquet` 实际参与差异分析的保留样本列；`contrast_reliability(..., *, analyzed_samples=None)` 与 `build_reliability()` 将样本标记细分为三类：<br>1. **已预过滤样本**（`pre_filtered`：在 `hard_set` 中但已不在保留矩阵中）：不参与当前比较的 `qc_confounded` 失衡判定，扣除后每组仍 ≥ 2 只时记 `status = "downweighted"`；<br>2. **未过滤严重/人工标记**（`unfiltered_hard`：`flag == "exclude"` 或 `samples.tsv` 人工指定且仍留在分析矩阵中）：继续严格执行 `qc_confounded`（比例差 ≥ `imbalance`）与 `qc_insufficient`（扣除后任一组 < 2 只）；<br>3. **轻度自动提示**（`soft`：仅来自自动 `sample_quality.parquet` 且 `flag != "exclude"`）：永不单独触发 `qc_confounded` 或 `qc_insufficient`，按每个软标记样本 `0.5` 权重温和折算 `reliability`（下限 `0.25`） | 自动推断（零项目硬编码）；`qc/contrast_reliability.parquet` 口径保持兼容 |
+| **G1 转录组样本 QC 校准与异源基因级隔离** | 1. `transcriptomics/sample_qc.py`：`DEFAULT_SAMPLE_QC_CONFIG` 新增 `"mt_flag_low": False`，默认仅对同组织偏高 mtRNA（衰老/裂解/空泡）告警；`evaluate_sample_quality(..., groups=None)` 计算同组织**同实验组**生物学重复间中位相关 `r_within`，当 `r_within >= var_corr_flag_min` 时抑制跨组分化引起的 `var_pairwise_corr` 与 `joint_degradation` 软标；`SampleQCResult` 新增 `foreign_genes`（来自 `_derive_pair_marker_sets()`）；<br>2. `transcriptomics/runner.py`：由 `ctx.experiment.config.design.factors` 构建 `sample_groups` 传入 `evaluate_sample_quality()`；新增 `_flag_foreign_markers()`，当差异比较仍保留带 `cross_tissue_contamination` 轻度标记的样本时，对与混入组织均值同向且显著/名义变化的异源特异基因，在 `differential.parquet` 的 `flags` 中精准追加基因级 `"foreign_tissue_marker"`（不影响同样本内其余洁净代谢基因） | `omics.transcriptomics.analysis.sample_qc.mt_flag_low`（默认 `false`）；差异表 `flags` 新增 `foreign_tissue_marker` |
+| **G18 统计状态保留与分级风险软封顶** | 1. `integration/modes/reaction_dossier.py`：`_state()` 将样本不足（`n < 2` 或 `qc_insufficient`）独立归为 `"insufficient_n"`；若行存在未过滤 `qc_confounded` 风险但已有有效差异统计（`padj` / `pvalue` / `log2fc`），保留真实统计状态（`changed` / `nominal` / `no_evidence`，禁用 `equivalent`）并在 `state_reason` 附注“含未过滤样本 QC 混杂风险”，`_finish()` 为其追加 `"qc_caution"`；<br>2. `integration/dossier/assessment.py`：定义统一风险标记 `_CAUTION_FLAGS = ("single_subject_driven", "foreign_tissue_marker", "qc_caution")` 与 `_LAYER_QC_CAUTION = ("foreign_tissue_marker", "qc_caution")`；新增 `_caution_info()` 与 `_cap_if_cautioned()`，在 `_judge_members()`、`regulation_axis()`、`pool_axis()` 中当支撑 `changed` 的成员均带风险标记时软封顶为 `suggestive` 并保留对应 `flags`；`decide()` 禁止单靠含 `_CAUTION_FLAGS` 的 C 轴证据升为 `L1`，并将 `foreign_tissue_marker`、`qc_caution` 写入 `phenomena` | 成员表 `cell_state` 新增/解耦 `insufficient_n`；`flags` / `phenomena` 新增 `qc_caution`、`foreign_tissue_marker` |
+| **通路图与档案图去感叹号降噪** | `visualization/primitives.py`、`integration/plotting/pathway_map_plots.py`、`pathway_map_html.py`、`dossier_plots.py`：彻底移除针对 `qc_blocked` / `insufficient_n` 的反应卡片级、四轴小条、聚合方框与交互 HTML 琥珀色感叹号三角（`⚠`），统一改用低对比度浅灰底色（`missing_fill`）配合中性双斜杠 `//`（图例标签统一为 `Low-n (n<2)`；刻意避开 HTML 逐只动物散点图已使用的贴边空心菱形 `◇`）；`integration/pathway_map.py` 新增 `_qc_disclosure()`，在每页图注首行集中附带单处纯英文/ASCII 比较级汇总（`Sample QC: RNA XvY usable of AvB (status)`） | 视觉编码升级（图面零感叹号噪声，兼容英文出版字体与 ASCII 校验） |
+
+验证：扩展 `tests/core/test_reliability.py`、`tests/transcriptomics/test_sample_qc.py`、`tests/integration/test_reaction_dossier.py`、`tests/integration/test_dossier_assessment.py`、`tests/visualization/test_primitives.py`，并与 `tests/integration/test_pathway_map.py`、`tests/core/test_config_consumers.py`、`tests/integration/test_candidates.py`、`tests/integration/test_reversal.py` 共 9 个单元测试套件联合运行，**93 项测试全部通过（OK）**。
+
+### 11.10 G9 / 工程性能：预排序 GSEA 双层开关与默认关闭优化（2026-11-24）
+
+#### 耗时特征与依赖核查
+
+对两个课题正式结果包文件落盘时间戳的只读核查表明，基于全排序特征列表与 `1000` 次随机置换的预排序 GSEA（`gseapy.prerank`）占据了全流程绝大部分运行时间，而核心多组学评估与通路图主体绘制均不依赖它：
+
+| 课题与运行包（只读） | 全流程 `run + integrate` 耗时 | 转录组 PyDESeq2 差异分析 | 转录组富集（ORA + GSEA） | **转录组 GSEA 占全流程比重** |
+|---|--:|--:|--:|--:|
+| `dio_glp1ra_project`（`run_20261123_124248`，30 个比较） | 170 分 10 秒 | 3 分 12 秒 | 159 分 13 秒 | **93.6%** |
+| `dio_project`（`run_20261123_124459`，10 个有效比较） | 28 分 41 秒 | 1 分 13 秒 | 21 分 56 秒 | **76.5%** |
+
+- **核心评估与通路总图零依赖**：`reaction_dossier`（F/C/R/M 四轴判定、`L0–L3/LX`、节点分流比、有向模块旋转检验、候选表）及通路图主画布（反应边、四格微条、代谢物节点、分专题子图、Graphical Abstract）只读 `differential.parquet` 与样本矩阵，不读取 `enrichment.parquet`。
+- **探索性融合可由本地 ORA 支撑**：唯一读取 `enrichment.parquet` 的 `pathway_convergence`（及总图 `atlas` 模式右侧栏 `Fusion FDR` 提示）由本地 Fisher ORA 与预排序 GSEA 共同供数；保留毫秒级本地 ORA 并默认关闭预排序 GSEA，可将数小时运行压缩至数分钟。
+
+#### 双层开关设计与实现
+
+| 层级 | 模块与实现 | 默认值与契约说明 |
+|---|---|---|
+| **统一富集适配器** | `adapters/enrichment.py`：`EnrichmentSettings` 新增 `run_gsea: bool = False`；新增 `resolve_run_gsea(analysis, *, override=None, aliases=(), default=False)` 校验严格布尔类型并按 `命令行覆盖 > analysis.run_gsea > 兼容别名 > default` 解析 | 默认 `false`（关闭置换 GSEA、保留本地 ORA）；非布尔值报 `RunError` |
+| **三大组学运行器** | 1. `transcriptomics/runner.py`：`_enrichment()` 解析 `resolve_run_gsea(analysis, override=ctx.run_gsea)`，仅当 `settings.run_gsea` 为真时调用 `prerank_rows()`；<br>2. `proteomics/runner.py`：`_DEFAULTS` 将 `"run_prerank_gsea"` 与 `"run_gsea"` 默认设为 `False`，`resolve_run_gsea(..., aliases=("run_prerank_gsea",))` 兼容旧配置键名；<br>3. `metabolomics/experiment_config.py` + `metabolomics/runner.py`：`MetabolomicsConfig` 新增 `run_gsea: bool = False`，仅开启时调用 `_gsea()` | 三大组学统一默认 `run_gsea: false`；`omics.proteomics.analysis.run_prerank_gsea` 向后兼容 |
+| **运行框架、流水线与 CLI** | `core/run.py`：`RunContext`、`start_run()`、`run_experiment()` 新增 `run_gsea: bool | None = None` 并写入 `manifest.parameters["run_gsea"]`；<br>`core/pipeline.py`：`run_pipeline()` 透传 `run_gsea`并在日志命令附加 `--gsea`/`--no-gsea`，`_plan()` 在旧单组学结果包已包含 `enrichment` 步骤时允许零/单表续跑；<br>`cli.py`：`omicsweave run` 与 `omicsweave pipeline` 新增互斥开关 `--gsea` / `--no-gsea` | 命令行显式开关优先级高于 `experiment.yaml` 配置 |
+| **通路融合优雅降级** | `integration/modes/pathway_convergence.py`：当源结果包中已有 $\ge 2$ 个非 MFA 组学执行了 `enrichment` 步骤、仅因关闭 GSEA 且无显著 ORA 命中使非空 `enrichment.parquet` 少于 2 份时，不抛错阻断流程，而是写出空 `pathway_fusion.parquet` / `pathway_overlaps.parquet` 并附加运行提示；未满足组学数或跳过 `enrichment` 步骤仍严格报 `RunError` | 保障 `pathway_convergence + reaction_dossier` 联合流水线在零 ORA 命中下平滑完结 |
+| **契约表完整列保障** | 1. `contract/tables.py` 与 `contract/__init__.py`：新增 `empty_enrichment()` 与 `_complete_enrichment_columns()`，在 `write_enrichment()` / `read_enrichment()` 时自动补齐全部 23 个 `ENRICHMENT_COLUMNS`（纯 ORA 模式下仍稳定具备 `es`、`nes`、`flags`，纯 GSEA 具备 `query_size`、`universe_size`、`odds_ratio`）；<br>2. `adapters/enrichment.py`、`adapters/gseapy_results.py`、`metabolomics/export.py`：各转换器直接输出完整列；三大运行器执行 `enrichment` 步骤但无显著条目时均落盘 0 行标准契约表；<br>3. `integration/methods/pathway_convergence.py`：`fuse_pathway_evidence()` 空融合结果表固定输出含 `omics_probabilities`、`omics_rank_fractions` 的完整 10 列 | 彻底消除关闭 GSEA 后下游课题脚本（如 `export_key_results.py`）直读 Parquet 时因缺列/缺表触发的 `KeyError` / `FileNotFoundError` |
+
+验证：在 `tests/transcriptomics/test_transcriptomics_runner.py`、`tests/proteomics/test_proteomics_runner.py`、`tests/metabolomics/test_metabolomics_runner.py`、`tests/integration/test_integrate.py`、`tests/core/test_pipeline.py`、`tests/core/test_tissue_aliases.py`、`tests/core/test_config_consumers.py` 7 套件通过（59 项 `OK`）基础上，补充 `tests/contract/test_result_tables.py` 全列结构契约验证并联合 `tests/contract/test_query_diff.py` 等 7 个套件回归，**58 项测试全部通过（OK）**。
 
 ---
 

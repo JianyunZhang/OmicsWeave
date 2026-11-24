@@ -64,9 +64,13 @@ def enrichr_to_contract(results: pd.DataFrame, *, contrast_id: str, contrast_rol
         "overlap_size": overlap,
         "set_size": set_size,
         "query_size": pd.array([query_size] * len(results), dtype="Int64"),
+        "universe_size": pd.Series(pd.NA, index=results.index, dtype="Int64"),
         "odds_ratio": pd.to_numeric(_optional(results, "Odds Ratio", np.nan), errors="coerce"),
+        "es": np.nan,
+        "nes": np.nan,
         "hit_features": _optional(results, "Genes", "").fillna("").astype(str),
         "tool": "gseapy.enrichr",
+        "flags": "",
     })
 
 
@@ -117,6 +121,9 @@ def prerank_to_contract(res2d: pd.DataFrame, *, contrast_id: str, contrast_role:
         "effect_direction": np.select([nes > 0, nes < 0], ["up", "down"], "none"),
         "overlap_size": overlap,
         "set_size": set_size,
+        "query_size": pd.Series(pd.NA, index=res2d.index, dtype="Int64"),
+        "universe_size": pd.Series(pd.NA, index=res2d.index, dtype="Int64"),
+        "odds_ratio": np.nan,
         "es": pd.to_numeric(res2d["ES"], errors="coerce"),
         "nes": nes,
         "hit_features": _optional(res2d, "Lead_genes", "").fillna("").astype(str),

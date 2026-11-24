@@ -69,6 +69,8 @@ class RunContext:
     run_dir: Path
     # None 表示运行该组学的全部步骤
     steps: tuple[str, ...] | None = None
+    # None 表示按各组学配置（默认 False）决定是否运行预排序 GSEA
+    run_gsea: bool | None = None
 
     def omics_dir(self, omics: Omics) -> Path:
         return self.run_dir / "omics" / omics.value
@@ -185,7 +187,8 @@ def load_validated(experiment_id: str, root: str | Path | Project | None = None)
 
 
 def start_run(project: Project, experiment: Experiment, run_id: str | None = None,
-              steps: list[str] | None = None, *, into_existing: bool = False) -> RunContext:
+              steps: list[str] | None = None, *, into_existing: bool = False,
+              run_gsea: bool | None = None) -> RunContext:
     """新建结果包目录并写出 metadata/。"""
     base = project.path("results") / experiment.id
     if run_id is None:
@@ -200,7 +203,7 @@ def start_run(project: Project, experiment: Experiment, run_id: str | None = Non
                 raise RunError(f"{run_dir} 已存在")
         elif run_dir.exists():
             raise RunError(f"{run_dir} 已存在")
-    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None)
+    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None, run_gsea=run_gsea)
     _write_metadata(ctx)
     return ctx
 
@@ -230,7 +233,7 @@ def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], param
 def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
                    steps: list[str] | None = None, root: str | Path | Project | None = None,
                    command: list[str] | None = None, run_id: str | None = None,
-                   *, into_existing: bool = False) -> tuple[Path, list[str]]:
+                   *, into_existing: bool = False, run_gsea: bool | None = None) -> tuple[Path, list[str]]:
     """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
     project, experiment = load_validated(experiment_id, root)
     chosen, notes = select_omics(experiment, list(omics))
@@ -244,7 +247,7 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
             raise RunError(f"{FIGURES} 步骤根据本次运行写出的差异结果表绘图，请与 differential 一起指定，"
                            f"如 --steps differential,{FIGURES}")
 
-    ctx = start_run(project, experiment, run_id, steps, into_existing=into_existing)
+    ctx = start_run(project, experiment, run_id, steps, into_existing=into_existing, run_gsea=run_gsea)
     runs: list[OmicsRun] = []
     for o in chosen:
         func, _ = runners[o]
@@ -266,6 +269,8 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
         from omicsweave.stats.post import postprocess
         notes += postprocess(experiment, ctx.run_dir)
 
-    finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command,
-               parameters={"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}})
+    parameters: dict[str, Any] = {"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}}
+    if run_gsea is not None:
+        parameters["run_gsea"] = run_gsea
+    finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command, parameters=parameters)
     return ctx.run_dir, notes + [n for r in runs for n in r.notes]

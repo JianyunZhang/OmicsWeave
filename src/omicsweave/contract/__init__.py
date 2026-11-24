@@ -20,6 +20,7 @@ from .manifest import (
 from .tables import (
     DIFFERENTIAL_COLUMNS,
     ENRICHMENT_COLUMNS,
+    empty_enrichment,
     read_differential,
     read_enrichment,
     validate_differential,
@@ -48,6 +49,7 @@ __all__ = [
     "RunManifest",
     "ValueType",
     "allocate_run_dir",
+    "empty_enrichment",
     "empty_features",
     "export_json_schema",
     "file_record",

@@ -270,6 +270,29 @@ def effect_standard_errors(table: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     return se, pd.Series(source, index=table.index)
 
 
+def empty_enrichment() -> pd.DataFrame:
+    """按 ``ENRICHMENT_COLUMNS`` 生成结构完整、带契约类型的 0 行富集结果表。"""
+    dtypes = {"float": "float64", "int": "Int64", "bool": "bool", "str": "object"}
+    return pd.DataFrame({c.name: pd.Series(dtype=dtypes[c.kind]) for c in ENRICHMENT_COLUMNS})
+
+
+def _complete_enrichment_columns(table: pd.DataFrame) -> pd.DataFrame:
+    """补齐富集表缺失的可选 ``ENRICHMENT_COLUMNS``（如纯 ORA 行缺 ``es``/``nes``/``flags``），保持类型完整。"""
+    out = table.copy()
+    for column in ENRICHMENT_COLUMNS:
+        if column.required or column.name in out.columns:
+            continue
+        if column.kind == "float":
+            out[column.name] = pd.Series(np.nan, index=out.index, dtype="float64")
+        elif column.kind == "int":
+            out[column.name] = pd.Series(pd.NA, index=out.index, dtype="Int64")
+        elif column.kind == "bool":
+            out[column.name] = pd.Series(False, index=out.index, dtype="bool")
+        else:
+            out[column.name] = pd.Series("", index=out.index, dtype="object")
+    return out
+
+
 def write_differential(table: pd.DataFrame, path: str | Path) -> Path:
     return _write(table, path, DIFFERENTIAL_COLUMNS, validate_differential)
 
@@ -279,8 +302,8 @@ def read_differential(path: str | Path) -> pd.DataFrame:
 
 
 def write_enrichment(table: pd.DataFrame, path: str | Path) -> Path:
-    return _write(table, path, ENRICHMENT_COLUMNS, validate_enrichment)
+    return _write(_complete_enrichment_columns(table), path, ENRICHMENT_COLUMNS, validate_enrichment)
 
 
 def read_enrichment(path: str | Path) -> pd.DataFrame:
-    return _read(path, validate_enrichment)
+    return _complete_enrichment_columns(_read(path, validate_enrichment))

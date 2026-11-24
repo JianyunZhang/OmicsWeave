@@ -188,6 +188,10 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
         else:
             differential = {Omics(p.parent.parent.name) for p in bundle.glob("omics/*/tables/differential.parquet")}
             enrichment = {Omics(p.parent.parent.name) for p in bundle.glob("omics/*/tables/enrichment.parquet")}
+            bundle_manifest = read_manifest(bundle)
+            bundle_steps = bundle_manifest.parameters.get("steps")
+            if bundle_steps == ALL or (isinstance(bundle_steps, list) and "enrichment" in bundle_steps):
+                enrichment |= {o for o in bundle_manifest.omics if o != Omics.MFA}
             # 沿用的单组学结果包须与当前数据、样本表和分析设置一致；只改 integration 一节或整合输入（如 panels）不影响它
             stale = _changed_inputs(
                 project, bundle,
@@ -267,7 +271,7 @@ def _run_script(project: Project, exp_id: str, script: Script, tokens: list[str]
 def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], start: str,
                     dry_run: bool, command: list[str] | None, log: Callable[[str], None],
                     warnings: list[str], *, tag: str | None = None, pin: bool = False,
-                    retention: RetentionPolicy | None = None) -> PipelineResult:
+                    retention: RetentionPolicy | None = None, run_gsea: bool | None = None) -> PipelineResult:
     from omicsweave.integration.integrate import integrate_experiment
 
     exp_id = plan.experiment.id
@@ -304,11 +308,12 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
             if plan.source:
                 step(current, f"沿用结果包 {plan.source.name}")
             else:
-                step(current, f"omicsweave run --experiment {exp_id} --omics {','.join(omics)}")
+                gsea_flag = " --gsea" if run_gsea is True else (" --no-gsea" if run_gsea is False else "")
+                step(current, f"omicsweave run --experiment {exp_id} --omics {','.join(omics)}{gsea_flag}")
                 if delivery:
                     result.run_dir, notes = run_experiment(
                         exp_id, omics, root=project, command=command,
-                        run_id=delivery.directory.name, into_existing=True,
+                        run_id=delivery.directory.name, into_existing=True, run_gsea=run_gsea,
                     )
                     for note in notes:
                         log(f"[提示] {note}")
@@ -403,7 +408,7 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
                  omics: list[str] | None = None, *, start: str = "run", source: str | None = None,
                  results_dir: str | Path | None = None, integration_run: str | None = None,
                  tag: str | None = None, pin: bool = False,
-                 retention: RetentionPolicy | None = None,
+                 retention: RetentionPolicy | None = None, run_gsea: bool | None = None,
                  dry_run: bool = False, command: list[str] | None = None,
                  log: Callable[[str], None] = _log) -> list[PipelineResult]:
     """运行标准流程，返回每个实验的产出。
@@ -454,7 +459,7 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
                         if issue.where in ("项目", f"实验 {plan.experiment.id}")]
             results.append(_run_experiment(
                 project, plan, omics or [ALL], start, dry_run, command, log, warnings,
-                tag=tag, pin=pin, retention=effective_retention,
+                tag=tag, pin=pin, retention=effective_retention, run_gsea=run_gsea,
             ))
         except RunError as exc:
             done = "、".join(r.experiment for r in results)

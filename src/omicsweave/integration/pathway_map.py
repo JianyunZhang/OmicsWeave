@@ -147,6 +147,32 @@ def resolve_layout(value: str, root: Path | None) -> Layout:
     return load_layout(path)
 
 
+_QC_LAYER_NAMES = {"transcriptomics": "RNA", "proteomics": "Protein", "metabolomics": "Metab", "mfa": "MFA"}
+
+
+def _qc_disclosure(reliability: pd.DataFrame | None, tissue: str, contrast_id: str, source: str) -> str:
+    """图注中的精简比较级 QC 摘要（纯英文/ASCII，替代全图卡片级重复感叹号）。"""
+    if reliability is None or reliability.empty:
+        return ""
+    sub = reliability[
+        (reliability["tissue"].astype(str) == str(tissue))
+        & (reliability["contrast_id"].astype(str) == str(contrast_id))
+        & (reliability["status"].astype(str) != "ok")
+    ]
+    if "source" in sub.columns and source and (reliability["source"].astype(str) == str(source)).any():
+        sub = sub[sub["source"].astype(str) == str(source)]
+    if sub.empty:
+        return ""
+    items = []
+    for r in sub.sort_values("omics").itertuples(index=False):
+        lbl = _QC_LAYER_NAMES.get(str(r.omics), str(r.omics))
+        items.append(
+            f"{lbl} {int(r.n_usable_numerator)}v{int(r.n_usable_denominator)}"
+            f" usable of {int(r.n_numerator)}v{int(r.n_denominator)} ({r.status})"
+        )
+    return f"  |  Sample QC: {'; '.join(items)}" if items else ""
+
+
 def _sample_sizes(rows: pd.DataFrame) -> str:
     parts = []
     names = {"transcriptomics": "RNA", "proteomics": "Protein", "metabolomics": "Metabolite"}
@@ -237,6 +263,8 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
                           + (f" 等 {len(problems)} 处" if len(problems) > 8 else ""))
     fusion = _fusion(dossier_dir)
     pathway_tests = _pathway_tests(dossier_dir)
+    rel_path = dossier_dir / "qc" / "contrast_reliability.parquet"
+    reliability = pd.read_parquet(rel_path) if rel_path.is_file() else None
     coverage = coverage_table(layout, members, assessed["flux_id"].unique())
     pairs = assessed[["tissue", "contrast_id"]].drop_duplicates().sort_values(["tissue", "contrast_id"])
     if conf["tissues"]:
@@ -267,8 +295,9 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
         n_l23 = int(claims.get("L2", 0)) + int(claims.get("L3", 0))
         n_indep = _independent_flux_chains(view)
         indep_note = f" ({n_indep} indep. chains)" if (n_l23 > 0 and n_indep < n_l23) else ""
+        qc_note = _qc_disclosure(reliability, row.tissue, row.contrast_id, source)
         caption = [
-            f"Run: {run_text}  |  Sample sizes (num vs den): {_sample_sizes(here)}",
+            f"Run: {run_text}  |  Sample sizes (num vs den): {_sample_sizes(here)}{qc_note}",
             (cal.caption(calibration, row.tissue, row.contrast_id) or "Calibration: not available")
             + f"  |  On-map claims: Multi-tracer={claims.get('L3', 0)}, Flux={claims.get('L2', 0)}{indep_note}, Enz-pred={claims.get('L1', 0)}"
             + "  (Enz-pred = enzyme-only; verify against decoy baseline before citing).",

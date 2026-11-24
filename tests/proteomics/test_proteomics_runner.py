@@ -13,12 +13,14 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
 import yaml
 
 from omicsweave.contract.dataset import read_dataset
+from omicsweave.contract.manifest import read_manifest
 from omicsweave.contract.tables import read_differential, read_enrichment
 from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
@@ -314,6 +316,49 @@ class MatrixInputTest(unittest.TestCase):
         self.assertEqual(to_uniprot, {"Alb": "P07724", "P01942": "P01942"})
         self.assertTrue(any("1 行没有特征名" in n for n in notes))
         self.assertTrue(any("重复" in n for n in notes))
+
+
+class ProteomicsRunGseaDefaultTest(unittest.TestCase):
+    def test_run_gsea_defaults_to_false_and_keeps_ora(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            exp_dir = root / "experiments" / EXP
+            exp_dir.mkdir(parents=True)
+            animals = {f"m{i}": ("LFD" if i <= 3 else "HFD") for i in range(1, 7)}
+            runs = {_run_name("liver", str(i)): (g, "b1") for i, g in enumerate(animals.values(), start=1)}
+            diann_report(runs, seed=9).to_csv(exp_dir / "report.tsv", sep="\t", index=False)
+            gmt = write_protein_sets(root / "protein_sets.gmt")
+            (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                               encoding="utf-8")
+            (exp_dir / "experiment.yaml").write_text(yaml.safe_dump({
+                "schema_version": 1, "experiment": {"id": EXP},
+                "design": {"factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"]}},
+                           "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD",
+                                          "denominator": "LFD", "role": "disease_effect"}]},
+                "omics": {"proteomics": {
+                    "enabled": True,
+                    "input": {"level": "table", "format": "diann_report", "files": [f"experiments/{EXP}/report.tsv"]},
+                    "analysis": {"gene_sets": [str(gmt)]},
+                }},
+            }, sort_keys=False), encoding="utf-8")
+            pd.DataFrame({"subject_id": list(animals), "diet": list(animals.values())}).to_csv(
+                exp_dir / "subjects.tsv", sep="\t", index=False)
+            pd.DataFrame([{"sample_id": f"liver_{m}", "subject_id": m, "omics": "proteomics", "tissue": "liver",
+                           "data_column": f"Liver{i}"} for i, m in enumerate(animals, start=1)]).to_csv(
+                exp_dir / "samples.tsv", sep="\t", index=False)
+
+            with mock.patch("gseapy.prerank") as prerank_mock:
+                run_dir, _ = _quiet(run_experiment, EXP, ["proteomics"],
+                                    steps=["differential", "enrichment"], root=root)
+            prerank_mock.assert_not_called()
+            enr_path = run_dir / "omics" / "proteomics" / "tables" / "enrichment.parquet"
+            self.assertTrue({"es", "nes", "flags"}.issubset(pd.read_parquet(enr_path).columns))
+            enr = read_enrichment(enr_path)
+            self.assertEqual(set(enr["method"]), {"ora"})
+            self.assertIn("UP_SET", set(enr["term_name"]))
+            params = read_manifest(run_dir).parameters["proteomics"]
+            self.assertFalse(params["analysis"]["run_gsea"])
+            self.assertFalse(params["enrichment"]["run_gsea"])
 
 
 if __name__ == "__main__":

@@ -65,12 +65,12 @@ _SPECIAL_DATA_STATES = frozenset({
     "not_detected", "no_knowledge", "qc_blocked",
 })
 # 兼容保留字典导出名，视觉渲染统一使用 primitives 纯矢量状态图标
-GLYPHS = {"equivalent": "—", "not_identifiable": "⊘", "insufficient_n": "⚠", "not_measured": "/",
-          "not_infused": "/", "not_detected": "◌", "no_knowledge": "/", "qc_blocked": "⚠"}
+GLYPHS = {"equivalent": "—", "not_identifiable": "⊘", "insufficient_n": "//", "not_measured": "/",
+          "not_infused": "/", "not_detected": "◌", "no_knowledge": "/", "qc_blocked": "//"}
 BLOCK_TITLES = {"flux": "FLUX by tracer", "enzyme": "ENZYME", "regulator": "REGULATOR", "pool": "POOL",
                 "assessment": "ASSESSMENT"}
-AXIS_GLYPHS = {"unchanged": "—", "mixed": "≠", "undetermined": "╌", "not_identifiable": "⊘", "insufficient_n": "⚠",
-               "not_detected": "◌", "not_measured": "/", "qc_blocked": "⚠", "no_knowledge": "/"}
+AXIS_GLYPHS = {"unchanged": "—", "mixed": "≠", "undetermined": "╌", "not_identifiable": "⊘", "insufficient_n": "//",
+               "not_detected": "◌", "not_measured": "/", "qc_blocked": "//", "no_knowledge": "/"}
 IDENTIFIABILITY = dict(IDENTIFIABILITY_COLORS)
 _HEADER_LAYER_ICONS = {"P": "protein", "R": "mrna", "M": "metabolite"}
 _ASSESSMENT_COL_ICONS = {"F": "flux", "C": "protein", "R": "regulation", "M": "metabolite"}
@@ -364,7 +364,7 @@ def _matrix_legend(
         ((("not_measured", 0),), "Not measured"),
         ((("not_identifiable", 0),), "Unident. flux"),
         ((("not_detected", 0),), "Not detected"),
-        ((("qc_blocked", 0),), "QC / Low-n"),
+        ((("qc_blocked", 0),), "Low-n (n<2)"),
     ):
         item_w = len(st_pair) * (sw + 0.035) + 0.04 + estimate_text_width(desc, 6.0, 1.0) + 0.18
         if x > 0.05 and x + item_w > lw_in:
@@ -682,7 +682,7 @@ def plot_dossier_page(rows: pd.DataFrame, samples: pd.DataFrame, sides: pd.DataF
 # ---------------------------------------------------------------------------
 
 SPLIT_LAYER_NAMES = {"mfa": "flux", "proteomics": "enzyme P", "transcriptomics": "enzyme R", "metabolomics": "metabolite"}
-SPLIT_STATES = {"not_identifiable": "⊘", "insufficient_n": "⚠", "not_measured": "/", "not_detected": "◌",
+SPLIT_STATES = {"not_identifiable": "⊘", "insufficient_n": "//", "not_measured": "/", "not_detected": "◌",
                 "same_members": "—"}
 
 

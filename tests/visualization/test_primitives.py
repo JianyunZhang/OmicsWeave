@@ -160,6 +160,20 @@ class PrimitivesTest(unittest.TestCase):
         plt.close(fig_u)
         plt.close(fig_d)
 
+    def test_low_n_and_qc_render_neutral_double_slash_without_amber_alert(self) -> None:
+        from matplotlib.colors import to_rgba
+
+        pal = get_palette("nature_editorial")
+        for st in ("insufficient_n", "qc_blocked"):
+            with self.subTest(state=st):
+                fig, ax = plt.subplots()
+                draw_status_cell(ax, 0.0, 0.0, 1.0, st, 0, palette=pal)
+                self.assertEqual(len(ax.lines), 2)
+                self.assertTrue(all(ln.get_color() == pal.muted for ln in ax.lines))
+                self.assertEqual(len(ax.patches), 1)
+                self.assertEqual(ax.patches[0].get_facecolor(), to_rgba(pal.missing_fill))
+                plt.close(fig)
+
 
 if __name__ == "__main__":
     unittest.main()

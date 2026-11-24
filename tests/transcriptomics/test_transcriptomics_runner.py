@@ -22,7 +22,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from omicsweave import cli
 from omicsweave.contract.dataset import read_dataset
+from omicsweave.contract.manifest import read_manifest
 from omicsweave.contract.tables import read_differential, read_enrichment
 from omicsweave.core.genesets import write_gmt
 from omicsweave.core.migrate import migrate_experiment, write_migration
@@ -134,7 +136,8 @@ class MigratedRunMatchesLegacyTest(unittest.TestCase):
             run_experiment(EXP, ["transcriptomics"], root=root)
         except RunError as exc:
             cls.raw_error = str(exc)
-        _set_input(root, {"level": "table", "format": "counts_matrix", "files": [COUNTS]}, gene_sets=[str(cls.gmt)])
+        _set_input(root, {"level": "table", "format": "counts_matrix", "files": [COUNTS]},
+                   gene_sets=[str(cls.gmt)], run_gsea=True)
         cls.run_dir, cls.notes = _quiet(run_experiment, EXP, ["transcriptomics"], root=root)
         tables = cls.run_dir / "omics" / "transcriptomics" / "tables"
         cls.table = read_differential(tables / "differential.parquet")
@@ -331,6 +334,104 @@ class PyDESeq2DependencyGuardTest(unittest.TestCase):
                 report = validate_project(root)
             self.assertTrue(report.ok)
             self.assertTrue(any("pydeseq2" in issue.message for issue in report.warnings))
+
+
+@unittest.skipIf(pydeseq2 is None, "pydeseq2 not installed")
+class TranscriptomicsRunGseaSwitchTest(unittest.TestCase):
+    def _build_project(self, root: Path, *, analysis: dict | None = None) -> Path:
+        exp_dir = root / "experiments" / EXP
+        (exp_dir / "data").mkdir(parents=True, exist_ok=True)
+        samples = [f"liver_m{i}" for i in range(1, 9)]
+        hfd = {f"liver_m{i}" for i in range(5, 9)}
+        gene_counts(samples, hfd, set(), seed=13, n_genes=200).to_csv(exp_dir / "data" / "counts.csv")
+        gmt = write_gene_sets(root / "gene_sets.gmt")
+        (root / "project.yaml").write_text("schema_version: 1\nproject: {id: p, species: mus_musculus}\n",
+                                           encoding="utf-8")
+        tx_analysis = {"gene_sets": [str(gmt)], "gsea_permutation_num": 10, **(analysis or {})}
+        (exp_dir / "experiment.yaml").write_text(yaml.safe_dump({
+            "schema_version": 1, "experiment": {"id": EXP},
+            "design": {
+                "factors": {"diet": {"level": "subject", "levels": ["LFD", "HFD"]}},
+                "contrasts": [{"id": "HFD_vs_LFD", "factor": "diet", "numerator": "HFD", "denominator": "LFD"}],
+            },
+            "omics": {"transcriptomics": {
+                "enabled": True,
+                "input": {"level": "table", "format": "counts_matrix", "files": [f"experiments/{EXP}/data/counts.csv"]},
+                "analysis": tx_analysis,
+            }},
+        }, sort_keys=False), encoding="utf-8")
+        pd.DataFrame({"subject_id": [f"m{i}" for i in range(1, 9)], "diet": ["LFD"] * 4 + ["HFD"] * 4}).to_csv(
+            exp_dir / "subjects.tsv", sep="\t", index=False
+        )
+        pd.DataFrame({"sample_id": samples, "subject_id": [f"m{i}" for i in range(1, 9)],
+                      "omics": "transcriptomics", "tissue": "liver"}).to_csv(
+            exp_dir / "samples.tsv", sep="\t", index=False
+        )
+        return exp_dir
+
+    def _run_cli(self, root: Path, *extra: str) -> Path:
+        out = io.StringIO()
+        argv = ["--project-dir", str(root), "run", "--experiment", EXP, "--omics", "transcriptomics",
+                "--steps", "differential,enrichment", *extra]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            with self.assertRaises(SystemExit) as exc:
+                cli.main(argv)
+        self.assertEqual(exc.exception.code, 0, out.getvalue())
+        return Path(out.getvalue().strip().splitlines()[-1].split("：", 1)[1])
+
+    def test_run_gsea_defaults_to_false_and_preserves_ora(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_project(root)
+            with mock.patch("gseapy.prerank") as prerank_mock:
+                run_dir, _ = _quiet(run_experiment, EXP, ["transcriptomics"],
+                                    steps=["differential", "enrichment"], root=root)
+            prerank_mock.assert_not_called()
+            enr_path = run_dir / "omics" / "transcriptomics" / "tables" / "enrichment.parquet"
+            raw_enr = pd.read_parquet(enr_path)
+            self.assertTrue({"es", "nes", "flags"}.issubset(raw_enr.columns))
+            enr = read_enrichment(enr_path)
+            self.assertEqual(set(enr["method"]), {"ora"})
+            self.assertIn("DE_SET", set(enr["term_name"]))
+            self.assertFalse(read_manifest(run_dir).parameters["transcriptomics"]["enrichment"]["run_gsea"])
+
+    def test_zero_ora_hits_still_writes_empty_contract_enrichment_parquet(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_project(root, analysis={"ora_min_selected": 100000})
+            run_dir, notes = _quiet(run_experiment, EXP, ["transcriptomics"],
+                                    steps=["differential", "enrichment"], root=root)
+            enr_path = run_dir / "omics" / "transcriptomics" / "tables" / "enrichment.parquet"
+            self.assertTrue(enr_path.is_file())
+            raw_enr = pd.read_parquet(enr_path)
+            self.assertTrue(raw_enr.empty)
+            self.assertTrue({"es", "nes", "flags"}.issubset(raw_enr.columns))
+            self.assertEqual(read_enrichment(enr_path).shape[0], 0)
+            self.assertTrue(any("没有可报告的结果" in n for n in notes))
+
+    def test_cli_gsea_no_gsea_overrides_and_invalid_type(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp).resolve()
+            self._build_project(root)
+            # 配置默认关闭，CLI --gsea 可临时开启
+            run_on = self._run_cli(root, "--gsea")
+            enr_on = read_enrichment(run_on / "omics" / "transcriptomics" / "tables" / "enrichment.parquet")
+            self.assertEqual(set(enr_on["method"]), {"ora", "gsea_prerank"})
+            self.assertTrue(read_manifest(run_on).parameters["run_gsea"])
+
+            # 配置显式开启 run_gsea: true，CLI --no-gsea 可强制跳过
+            self._build_project(root, analysis={"run_gsea": True})
+            with mock.patch("gseapy.prerank") as prerank_mock:
+                run_off = self._run_cli(root, "--no-gsea")
+            prerank_mock.assert_not_called()
+            enr_off = read_enrichment(run_off / "omics" / "transcriptomics" / "tables" / "enrichment.parquet")
+            self.assertEqual(set(enr_off["method"]), {"ora"})
+            self.assertFalse(read_manifest(run_off).parameters["run_gsea"])
+
+            # 非布尔值应报 RunError
+            self._build_project(root, analysis={"run_gsea": "yes"})
+            with self.assertRaisesRegex(RunError, "布尔值"):
+                _quiet(run_experiment, EXP, ["transcriptomics"], steps=["differential", "enrichment"], root=root)
 
 
 if __name__ == "__main__":

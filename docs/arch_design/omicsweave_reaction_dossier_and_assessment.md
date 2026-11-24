@@ -1,7 +1,7 @@
 # OmicsWeave 反应档案与分轴综合评估：通路层面的完整展示与不做加和的评估方案
 
 > 文档类型：设计建议（S0–S5 已实施，S6 待实施；S4 的组别置换待 E1，S5 的标记层待 G10）
-> 版本：v0.11（2026-11-23，8.1 增加评估规则硬化记录：`not_assessable` 反应门控、`pathway_step` 与 `active_abundance_share`、MFA 单组贴边与 `flux_scale_drift_gate`）；v0.10（2026-11-19，图 E 改为整张网络的分组织总图，设计移到[独立文档](omicsweave_pathway_map.md)，见 4.4 与第 9 节）；v0.9（2026-11-18，C 轴增加规则开关 `rna_single_source_changed`，单示踪剂实验的通量按示踪剂列出，见 3.4、第 7 节与 8.1）；v0.8（2026-11-18，8.1 增加 G10 部分接入的记录：F 轴方向按净通量变化定号、标准化尺度的异质性、逐只动物的拟合分布）；v0.7（2026-11-17，8.1 增加 S5 记录，第 6 节写出 S5 新增的列；v0.6 同日增加 S4 记录、校准表的列与对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
+> 版本：v0.12（2026-11-24，3.4/3.5/4.1 与 8.1 补充 `insufficient_n` 解耦、`qc_caution` 与 `foreign_tissue_marker` 风险软封顶、保留有统计输出格子的展示）；v0.11（2026-11-23，8.1 增加评估规则硬化记录：`not_assessable` 反应门控、`pathway_step` 与 `active_abundance_share`、MFA 单组贴边与 `flux_scale_drift_gate`）；v0.10（2026-11-19，图 E 改为整张网络的分组织总图，设计移到[独立文档](omicsweave_pathway_map.md)，见 4.4 与第 9 节）；v0.9（2026-11-18，C 轴增加规则开关 `rna_single_source_changed`，单示踪剂实验的通量按示踪剂列出，见 3.4、第 7 节与 8.1）；v0.8（2026-11-18，8.1 增加 G10 部分接入的记录：F 轴方向按净通量变化定号、标准化尺度的异质性、逐只动物的拟合分布）；v0.7（2026-11-17，8.1 增加 S5 记录，第 6 节写出 S5 新增的列；v0.6 同日增加 S4 记录、校准表的列与对照集的格式；v0.5、v0.4、v0.3、v0.2 同日分别增加 S3、S2、S1 记录与 8.1；v0.1 为 2026-11-16）
 > 依据：对队列 A 结果包（组学 `run_20261112_102147_5d76`、整合 `run_20261115_010915_d97b`）与队列 B 结果包
 > （`run_20261112_113117_1269`）的只读核查；课题工作区中的 `midterm_report/midterm_key_pathways.md` 与
 > `focus_targets/INTEGRATION_ASSESSMENT.md`（未纳入版本库）
@@ -131,12 +131,12 @@
 
 | 状态 | 条件 |
 |---|---|
-| `changed` | 蛋白：按丰度加权的变化（G7）方向明确，主要成员通过 FDR，且不是只由次要同工酶驱动。没有蛋白数据时：RNA 在两个队列复现（G6），标记 `rna_only`。规则 `rna_single_source_changed` 打开时，只有一个来源测到 RNA 的反应在该来源中通过 FDR 即可，另标 `rna_single_source`、不算复现（供没有蛋白组、也没有第二个队列的项目，见 8.1） |
-| `suggestive` | 只有名义 p，或只有单个队列的 RNA |
-| `unchanged` | 等效性检验通过（界限默认为 log2 倍数变化 ±0.58） |
+| `changed` | 蛋白：按丰度加权的变化（G7）方向明确，主要成员通过 FDR，且不是只由次要同工酶驱动。没有蛋白数据时：RNA 在两个队列复现（G6），标记 `rna_only`。规则 `rna_single_source_changed` 打开时，只有一个来源测到 RNA 的反应在该来源中通过 FDR 即可，另标 `rna_single_source`、不算复现（供没有蛋白组、也没有第二个队列的项目，见 8.1）。若支撑判定的成员全部带有风险警示标记（`single_subject_driven`、`foreign_tissue_marker`、`qc_caution`），则软封顶降级为 `suggestive` 并保留对应 `flags` |
+| `suggestive` | 只有名义 p，只有单个队列的 RNA，或支撑 `changed` 的成员全部带有风险警示标记（软封顶） |
+| `unchanged` | 等效性检验通过（界限默认为 log2 倍数变化 ±0.58）；含未过滤 `qc_confounded` 风险时不判等效 |
 | `mixed` | 主要成员方向相反。记为“同工酶转换”，不求和 |
 | `undetermined` | 测到，但既不能判为变化，也不能判为等效 |
-| `not_detected` / `not_measured` / `qc_blocked` | 映射了但数据中没有；该层没有数据；该层被 QC 判为不可评估（G2） |
+| `not_detected` / `not_measured` / `insufficient_n` / `qc_blocked` | 映射了但数据中没有；该层没有数据；该层有效样本不足（某组 `n < 2` 或 `qc_insufficient`）；被 QC 阻断且无统计输出（G2） |
 
 复合体（如 PDH 的 PDHA1、PDHB、DLAT）按整体判断：已定量的核心亚基中至少一半同向，且至少一个通过 FDR。多个复合体共用的亚基（如 DLD）不参与方向判断。
 RNA 与蛋白不一致时，C 轴取蛋白的结论，并标记 `rna_protein_discordant`，两者都展示。
@@ -157,7 +157,7 @@ M 轴单独不能给出通量方向；它的用途是在通量方向已知或假
 |:--:|---|---|
 | L3 已证实 | F 轴为 `established` | “通量上升 / 下降” |
 | L2 有提示 | F 轴为 `suggestive` | “示踪数据提示上升 / 下降，待重复” |
-| L1 预测 | F 轴无法判断；C 轴为 `changed` 且稳健（通过 FDR 或跨队列复现，不是由单只动物驱动，未被 QC 阻断）；M 轴与 R 轴没有相反的指向 | “酶容量上调，预测通量上升；可由某示踪剂或读数检验” |
+| L1 预测 | F 轴无法判断；C 轴为 `changed` 且稳健（通过 FDR 或跨队列复现，不是由单只动物、`foreign_tissue_marker` 异源组织混入或未过滤 `qc_caution` 混杂风险单独驱动）；M 轴与 R 轴没有相反的指向 | “酶容量上调，预测通量上升；可由某示踪剂或读数检验” |
 | L0 未定 | 其余情况，包括 C 轴与 M 轴或 R 轴指向相反 | 只描述各轴的现象 |
 | LX 矛盾 | F 轴为 `conflicting` | “示踪剂之间不一致”，先查模型与稳态 |
 
@@ -173,7 +173,7 @@ L1 另记同向的非通量轴数（1–3）和能检验它的示踪剂（取自
 | 拮抗（代偿） | ρ_h < 0，即酶量变化与通量变化方向相反 | 酶量的变化在抵消通量的变化 [2] |
 | 未解析 | C 轴未定 | |
 
-L1 及以下不给机制类型，只记现象标签（如 `capacity_up`、`isozyme_switch`、`regulator_inhibitory_up`、`step_restrained`、`capacity_pool_opposed`）。
+L1 及以下不给机制类型，只记现象标签（如 `capacity_up`、`isozyme_switch`、`regulator_inhibitory_up`、`step_restrained`、`capacity_pool_opposed`、`foreign_tissue_marker`、`qc_caution`）。
 
 与加和总分相比，这张表有两点不同：酶量与通量方向相反不再降低“可信度”，而是归入一种机制；没有通量证据的反应最高只到 L1，不会因为组学层热闹而排到前面。
 
@@ -262,10 +262,11 @@ L1 及以下不给机制类型，只记现象标签（如 `capacity_up`、`isozy
 | `equivalent` | 等效性检验通过，可以说“未改变” |
 | `not_detected` | 知识表中有该成员，该层有数据，但数据中没有这个特征 |
 | `not_measured` | 该来源、该组织没有这一层数据 |
-| `qc_blocked` | 该层在此组织 × 比较上被 QC 判为不可评估 |
+| `insufficient_n` | 有效样本不足（任一组 `n < 2` 或 `qc_insufficient`）；图面统一绘制为浅灰底配中性双斜杠 `//`（`Low-n (n<2)`） |
+| `qc_blocked` | 该层在此组织 × 比较上被 QC 阻断且无有效统计输出；若仍留在差异模型中的 `qc_confounded` 比较已产出差异统计量，则不再抹除格子，而是保留 `changed` / `nominal` / `no_evidence`（禁用 `equivalent`）并附 `qc_caution` 标记供软封顶 |
 | `no_knowledge` | 知识表中这个角色没有成员 |
 
-通量的格子另有 `not_infused`（没有输注该示踪剂）、`insufficient_n`、`not_identifiable`。
+通量的格子另有 `not_infused`（没有输注该示踪剂）、`not_identifiable`。
 
 ### 4.2 图 A：通路证据矩阵
 
@@ -694,6 +695,11 @@ Mazdu_vs_Saline_in_HFD 腓肠肌 11 对 4.7、肝脏 14 对 11.3、肾皮质 22 
 | `not_assessable` 反应硬门控 | `assessment.decide(..., semantics=...)` 与 `assess()` 对 `direction_evidence == "not_assessable"`（如 `BIOMASS_REACTION_*`、`Salvage_c`）强制锁为 `L0`、`claim_direction = 0`、`phenomena = "not_assessable_reaction"` | 虚拟反应非 L0 格数由 **23 降为 0** |
 | `pathway_step` 与 `active_abundance_share` | `reaction_members` 新增 `pathway_step` 关系（覆及 `THERMOGENESIS_UCP`、`FA_esterification_c`、`HMGCR`、`BILE_acid`、`ETHER_LIPID`，并将 `Ucp2`/`Ucp3` 移入 `related_isozymes`）；`dossier_members.parquet` 新增 `active_abundance_share` 列；`_judge_members()` 豁免 `pathway_step` 的同工酶丰度压制，普通同工酶采用活跃条件占比并支持无主要同工酶反向时的多成员合计占比放行 | `sq_adipose THERMOGENESIS_UCP`（4 比较）与 `liver FA_esterification_c`（3 比较）均由 `L0 (minor_isozyme_driven)` 恢复为 `L1`；全表 `minor_isozyme_driven` 由 316 降至 240，真诱饵仍受保护 |
 | MFA 单组贴边与 `flux_scale_drift_gate` | 规则新增 `rules.flux_scale_drift_gate`（默认 `true`，`reaction_dossier._parameters` 校验布尔值）：MFA 差异表带 `flux_scale_drift` 时 F 轴降级为 `undetermined` 并在 `phenomena` 中明示；配合 MFA 2% 上界相对容差与按组贴边核查（`contrast_bound_pinned`），消除跨批次通量尺度漂移与单组撞顶假阳性 | `3W_vs_1W` 两个跨时长比较的 L2/L3 通量声明由 **76 降为 0**；`liver G6Pase_c [Mazdu_3W_vs_1W]` 因 3W 组 `2/3` 撞顶升级 `bound_pinned` 降为 `L0` |
+
+**转录组样本 QC 双重惩罚修正与分级风险软封顶（2026-11-24）**：针对 G1 自动质检后仍对已剔除或轻度标记比较全量抹除为 `qc_blocked` 并在通路图铺满感叹号的问题，同步调整可靠性计算与档案评估逻辑（完整分析见[通用能力规划](omicsweave_generic_capabilities_and_evaluation.md) 11.9）：
+
+- **剔除后双重惩罚解除与 `insufficient_n` 解耦**：`reaction_dossier._state()` 将样本不足（某组 `n < 2` 或 `qc_insufficient`）独立记为 `insufficient_n`；对已剔除异常样本且剩余样本充足（`core/reliability.py` 按 `matrix.parquet` 核定为 `downweighted`）的比较正常进入评估，不再触发 `qc_blocked`。
+- **统计保留 + `qc_caution` / `foreign_tissue_marker` 软封顶**：若某比较仍包含未过滤的 `qc_confounded` 混杂风险但已有有效差异统计输出（`log2fc` / `pvalue` / `padj`），`_state()` 与 `_finish()` 保留其真实统计状态（`changed` / `nominal` / `no_evidence`，禁用 `equivalent`），附注“含未过滤样本 QC 混杂风险”并写入 `qc_caution` 标记；`assessment.py` 通过统一的风险标记集合 `_CAUTION_FLAGS = ("single_subject_driven", "foreign_tissue_marker", "qc_caution")` 对全由带警示成员驱动的 `changed` 结果软封顶为 `suggestive`，禁止其单独升为 `L1`，并在 `phenomena` 中明确标注 `foreign_tissue_marker` / `qc_caution`。
 
 ---
 

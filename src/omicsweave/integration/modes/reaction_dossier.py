@@ -187,21 +187,33 @@ def _frame_for(layer: str, frames: Any, tissue: str, contrast: str) -> pd.DataFr
 def _state(row: dict[str, Any], rules: dict[str, float]) -> tuple[str, str]:
     """测到的特征的格子状态与原因。"""
     alpha, bound = float(rules["alpha"]), float(rules["equivalence_bound"])
-    if row.get("qc_status") in BLOCKED:
-        return "qc_blocked", f"QC：{row['qc_status']}"
+    n = pd.to_numeric(pd.Series([row.get("n_numerator"), row.get("n_denominator")]), errors="coerce")
+    if n.notna().all() and n.min() < 2:
+        return "insufficient_n", f"较小组 {int(n.min())} 只（仅保留探索性效应量）"
+    qc_status = str(row.get("qc_status") or "").strip()
+    if qc_status == "qc_insufficient":
+        return "insufficient_n", f"QC 可用样本不足（{qc_status}）"
+    confounded = qc_status in BLOCKED
+    has_stats = any(pd.notna(row.get(k)) for k in ("padj", "pvalue", "log2fc"))
+    if confounded and not has_stats:
+        return "qc_blocked", f"QC：{qc_status}"
     padj, pvalue = row.get("padj"), row.get("pvalue")
     if pd.notna(padj) and padj < alpha:
-        return "changed", f"padj {padj:.3g} < {alpha:g}"
-    if pd.notna(pvalue) and pvalue < alpha:
-        return "nominal", f"p {pvalue:.3g} < {alpha:g}，padj 未过"
-    fc, se = row.get("log2fc"), row.get("se")
-    shrunk = str(row.get("lfc_shrinkage") or "").strip().lower() not in ("", "none", "nan")
-    df = _degrees_of_freedom(row)
-    if pd.notna(fc) and pd.notna(se) and se > 0 and not shrunk and df >= 1:
-        if abs(fc) + float(student_t.ppf(0.95, df)) * se < bound:
-            return "equivalent", f"90% 区间（t，自由度 {df:g}）在 ±{bound:g} 内"
-    reason = "收缩估计不做等效判定" if shrunk else ("没有 p 值（只有效应量）" if pd.isna(pvalue) else "")
-    return "no_evidence", reason
+        state, reason = "changed", f"padj {padj:.3g} < {alpha:g}"
+    elif pd.notna(pvalue) and pvalue < alpha:
+        state, reason = "nominal", f"p {pvalue:.3g} < {alpha:g}，padj 未过"
+    else:
+        fc, se = row.get("log2fc"), row.get("se")
+        shrunk = str(row.get("lfc_shrinkage") or "").strip().lower() not in ("", "none", "nan")
+        df = _degrees_of_freedom(row)
+        if not confounded and pd.notna(fc) and pd.notna(se) and se > 0 and not shrunk and df >= 1:
+            if abs(fc) + float(student_t.ppf(0.95, df)) * se < bound:
+                return "equivalent", f"90% 区间（t，自由度 {df:g}）在 ±{bound:g} 内"
+        state = "no_evidence"
+        reason = "收缩估计不做等效判定" if shrunk else ("没有 p 值（只有效应量）" if pd.isna(pvalue) else "")
+    if confounded:
+        reason = (reason + "；" if reason else "") + "含未过滤样本 QC 混杂风险"
+    return state, reason
 
 
 def _degrees_of_freedom(row: dict[str, Any]) -> float:
@@ -466,13 +478,19 @@ def _finish(rows: list[dict[str, Any]], rules: dict[str, float], flux_id: str, t
     for row in rows:
         if "cell_state" not in row:
             row["cell_state"], row["state_reason"] = (_mfa_state if row["layer"] == "mfa" else _state)(row, rules)
+        raw_flags = row.get("flags") or []
+        flags = [f for f in str(raw_flags).split(";") if f] if isinstance(raw_flags, str) else list(raw_flags)
+        if str(row.get("qc_status") or "").strip() == "qc_confounded" and row["cell_state"] in (
+            "changed", "nominal", "no_evidence", "equivalent"
+        ):
+            flags.append("qc_caution")
         fc, se = row.get("log2fc"), row.get("se")
         if pd.notna(fc) and pd.notna(se):
             row["ci_lower"], row["ci_upper"] = fc - Z95 * se, fc + Z95 * se
         sign = _activity_sign(row.get("regulator_effect", ""), row.get("regulator_mode", ""))
         row["implied_direction"] = _implied(row["role"], fc, sign, str(row.get("member_relation") or "")) \
             if row["cell_state"] in ("changed", "nominal") else ""
-        row["flags"] = ";".join(dict.fromkeys(row.get("flags") or []))
+        row["flags"] = ";".join(dict.fromkeys(flags))
         row.update(flux_id=flux_id, tissue=tissue, contrast_id=contrast, source=label,
                    direction_evidence=direction_evidence)
     return rows

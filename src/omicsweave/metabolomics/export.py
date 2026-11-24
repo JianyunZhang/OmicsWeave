@@ -123,6 +123,9 @@ def ora_to_contract(result: pd.DataFrame, *, contrast_id: str, contrast_role: st
         "query_size": pd.to_numeric(optional("SigTotal")).astype("Int64"),
         "universe_size": pd.to_numeric(optional("UniverseCount")).astype("Int64"),
         "odds_ratio": pd.to_numeric(optional("OddsRatio"), errors="coerce"),
+        "es": np.nan,
+        "nes": np.nan,
         "hit_features": optional("Members").fillna("").astype(str),
         "tool": "omicsweave.metabolomics.ora",
+        "flags": "",
     }).reset_index(drop=True)

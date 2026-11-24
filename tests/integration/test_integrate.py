@@ -225,6 +225,28 @@ class IntegrateTest(unittest.TestCase):
         run_dir = Path(out.getvalue().strip().splitlines()[-1].split("：", 1)[1])
         self.assertEqual(read_manifest(run_dir).command, ["omicsweave", *argv])
 
+    def test_sparse_ora_gracefully_writes_empty_fusion_when_enrichment_ran(self) -> None:
+        run_dir = self.root / "results" / EXP / "run_20261101_000001_sparse"
+        rows = contract_rows("liver", 0)["metabolomics"]
+        write_enrichment(rows, run_dir / "omics" / "metabolomics" / "tables" / "enrichment.parquet")
+        write_manifest(RunManifest(
+            run_id="run_20261101_000001_sparse",
+            project_id="toy",
+            experiment_id=EXP,
+            omics=[Omics.METABOLOMICS, Omics.TRANSCRIPTOMICS],
+            parameters={"steps": "all"},
+        ), run_dir)
+        out_dir, notes = integrate_experiment(EXP, ["pathway_convergence"], source=run_dir.name, root=self.root)
+        tables = out_dir / "integration" / "pathway_convergence" / "tables"
+        fusion = pd.read_parquet(tables / "pathway_fusion.parquet")
+        overlaps = pd.read_parquet(tables / "pathway_overlaps.parquet")
+        evidence = pd.read_parquet(tables / "pathway_evidence.parquet")
+        self.assertTrue(fusion.empty)
+        self.assertTrue({"omics_probabilities", "omics_rank_fractions", "fused_fdr"}.issubset(fusion.columns))
+        self.assertTrue(overlaps.empty)
+        self.assertFalse(evidence.empty)
+        self.assertTrue(any("默认关闭 GSEA" in note for note in notes), notes)
+
 
 if __name__ == "__main__":
     unittest.main()
