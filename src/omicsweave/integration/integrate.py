@@ -15,10 +15,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from omicsweave.contract.manifest import MANIFEST_FILE
-from omicsweave.core.config import Project
+from omicsweave.contract.manifest import MANIFEST_FILE, RunManifest, file_record, read_manifest, write_manifest
+from omicsweave.core.config import EXPERIMENT_FILE, Project
 from omicsweave.core.model import IntegrationMode
-from omicsweave.core.run import RunContext, RunError, finish_run, load_validated, start_run
+from omicsweave.core.run import (
+    RunContext,
+    RunError,
+    _expand,
+    finish_run,
+    is_bundle_output,
+    load_validated,
+    start_run,
+)
 
 # 已实现的整合模式：模式 → "模块:函数"
 MODES: dict[IntegrationMode, str] = {
@@ -82,20 +90,64 @@ def select_modes(requested: list[str], configured: list[IntegrationMode]) -> lis
 
 def integrate_experiment(experiment_id: str, modes: list[str] | None = None, *, source: str | None = None,
                          root: str | Path | Project | None = None, command: list[str] | None = None,
-                         run_id: str | None = None) -> tuple[Path, list[str]]:
-    """运行整合模式，返回 (新结果包目录, 提示)。"""
+                         run_id: str | None = None, into_source: bool = False,
+                         into_existing: bool = False) -> tuple[Path, list[str]]:
+    """运行整合模式，返回 (结果包目录, 提示)。``into_source=True`` 时直接写入源结果包并合并清单。"""
     project, experiment = load_validated(experiment_id, root)
     settings = experiment.config.integration
     chosen = select_modes(list(modes or []), settings.modes)
     src = source_run(project.path("results"), experiment.id, source)
-    ctx = start_run(project, experiment, run_id)
+    if into_source:
+        ctx = RunContext(project, experiment, src.name, src)
+    else:
+        ctx = start_run(project, experiment, run_id, into_existing=into_existing)
     runs = []
     for mode in chosen:
         try:
             runs.append(_load_mode(mode)(ctx, src, dict(settings.parameters.get(mode, {}))))
         except RunError as exc:
             raise RunError(f"{mode.value} 失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
-    finish_run(ctx, [p for r in runs for p in r.inputs], omics=[], command=command,
-               parameters={"source_run": src.name, "modes": [m.value for m in chosen],
-                           **{r.mode.value: r.parameters for r in runs}})
+    if into_source:
+        existing = read_manifest(src)
+        design = experiment.config.design
+        candidates = _expand([
+            experiment.root / EXPERIMENT_FILE,
+            experiment.root / design.subjects,
+            experiment.root / design.samples,
+            *(p for r in runs for p in r.inputs),
+        ])
+        input_records = [f for f in existing.files if f.role == "input"]
+        seen = {f.path for f in input_records}
+        src_resolved = src.resolve()
+        for path in candidates:
+            if path.resolve().is_relative_to(src_resolved):
+                continue
+            record = file_record(path, project.root, "input", kind="integration")
+            if record.path not in seen:
+                seen.add(record.path)
+                input_records.append(record)
+        outputs = sorted(p for p in src.rglob("*") if p.is_file() and is_bundle_output(p, src))
+        merged_params = {
+            **existing.parameters,
+            "source_run": src.name,
+            "modes": [m.value for m in chosen],
+            **{r.mode.value: r.parameters for r in runs},
+        }
+        manifest = RunManifest(
+            run_id=existing.run_id,
+            project_id=existing.project_id,
+            experiment_id=existing.experiment_id,
+            created_at=existing.created_at,
+            command=existing.command or command or [],
+            config_sha256=existing.config_sha256,
+            omics=existing.omics,
+            parameters=merged_params,
+            files=input_records + [file_record(p, src, "output") for p in outputs],
+        )
+        write_manifest(manifest, src)
+    else:
+        finish_run(ctx, [p for r in runs for p in r.inputs], omics=[], command=command,
+                   parameters={"source_run": src.name, "modes": [m.value for m in chosen],
+                               **{r.mode.value: r.parameters for r in runs}},
+                   input_kind="integration")
     return ctx.run_dir, [n for r in runs for n in r.notes]

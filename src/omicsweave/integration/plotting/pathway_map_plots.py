@@ -1782,6 +1782,7 @@ def _legend_atlas(
     strip_mode: str = "omics",
     omics_edge_color: str = "tinted",
     unit_in: float = UNIT,
+    single_tracer: bool = False,
 ) -> None:
     panel_w = total_width - 2.0
     legend_h = 17.4
@@ -1835,6 +1836,8 @@ def _legend_atlas(
             "Edge color: MFA Pooled IVW flux along net flow\n"
             "(directional |log2FC| < 0.8 floored at ±0.8)"
         )
+    if single_tracer:
+        col1_note = "Solid rail: single-tracer MFA net flux\nColor: direction of the contrast along net flow"
     ax.text(c1, y0 + 7.0, col1_note, fontsize=3.55, color=palette.ink2, va="top", linespacing=1.40)
 
     # Col 2: Edges & Linked Flux Conduit
@@ -2027,13 +2030,15 @@ def _legend_atlas(
     # Full-width Statistical Rules Bar (Multi-Tracer Pooled IVW + Linked Flux Grouped BH-FDR)
     stat_y1 = y0 + main_h + 1.05
     stat_y2 = y0 + main_h + 2.60
+    method_label = "Single-tracer MFA:" if single_tracer else "Multi-Tracer MFA Pooling (Pooled IVW):"
     ax.text(
         c1, stat_y1,
-        "Multi-Tracer MFA Pooling (Pooled IVW):",
+        method_label,
         fontsize=3.55, fontweight="bold", color=palette.ink, va="center",
     )
     ax.text(
-        c1 + _text_width("Multi-Tracer MFA Pooling (Pooled IVW):", 3.55, bold=True, unit=unit_in) + 0.7, stat_y1,
+        c1 + _text_width(method_label, 3.55, bold=True, unit=unit_in) + 0.7, stat_y1,
+        "Estimates, sample sizes and stability refer to the displayed infusion cohort." if single_tracer else
         "Unconstrained (poorly_constrained / bound_pinned) & low-n (<2/group) tracers are excluded; identifiable tracers are combined via "
         "tracer-stratified inverse-variance fixed-effects pooling (w = 1/[(s²_animal + f̄_fit)/n], stratified permutation p). "
         "Flux Sig. (●●●): k≥2 concordant + FDR<0.05 + stable; Suggestive (●●○): |Hedges' g|≥1 or (k≥2 concordant + p<0.05 + |g|≥0.8) & LOO-stable; "
@@ -2143,6 +2148,7 @@ def _pub_legend_plan(
     omics_edge_color: str = "tinted",
     min_font_pt: float | None = None,
     include_caption: bool = True,
+    single_tracer: bool = False,
 ) -> dict:
     """预先计算出版/子图紧凑图例的精确换行与总高度（全部状态与图标均以真实图元呈现）。"""
     fs = _scaled_fs(3.75, font_scale, min_font_pt)
@@ -2230,6 +2236,8 @@ def _pub_legend_plan(
         "(Flux Sig.=≥2 tracers & FDR<0.05; Sugg.=|g|≥1 or (≥2 & p<0.05 & |g|≥0.8) & LOO-stable; solid —=TOST equiv.; dashed=undetermined; opposing |g|≥1 → mixed). "
         "Linked flux = stoichiometric 1-DOF redundancy, not higher confidence."
     )
+    if single_tracer:
+        full_method_text = "Single-tracer MFA. Each animal contributes one fitted net flux estimate per reaction."
     if include_caption:
         note_extra = panel_note or (
             ("Inactive / unassessed regions folded from print view: " + " · ".join(folded_regions))
@@ -2245,7 +2253,7 @@ def _pub_legend_plan(
     else:
         # 净版模式：图内仅保留 1 条精炼方法键（长图注与运行溯源写入配套 _caption.txt）
         concise_method = "MFA Pooled IVW across identifiable tracers; Linked flux = 1-DOF stoichiometric chain (see caption)."
-        note_lines = textwrap.wrap(concise_method, wrap_cols)[:2]
+        note_lines = textwrap.wrap(full_method_text if single_tracer else concise_method, wrap_cols)[:2]
         cap_lines = []
 
     em_fs = em_units(fs, unit_in)
@@ -2794,7 +2802,7 @@ def plot_pathway_map(
                 leg_vw, caption, folded_regions, panel_note,
                 font_scale=font_scale, unit_in=unit_in, metro=metro, color_mode=color_mode,
                 strip_mode=strip_mode, omics_edge_color=omics_edge_color,
-                min_font_pt=min_font_pt, include_caption=(not clean_pub),
+                min_font_pt=min_font_pt, include_caption=(not clean_pub), single_tracer="tracer" in view,
             )
             pub_footer = legend_plan["footer_h"]
             x_lim = (x_min_c, x_max_c)
@@ -2894,7 +2902,7 @@ def plot_pathway_map(
                     ax, layout.height + 1.8, layout.width + SIDEBAR, caption,
                     palette=palette, cmap=cmap, preset=style, metro=metro,
                     color_mode=color_mode, strip_mode=strip_mode,
-                    omics_edge_color=omics_edge_color, unit_in=unit_in,
+                    omics_edge_color=omics_edge_color, unit_in=unit_in, single_tracer="tracer" in view,
                 )
             else:
                 _legend_publication(

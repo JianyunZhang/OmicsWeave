@@ -14,6 +14,7 @@ from typing import Literal
 
 from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
 from .delivery import (
+    INDEX_FILE,
     PIN_FILE,
     DeliveryRecord,
     delivery_experiments,
@@ -153,7 +154,7 @@ def _collect_protected_bundles(results_root: Path, experiment_id: str,
 
     exp_resolved = exp_dir.resolve()
     for entry in sorted(exp_dir.iterdir()):
-        if entry.is_dir() and not entry.name.startswith(".") and (entry / MANIFEST_FILE).is_file():
+        if entry.is_dir() and not entry.name.startswith((".", "_")) and (entry / MANIFEST_FILE).is_file():
             bundles[entry.name] = entry
 
     protected: set[str] = set()
@@ -170,17 +171,21 @@ def _collect_protected_bundles(results_root: Path, experiment_id: str,
 
     for delivery in kept_deliveries:
         for run_id in delivery.bundles.values():
-            mark(run_id, "referenced")
+            if run_id != delivery.delivery_id:
+                mark(run_id, "referenced")
         for rel in delivery.bundle_paths.values():
             try:
                 resolved = (delivery.directory / rel).resolve()
-                if resolved.parent == exp_resolved and resolved.name in bundles:
+                if resolved.parent == exp_resolved and resolved.name in bundles and resolved.name != delivery.delivery_id:
                     mark(resolved.name, "referenced")
             except OSError:
                 continue
 
     # 传递保护：若保留了整合/后处理结果包，它依赖的 source_run 与结果包内输入同样必须保留
     queue = list(protected)
+    for delivery in kept_deliveries:
+        if delivery.delivery_id in bundles and delivery.delivery_id not in queue:
+            queue.append(delivery.delivery_id)
     while queue:
         current = queue.pop()
         bundle_dir = bundles[current]
@@ -189,7 +194,7 @@ def _collect_protected_bundles(results_root: Path, experiment_id: str,
         except Exception:
             continue
         source_run = manifest.parameters.get("source_run")
-        if isinstance(source_run, str) and source_run in bundles and source_run not in protected:
+        if isinstance(source_run, str) and source_run != current and source_run in bundles and source_run not in protected:
             mark(source_run, "referenced")
             queue.append(source_run)
         for item in manifest.files:
@@ -199,7 +204,7 @@ def _collect_protected_bundles(results_root: Path, experiment_id: str,
             for idx, part in enumerate(parts[:-1]):
                 if part == experiment_id and idx + 1 < len(parts):
                     candidate = parts[idx + 1]
-                    if candidate in bundles and candidate not in protected:
+                    if candidate != current and candidate in bundles and candidate not in protected:
                         mark(candidate, "referenced")
                         queue.append(candidate)
     return bundles, protected, reasons
@@ -232,6 +237,7 @@ def plan_cleanup(
         )
 
         kept_deliveries: list[DeliveryRecord] = []
+        candidate_removals: list[tuple[DeliveryRecord, str]] = []
         for record in records:
             if record.delivery_id in exp_protected:
                 kept_deliveries.append(record)
@@ -249,10 +255,7 @@ def plan_cleanup(
                     kept_deliveries.append(record)
                     report.kept.append(KeptItem(exp_id, "delivery", record.delivery_id, record.directory, reason))
                 else:
-                    report.to_remove.append(CleanupItem(
-                        exp_id, "delivery", record.delivery_id, record.directory,
-                        "exceeds_keep_last", directory_size(record.directory),
-                    ))
+                    candidate_removals.append((record, "exceeds_keep_last"))
                 continue
 
             if record.pinned:
@@ -266,28 +269,42 @@ def plan_cleanup(
                 continue
 
             if record.status == "failed":
-                report.to_remove.append(CleanupItem(
-                    exp_id, "delivery", record.delivery_id, record.directory,
-                    "failed", directory_size(record.directory),
-                ))
+                candidate_removals.append((record, "failed"))
             else:
                 age_hours = max(0.0, (now_ts - record.last_activity_timestamp) / 3600.0)
                 if age_hours >= policy.stale_running_hours:
                     reason = "corrupt" if record.status == "corrupt" else "stale_running"
-                    report.to_remove.append(CleanupItem(
-                        exp_id, "delivery", record.delivery_id, record.directory,
-                        reason, directory_size(record.directory),
-                    ))
+                    candidate_removals.append((record, reason))
                 else:
                     kept_deliveries.append(record)
                     report.kept.append(KeptItem(exp_id, "delivery", record.delivery_id, record.directory, "active_running"))
+
+        bundles: dict[str, Path] = {}
+        protected_bundles: set[str] = set()
+        bundle_reasons: dict[str, str] = {}
+        if kept_deliveries and (candidate_removals or policy.prune_orphan_bundles):
+            bundles, protected_bundles, bundle_reasons = _collect_protected_bundles(root, exp_id, kept_deliveries)
+
+        for record, reason in candidate_removals:
+            if record.delivery_id in protected_bundles:
+                kept_deliveries.append(record)
+                report.kept.append(KeptItem(
+                    exp_id, "delivery", record.delivery_id, record.directory,
+                    bundle_reasons[record.delivery_id],
+                ))
+            else:
+                report.to_remove.append(CleanupItem(
+                    exp_id, "delivery", record.delivery_id, record.directory,
+                    reason, directory_size(record.directory),
+                ))
 
         if policy.prune_orphan_bundles:
             if not kept_deliveries:
                 report.notes.append(f"[{exp_id}] 没有可保留的交付记录，跳过孤立结果包清理以防误删独立运行结果包")
                 continue
-            bundles, protected_bundles, bundle_reasons = _collect_protected_bundles(root, exp_id, kept_deliveries)
             for run_id, bundle_path in bundles.items():
+                if (bundle_path / INDEX_FILE).is_file():
+                    continue
                 if run_id in protected_bundles:
                     report.kept.append(KeptItem(exp_id, "bundle", run_id, bundle_path, bundle_reasons[run_id]))
                 else:

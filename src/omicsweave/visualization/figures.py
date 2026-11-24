@@ -11,8 +11,10 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Sequence
+from io import BytesIO
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -130,7 +132,14 @@ def save_figure(
             kwargs["pil_kwargs"] = {"quality": 95, "subsampling": 0}
         try:
             with plt.rc_context(rc_override):
-                fig.savefig(path, format=fmt_clean, **kwargs)
+                if os.name == "nt" and fmt_clean in ("tif", "tiff"):
+                    # Pillow/libtiff 在部分 Windows 运行环境中直接写文件描述符会终止进程。
+                    # 同一 LZW 编码器支持内存流，完成编码后再写入目标文件。
+                    with BytesIO() as encoded:
+                        fig.savefig(encoded, format=fmt_clean, **kwargs)
+                        path.write_bytes(encoded.getbuffer())
+                else:
+                    fig.savefig(path, format=fmt_clean, **kwargs)
         except (AttributeError, KeyError, ValueError):
             if fmt_clean != "pdf":
                 raise

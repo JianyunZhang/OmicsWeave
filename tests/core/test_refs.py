@@ -139,7 +139,7 @@ class ValidateAuditTest(unittest.TestCase):
             root = Path(tmp).resolve()
             build_two_factor_project(root)
             self.assertFalse([i for i in validate_project(root).warnings if "protein_accession" in i.message])
-            run_dir = root / "analysis_results" / EXP / "run_20261101_000000_src"
+            run_dir = root / "results" / EXP / "run_20261101_000000_src"
             correct = get_uniprot_ids("Pklr")[0]
             features = pd.DataFrame({"uniprot_id": [correct, "Q00000"]}, index=pd.Index(["Pklr", "Pkm"]))
             write_dataset(run_dir / "omics" / "proteomics" / "data" / "liver", Dataset(

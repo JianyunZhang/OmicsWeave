@@ -74,8 +74,8 @@ class PipelineTest(unittest.TestCase):
 
     def bundles(self, kind: str | None = None) -> list[Path]:
         """结果包；``kind`` 为 omics / integration 时只取单组学或整合结果包。"""
-        base = self.root / "analysis_results" / EXP
-        found = sorted(p for p in base.iterdir()) if base.is_dir() else []
+        base = self.root / "results" / EXP
+        found = sorted(p for p in base.iterdir() if (p / "manifest.json").is_file()) if base.is_dir() else []
         return [p for p in found if kind is None or (p / kind).is_dir()]
 
     def records(self) -> list[dict]:
@@ -84,11 +84,15 @@ class PipelineTest(unittest.TestCase):
     def test_full_pipeline_passes_exact_run_ids(self) -> None:
         code, output = self.pipeline()
         self.assertEqual(code, 0, output)
-        self.assertEqual(len(self.bundles()), 2)
+        self.assertEqual(len(self.bundles()), 1)
         (run_dir,), (integration_dir,) = self.bundles("omics"), self.bundles("integration")
+        self.assertEqual(run_dir, integration_dir)
         self.assertTrue((run_dir / "omics" / "mfa" / "tables" / "differential.parquet").is_file())
-        self.assertTrue((integration_dir / "integration" / "reversal" / "tables" / "reversal.parquet").is_file())
-        # 整合读取的是本次 run 的结果包，脚本拿到的也是这两个运行 ID
+        self.assertTrue((run_dir / "integration" / "reversal" / "tables" / "reversal.parquet").is_file())
+        self.assertTrue((run_dir / "summary.xlsx").is_file())
+        self.assertTrue((run_dir / "index.json").is_file())
+        self.assertTrue((self.root / "results" / "latest.json").is_file())
+        # 整合读取的是本次 run 的结果包，脚本拿到的也是这个运行 ID
         self.assertEqual(read_manifest(integration_dir).parameters["source_run"], run_dir.name)
         self.assertEqual(self.records(), [{"run": run_dir.name, "integration": integration_dir.name,
                                            "run_dir": str(run_dir), "project_dir": str(self.root),
@@ -100,10 +104,12 @@ class PipelineTest(unittest.TestCase):
     def test_resume_from_integrate_and_scripts(self) -> None:
         self.assertEqual(self.pipeline()[0], 0)
         (run_dir,), (first_integration,) = self.bundles("omics"), self.bundles("integration")
+        self.assertEqual(run_dir, first_integration)
 
         code, output = self.pipeline("--from", "scripts")
         self.assertEqual(code, 0, output)
-        self.assertEqual(len(self.bundles()), 2)        # 没有新建结果包
+        self.assertEqual(len(self.bundles()), 1)        # 没有新建结果包（仅新增脚本交付目录）
+        self.assertEqual(len(list((self.root / "results" / EXP).glob("*/index.json"))), 2)
         self.assertEqual(self.records()[-1]["integration"], first_integration.name)
 
         # 只给 --source 时从 integrate 开始：新建整合结果包，单组学结果包沿用
@@ -115,10 +121,32 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(self.records()[-1], {**self.records()[0], "integration": second_integration.name})
 
     def test_reused_bundles_must_match_current_inputs(self) -> None:
+        panels_file = self.root / "experiments" / EXP / "panels.yaml"
+        initial_panels = yaml.safe_dump({
+            "panels": {"p": {"segments": [{"name": "s", "reactions": ["PDH_m"]}]}}
+        }, sort_keys=False, allow_unicode=True)
+        panels_file.write_text(initial_panels, encoding="utf-8")
+        self.edit("experiments/" + EXP + "/experiment.yaml",
+                  lambda doc: doc.update(integration={
+                      "enabled": True,
+                      "modes": ["reversal", "reaction_dossier"],
+                      "parameters": {"reaction_dossier": {"panels": "panels.yaml", "pathway_map": {"enabled": False}}},
+                  }))
         self.assertEqual(self.pipeline()[0], 0)
         (run_dir,) = self.bundles("omics")
+        # 仅改 panels.yaml（整合输入）：--from scripts 判为过期，但仍可沿用同一目录内的单组学结果包从 integrate 续跑
+        panels_file.write_text(yaml.safe_dump({
+            "panels": {"p": {"segments": [{"name": "s", "reactions": ["CS_m"]}]}}
+        }, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        code, output = self.pipeline("--from", "scripts", "--dry-run")
+        self.assertEqual(code, 1, output)
+        self.assertIn("panels.yaml 在整合之后改过", output)
+        code, output = self.pipeline("--source", run_dir.name, "--dry-run")
+        self.assertEqual(code, 0, output)
+        panels_file.write_text(initial_panels, encoding="utf-8")
+
         experiment = f"experiments/{EXP}/experiment.yaml"
-        # 只改 integration 一节（如打开 panels）：整合结果包过期，单组学结果包仍可沿用
+        # 只改 integration 一节（如打开参数）：整合结果包过期，单组学结果包仍可沿用
         self.edit(experiment, lambda doc: doc["integration"].update(parameters={"reversal": {}}))
         code, output = self.pipeline("--from", "scripts", "--dry-run")
         self.assertEqual(code, 1, output)
@@ -139,7 +167,7 @@ class PipelineTest(unittest.TestCase):
     def test_dry_run_lists_steps_without_writing(self) -> None:
         code, output = self.pipeline("--dry-run")
         self.assertEqual(code, 0, output)
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
         self.assertIn(f"omicsweave run --experiment {EXP} --omics all", output)
         self.assertIn(f"omicsweave integrate --experiment {EXP} --source <run>", output)
         self.assertIn(f"python analysis/record.py {EXP} <run> <integration> <run_dir>", output)
@@ -164,7 +192,7 @@ class PipelineTest(unittest.TestCase):
         code, output = self.pipeline()
         self.assertEqual(code, 1, output)
         self.assertIn("没有启用整合", output)
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
 
     def test_unknown_placeholder_is_a_config_error(self) -> None:
         self.set_pipeline({"scripts": [{"command": "analysis/record.py {runid}"}]})
@@ -178,7 +206,7 @@ class PipelineTest(unittest.TestCase):
         (run_dir,) = self.bundles("omics")
         self.assertIn("脚本 record 失败（退出码 3）", output)
         self.assertIn(f"--from scripts --source {run_dir.name}", output)
-        index, = (self.root / "analysis_results" / "_deliveries" / EXP).glob("*/index.json")
+        index, = (self.root / "results" / EXP).glob("*/index.json")
         failure = json.loads(index.read_text(encoding="utf-8"))
         self.assertEqual(failure["stages"]["script_1:record"]["status"], "failed")
         self.assertEqual(failure["stages"]["summary"]["status"], "pending")
@@ -194,11 +222,13 @@ class PipelineTest(unittest.TestCase):
         self.set_pipeline({"scripts": [{"command": "analysis/交付脚本.py {delivery_dir} {run_dir}", "outputs": ["表.txt"]}]})
         code, output = self.pipeline("--results-dir", str(target))
         self.assertEqual(code, 0, output)
-        first, = (target / "_deliveries" / EXP).glob("*/index.json")
+        first, = (target / EXP).glob("*/index.json")
         original = first.read_bytes()
         bundle = json.loads(original)["bundles"]
         source = bundle["run"]["run_id"]
         integration = bundle["integrate"]["run_id"]
+        self.assertEqual(source, first.parent.name)
+        self.assertEqual(integration, first.parent.name)
         args = ("--results-dir", str(target), "--from", "scripts", "--source", source, "--integration-run")
         self.assertEqual(self.pipeline(*args, "wrong-run")[0], 1)
         code, output = self.pipeline(*args, integration)
@@ -210,7 +240,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(first.read_bytes(), original)
         self.assertEqual((second.parent / "表.txt").read_text(encoding="utf-8"), str(target / EXP / source))
         self.assertIn("summary.xlsx", [row["path"] for row in data["artifacts"]])
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
         self.set_pipeline({"scripts": [{"command": "analysis/交付脚本.py {delivery_dir} {run_dir}",
                                         "outputs": ["遗漏.txt"]}]})
         code, output = self.pipeline(*args, integration)
@@ -230,7 +260,7 @@ class PipelineTest(unittest.TestCase):
         code, output = run_cli(["--project-dir", str(root), "pipeline", "--dry-run"])
         self.assertEqual(code, 1)
         self.assertIn("尚未接入", output)
-        self.assertFalse((root / "analysis_results").exists())
+        self.assertFalse((root / "results").exists())
 
 
 if __name__ == "__main__":

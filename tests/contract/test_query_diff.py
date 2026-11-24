@@ -47,7 +47,7 @@ class BundleToolsTest(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.root = Path(cls._tmp.name).resolve()
         build_two_factor_project(cls.root)
-        cls.source = cls.root / "analysis_results" / EXP / "run_20261101_000000_src"
+        cls.source = cls.root / "results" / EXP / "run_20261101_000000_src"
         for name, table in contract_tables().items():
             write_differential(table, cls.source / "omics" / name / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=cls.source.name, project_id="toy", experiment_id=EXP,

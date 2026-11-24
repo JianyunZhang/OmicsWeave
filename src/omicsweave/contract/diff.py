@@ -81,9 +81,17 @@ class BundleDiff:
 
 
 def _hashes(run_dir: Path) -> dict[str, str]:
-    """结果包内全部文件（运行清单与导出副本除外）的实际校验值；不用清单中记录的值，结果包可能在运行后被改动。"""
-    return {p.relative_to(run_dir).as_posix(): sha256_file(p) for p in sorted(run_dir.rglob("*"))
-            if p.is_file() and p.name != MANIFEST_FILE and p.relative_to(run_dir).parts[0] != "exports"}
+    """结果包内全部文件（运行清单、交付元数据与导出副本除外）的实际校验值；不用清单中记录的值，结果包可能在运行后被改动。"""
+    ignored_root = {MANIFEST_FILE, "index.json", ".index.tmp", ".keep", "summary.xlsx"}
+    result: dict[str, str] = {}
+    for p in sorted(run_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(run_dir)
+        if (len(rel.parts) == 1 and rel.name in ignored_root) or rel.parts[0] == "exports":
+            continue
+        result[rel.as_posix()] = sha256_file(p)
+    return result
 
 
 def _key(path: str, a: pd.DataFrame, b: pd.DataFrame) -> list[str] | None:

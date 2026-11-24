@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from omicsweave.contract.export import write_excel_tsv
 from omicsweave.contract.tables import effect_standard_errors, read_differential, write_differential
 from omicsweave.core.config import Experiment
 from omicsweave.core.reliability import QC_DIR, write_run_reliability
@@ -128,5 +129,9 @@ def postprocess(experiment: Experiment, run_dir: str | Path) -> list[str]:
 
     for name, group in ((DIFFERENTIAL, tables), (DERIVED, derived)):
         for omics, table in group.items():
-            write_differential(flag_rows(table, robust.get(omics)), run_dir / "omics" / omics / "tables" / name)
+            path = write_differential(flag_rows(table, robust.get(omics)), run_dir / "omics" / omics / "tables" / name)
+            if omics == "mfa" and name == DIFFERENTIAL and "tracer_evidence" in table:
+                # 使用最终结果，含逐只去除标记；另行拟合的公式模型没有示踪剂合并估计。
+                final = read_differential(path)
+                write_excel_tsv(final.loc[final["tracer_evidence"].notna()], path.with_name("differential_pooled.tsv"))
     return notes + write_run_reliability(experiment, run_dir)

@@ -598,8 +598,8 @@ class MultiOmicsIntegrationAndReplicationAliasTest(unittest.TestCase):
         self.assertIsNotNone(res.integration_dir)
         self.assertIsNotNone(res.delivery_dir)
 
-        # 整个 analysis_results 下不应出现任何别名目录名或文件名
-        results_root = self.root / "analysis_results"
+        # 整个 results 下不应出现任何别名目录名或文件名
+        results_root = self.root / "results"
         bad_paths = [
             p.relative_to(results_root).as_posix()
             for p in results_root.rglob("*")
@@ -675,7 +675,7 @@ class MultiOmicsIntegrationAndReplicationAliasTest(unittest.TestCase):
             }, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
         # 构造一个旧结果包：RNA 磁盘目录叫 cerebral_cortex、蛋白叫 brain、MFA 叫 brain
-        src = self.root / "analysis_results" / EXP / "run_20261101_000000_old"
+        src = self.root / "results" / EXP / "run_20261101_000000_old"
         for omics, tissue, feat, samples in (
             ("transcriptomics", "cerebral_cortex", "Pdha1", ["r1", "r2", "r3", "r4"]),
             ("proteomics", "brain", "Pdha1", ["p1", "p2", "p3", "p4"]),
@@ -757,7 +757,7 @@ class MultiOmicsIntegrationAndReplicationAliasTest(unittest.TestCase):
                 "schema_version": 1, "experiment": {"id": exp_id},
                 "design": {"tissue_aliases": aliases},
             }, allow_unicode=True, sort_keys=False), encoding="utf-8")
-            run_dir = self.root / "analysis_results" / exp_id / "run_20261101_000000_src"
+            run_dir = self.root / "results" / exp_id / "run_20261101_000000_src"
             write_differential(pd.DataFrame({
                 "contrast_id": [DIET] * 5, "contrast_role": ["disease_effect"] * 5, "tissue": [tissue] * 5,
                 "omics": ["transcriptomics"] * 5, "feature_id": [f"G{i}" for i in range(5)],
@@ -812,7 +812,7 @@ class MultiOmicsIntegrationAndReplicationAliasTest(unittest.TestCase):
             "integration": {"enabled": True, "modes": ["reversal"]},
         }, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-        src = self.root / "analysis_results" / EXP / "run_20261101_000000_rev"
+        src = self.root / "results" / EXP / "run_20261101_000000_rev"
         write_differential(pd.DataFrame({
             "contrast_id": ["HFD_vs_LFD", "HFD_TX_vs_HFD"],
             "contrast_role": ["disease_effect", "treatment_effect"],

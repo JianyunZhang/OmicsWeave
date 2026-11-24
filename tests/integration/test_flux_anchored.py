@@ -226,7 +226,7 @@ class FluxAnchoredBundleTest(unittest.TestCase):
 
     def source_bundle(self, omics: tuple[str, ...] = ("mfa", "transcriptomics", "proteomics", "metabolomics"),
                       ) -> Path:
-        run_dir = self.root / "analysis_results" / EXP / "run_20261101_000000_src"
+        run_dir = self.root / "results" / EXP / "run_20261101_000000_src"
         for name in omics:
             write_differential(self.tables[name], run_dir / "omics" / name / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=run_dir.name, project_id="toy", experiment_id=EXP,
@@ -269,7 +269,7 @@ class FluxAnchoredBundleTest(unittest.TestCase):
         self.assertEqual(manifest.parameters["flux_anchored"]["omics"],
                          ["metabolomics", "mfa", "proteomics", "transcriptomics"])
         inputs = {f.path for f in manifest.files if f.role == "input"}
-        self.assertIn(f"analysis_results/{EXP}/{source.name}/omics/mfa/tables/differential.parquet", inputs)
+        self.assertIn(f"results/{EXP}/{source.name}/omics/mfa/tables/differential.parquet", inputs)
         self.assertTrue({"flux_evidence_profile", "flux_evidence_table", "flux_pathway_profile"}
                         <= set(bundle_tables(run_dir)))
 

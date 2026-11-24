@@ -14,19 +14,23 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pandas as pd
 
 from omicsweave.contract.export import write_excel_tsv
-from omicsweave.mfa.tracers import format_tracer_display
+from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
+from omicsweave.mfa.tracers import format_tracer_display, tracer_directory_name
 from omicsweave.visualization.graphical_abstract import GA_LAYOUTS, GA_STYLES
 from omicsweave.visualization.journal import DEFAULT_JOURNAL_PROFILE, list_journal_profiles
 from omicsweave.visualization.palettes import VALID_COLOR_MODES
 from omicsweave.visualization.theme import list_presets
 
 from .dossier import calibration as cal
+from .dossier.assessment import assess
 from .dossier.map_view import (
     coverage_table,
     extra_pathway_fusion,
@@ -39,6 +43,7 @@ from .plotting.pathway_submaps import ALL_SUBMAP_IDS, VALID_MIN_SIGNALS, select_
 
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
+    "by_tracer": True,
     "layout": "",
     "tissues": [],
     "contrasts": [],
@@ -112,6 +117,8 @@ def settings(raw: dict[str, Any] | None) -> dict[str, Any]:
         raise ValueError(f"pathway_map.abstract.layout 应为 {'、'.join(GA_LAYOUTS)} 之一，实际为 {abstract['layout']!r}")
 
     merged = {**DEFAULTS, **raw, "highlight": highlight, "submaps": submaps, "abstract": abstract}
+    if not isinstance(merged["by_tracer"], bool):
+        raise ValueError("pathway_map.by_tracer 应为 true 或 false")
     if merged["mode"] not in MAP_MODES:
         raise ValueError(f"pathway_map.mode 应为 {'、'.join(MAP_MODES)} 之一，实际为 {merged['mode']!r}")
     if merged["style"] not in list_presets():
@@ -175,10 +182,36 @@ def _pathway_tests(dossier_dir: Path) -> pd.DataFrame | None:
     return pd.read_parquet(path) if path.is_file() else None
 
 
+def write_map_index(out_dir: Path, pages: dict[tuple[str, str], dict[str, Path]], formats: list[str]) -> None:
+    """以组织和比较为行，让同一网络的汇总图、各个实际输注队列及其视图表可以并排打开。"""
+    tracers = sorted({key for scopes in pages.values() for key in scopes if key})
+    headers = ["组织", "比较", "综合评估", *(format_tracer_display(t) for t in tracers)]
+    rows = ["<tr>" + "".join(f"<th>{escape(label)}</th>" for label in headers) + "</tr>"]
+    for (tissue, contrast), scopes in pages.items():
+        cells = [escape(tissue), escape(contrast)]
+        for key in ["", *tracers]:
+            if key not in scopes:
+                cells.append("无比较数据")
+                continue
+            links = []
+            for ext in dict.fromkeys([*(f.lower().lstrip(".") for f in formats), "tsv"]):
+                path = scopes[key].with_suffix("." + ext)
+                if path.is_file():
+                    url = quote(path.relative_to(out_dir).as_posix(), safe="/")
+                    links.append(f'<a href="{url}">{escape(ext.upper())}</a>')
+            cells.append(" · ".join(links))
+        rows.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+    (out_dir / "pathway_maps.html").write_text(
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>通路图索引</title>'
+        '<style>body{font:16px system-ui;margin:2rem;color:#17343b}table{border-collapse:collapse}'
+        'td,th{padding:.55rem .8rem;border:1px solid #becacd}th{background:#e9f1ef}a{color:#075686}</style>'
+        '<h1>通路图索引</h1><table>' + "".join(rows) + "</table></html>", encoding="utf-8")
+
+
 def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] | None, source: str,
                 runs: dict[str, str], members: pd.DataFrame | None = None, axes: pd.DataFrame | None = None,
                 assessed: pd.DataFrame | None = None, calibration: pd.DataFrame | None = None,
-                root: Path | None = None) -> list[str]:
+                root: Path | None = None, rules: dict[str, Any] | None = None) -> list[str]:
     """画全部（组织, 比较）的图 E，返回运行说明。``dossier_dir``：``integration/reaction_dossier``（读表与通路融合表）；
     ``runs``：写入图注的 {名称: 运行 ID}；``root``：解析相对路径的布局文件（实验目录）。"""
     from .plotting.pathway_map_plots import plot_pathway_map
@@ -215,6 +248,8 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
     unplaced = coverage[coverage["placement"] == "unplaced"]
     covered = coverage[coverage["placement"] == "covered_by_steps"]
     views = []
+    tracer_views = []
+    pages = {}
     n_submaps_rendered = 0
     skipped_submaps: list[str] = []
     n_abstracts_rendered = 0
@@ -242,29 +277,54 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
             + f"  |  Step-covered aggregates folded onto edges: {len(covered)}.",
         ]
         stem = out_dir.joinpath(*FIGURE_DIR, row.tissue, f"map_{row.contrast_id}")
+        pages[(row.tissue, row.contrast_id)] = {"": stem}
         stem.parent.mkdir(parents=True, exist_ok=True)
         write_excel_tsv(view, stem.with_suffix(".tsv"))
         regions = region_summary(view, layout, fusion, row.tissue, row.contrast_id)
         extra_fusion = extra_pathway_fusion(fusion, layout, row.tissue, row.contrast_id)
         signed_mods = signed_module_summary(pathway_tests, row.tissue, row.contrast_id)
         tissue_title = str(row.tissue).replace("_", " ").upper() if len(str(row.tissue)) <= 3 else str(row.tissue).replace("_", " ").title()
+        measured = here[(here["layer"] == "mfa") & here["tracer"].notna() & (here["tracer"] != "pooled")
+                        & ~here["cell_state"].isin(["not_infused", "not_measured"])]
+        tracers = sorted(measured["tracer"].unique())
+        drawing = dict(top_rank=int(conf["highlight"]["top_rank"]), mode=conf["mode"], style=conf["style"],
+                       journal=conf["journal"], color_mode=conf["color_mode"], strip_mode=conf["strip_mode"],
+                       omics_edge_color=conf["omics_edge_color"], focus_regions=list(conf["regions"]) or None,
+                       tissue=row.tissue, contrast_id=row.contrast_id, source=source)
+        scope = "Pooled MFA" if len(tracers) > 1 else (
+            format_tracer_display(tracers[0]) if tracers else "")
+        atlas_title = f"{tissue_title} · {row.contrast_id}  —  Tissue Multi-Omics Pathway Atlas"
         plot_pathway_map(view, layout, regions,
-                         f"{tissue_title} · {row.contrast_id}  —  Tissue Multi-Omics Pathway Atlas",
+                         f"{atlas_title} · {scope}" if scope else atlas_title,
                          caption, stem, formats, extra_fusion=extra_fusion, signed_modules=signed_mods,
-                         top_rank=int(conf["highlight"]["top_rank"]),
-                         mode=str(conf["mode"]),
-                         style=str(conf["style"]),
-                         journal=str(conf["journal"]),
-                         color_mode=str(conf["color_mode"]),
-                         strip_mode=str(conf["strip_mode"]),
-                         omics_edge_color=str(conf["omics_edge_color"]),
-                         focus_regions=list(conf["regions"]) or None,
-                         members=members,
-                         samples=samples,
-                         sample_contrasts=sample_contrasts,
-                         tissue=str(row.tissue),
-                         contrast_id=str(row.contrast_id),
-                         source=str(source))
+                         members=here, samples=samples, sample_contrasts=sample_contrasts, **drawing)
+
+        if conf["by_tracer"]:
+            for tracer, part in measured.groupby("tracer", sort=True):
+                animal_rows = None
+                if samples is not None and not samples.empty and "tracer" in samples:
+                    animal_rows = samples[(samples["source"] == source) & (samples["layer"] == "mfa")
+                                          & (samples["tissue"] == row.tissue) & (samples["tracer"] == tracer)]
+                # 从本输注队列的成员和动物重新评估，包括可辨识性、尺度漂移和稳定性。
+                # 全图仍使用同一网络坐标；该队列无法测量的反应在图上留空。
+                tr_axes, tr_claims = assess(part, source, rules=rules, samples=animal_rows, sides=sample_contrasts)
+                tr_view = map_view(layout, part, tr_axes, tr_claims, row.tissue, row.contrast_id, source, coverage,
+                                   top_rank=drawing["top_rank"], min_claim=conf["highlight"]["min_claim"])
+                raw_stats = part[["flux_id", "n_numerator", "n_denominator", "mean_numerator", "mean_denominator",
+                                  "log2fc", "effect", "ci_lower", "ci_upper", "pvalue", "padj", "identifiability",
+                                  "cell_state", "flags"]].rename(columns={"flux_id": "element_id", "effect": "hedges_g"})
+                tr_view = tr_view.merge(raw_stats, on="element_id", how="left", validate="many_to_one").assign(tracer=tracer)
+                tracer_views.append(tr_view)
+                tr_stem = stem.parent / "by_tracer" / tracer_directory_name(tracer) / stem.name
+                pages[(row.tissue, row.contrast_id)][tracer] = tr_stem
+                tr_stem.parent.mkdir(parents=True, exist_ok=True)
+                write_excel_tsv(tr_view, tr_stem.with_suffix(".tsv"))
+                tr_regions = region_summary(tr_view, layout, None, row.tissue, row.contrast_id)
+                label = format_tracer_display(tracer)
+                plot_pathway_map(tr_view, layout, tr_regions, f"{tissue_title} · {row.contrast_id} — {label} MFA",
+                                 [f"Run: {run_text}  |  {_sample_sizes(part)}", "Single-tracer net flux estimates."],
+                                 tr_stem, formats, members=part, samples=animal_rows,
+                                 sample_contrasts=sample_contrasts, **drawing)
 
         # 默认生成正文分专题代谢子通路图（1:1 遵循目标期刊栏宽与净版出版规范，无数据时自动跳过；静态格式）
         if sub_conf["enabled"] and static_formats:
@@ -327,11 +387,17 @@ def render_maps(dossier_dir: Path, out_dir: Path, raw_settings: dict[str, Any] |
     (out_dir / "tables").mkdir(parents=True, exist_ok=True)
     table = pd.concat(views, ignore_index=True) if views else pd.DataFrame()
     table.to_parquet(out_dir / "tables" / MAP_TABLE, index=False)
+    if tracer_views:
+        pd.concat(tracer_views, ignore_index=True).to_parquet(out_dir / "tables" / "pathway_map_by_tracer.parquet",
+                                                             index=False)
+        write_map_index(out_dir, pages, formats)
     coverage.to_parquet(out_dir / "tables" / COVERAGE_TABLE, index=False)
     notes = [f"通路总图（图 E）：{len(views)} 页，在 {'/'.join(FIGURE_DIR)}/；风格 {conf['style']}（{conf['color_mode']}）；布局 {layout.path.name}"
              f"（sha256 {layout.sha256[:12]}）"]
     if n_submaps_rendered:
         notes.append(f"代谢子通路图：{n_submaps_rendered} 张，在 {'/'.join(FIGURE_DIR)}/<组织>/{SUBMAP_SUBDIR}/")
+    if tracer_views:
+        notes.append(f"分示踪剂通路图：{len(tracer_views)} 页，在 {'/'.join(FIGURE_DIR)}/<组织>/by_tracer/")
     if skipped_submaps:
         preview = "、".join(skipped_submaps[:6]) + (f" 等 {len(skipped_submaps)} 项" if len(skipped_submaps) > 6 else "")
         notes.append(f"代谢子通路图（因无评估数据跳过）：{preview}")
@@ -353,7 +419,10 @@ def redraw(bundle: Path, out_dir: Path | None, raw_settings: dict[str, Any] | No
     source = with_flux["source"].mode().iloc[0] if not with_flux.empty else sources[0]
     if out_dir is None:
         out_dir = bundle.parent / "_redraws" / bundle.name / f"pathway_map_{datetime.now():%Y%m%d_%H%M%S}"
-    notes = render_maps(dossier_dir, out_dir, raw_settings, source, {"Integration": bundle.name}, members=members, root=root)
+    params = read_manifest(bundle).parameters.get("reaction_dossier", {}) if (bundle / MANIFEST_FILE).is_file() else {}
+    source = params.get("label") or source
+    notes = render_maps(dossier_dir, out_dir, raw_settings, source, {"Integration": bundle.name}, members=members,
+                        root=root, rules=params.get("rules"))
     return out_dir, notes
 
 

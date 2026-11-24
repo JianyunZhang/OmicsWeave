@@ -143,7 +143,7 @@ class IntegrateTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def source_bundle(self, omics: list[str], run_id: str = "run_20261101_000000_src") -> Path:
-        run_dir = self.root / "analysis_results" / EXP / run_id
+        run_dir = self.root / "results" / EXP / run_id
         for tissue, seed in (("liver", 0), ("heart", 1)):
             rows = contract_rows(tissue, seed)
             for name in omics:
@@ -173,7 +173,7 @@ class IntegrateTest(unittest.TestCase):
         self.assertEqual(manifest.parameters["source_run"], source.name)
         self.assertEqual(manifest.parameters["pathway_convergence"]["gsea_padj_cutoff"], 0.25)
         inputs = {f.path for f in manifest.files if f.role == "input"}
-        self.assertIn(f"analysis_results/{EXP}/{source.name}/omics/metabolomics/tables/enrichment.parquet", inputs)
+        self.assertIn(f"results/{EXP}/{source.name}/omics/metabolomics/tables/enrichment.parquet", inputs)
         self.assertEqual(notes, [])
         # 导出整合结果包
         self.assertEqual(list(bundle_tables(run_dir)), ["pathway_evidence", "pathway_fusion", "pathway_overlaps"])

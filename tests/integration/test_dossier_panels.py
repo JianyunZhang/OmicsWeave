@@ -41,7 +41,7 @@ PANEL = {"panels": {"liver_glucose": {
 
 def write_bundle(root: Path, tables: dict[str, pd.DataFrame], omics: tuple[str, ...]) -> Path:
     """在另一个项目目录中写出源结果包（统一差异结果表与运行清单）。"""
-    run_dir = root / "analysis_results" / EXP / "run_20261101_000000_src"
+    run_dir = root / "results" / EXP / "run_20261101_000000_src"
     for name in omics:
         write_differential(tables[name], run_dir / "omics" / name / "tables" / "differential.parquet")
     write_manifest(RunManifest(run_id=run_dir.name, project_id="other", experiment_id=EXP,

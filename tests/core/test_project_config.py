@@ -253,6 +253,7 @@ class ScaffoldTest(unittest.TestCase):
             root = Path(tmp) / "proj"
             written = create_project(root, "proj")
             self.assertTrue((root / "project.yaml") in written)
+            self.assertTrue((root / "results").is_dir())
             self.assertEqual(validate_project(root).issues, [])
             with self.assertRaises(FileExistsError):
                 create_project(root, "proj")

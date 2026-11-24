@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from omicsweave.contract.manifest import RunManifest, file_record, new_run_id, write_manifest
+from omicsweave.contract.manifest import MANIFEST_FILE, RunManifest, allocate_run_dir, file_record, write_manifest
 
 from .config import EXPERIMENT_FILE, ConfigError, Experiment, Project, load_experiment, load_project
 from .model import Contrast, Omics
@@ -43,6 +43,18 @@ METADATA_DIR = "metadata"
 FIGURES = "figures"
 # 写出 tables/differential.parquet 的步骤；figures 读取它
 _TABLE_STEPS = {"differential", "enrichment"}
+DELIVERY_META_FILES = frozenset({"index.json", ".index.tmp", ".keep", "summary.xlsx"})
+DELIVERY_ONLY_DIRS = frozenset({"candidates", "panels", "pathway_map", "figures", "key_results", "exports"})
+
+
+def is_bundle_output(path: Path, run_dir: Path) -> bool:
+    """是否属于结果包本体输出（排除清单、交付索引、汇总表及交付副本/课题脚本目录）。"""
+    rel = path.relative_to(run_dir)
+    if len(rel.parts) == 1 and rel.name in {MANIFEST_FILE, *DELIVERY_META_FILES}:
+        return False
+    if rel.parts[0] in DELIVERY_ONLY_DIRS:
+        return False
+    return True
 
 
 class RunError(Exception):
@@ -143,7 +155,7 @@ def select_omics(experiment: Experiment, requested: list[str]) -> tuple[list[Omi
 
 def _write_metadata(ctx: RunContext) -> None:
     directory = ctx.run_dir / METADATA_DIR
-    directory.mkdir(parents=True)
+    directory.mkdir(parents=True, exist_ok=True)
     ctx.experiment.subjects.to_parquet(directory / "subjects.parquet", index=False)
     ctx.experiment.samples.to_parquet(directory / "samples.parquet", index=False)
     config = ctx.experiment.config.model_dump(mode="json")
@@ -173,25 +185,34 @@ def load_validated(experiment_id: str, root: str | Path | Project | None = None)
 
 
 def start_run(project: Project, experiment: Experiment, run_id: str | None = None,
-              steps: list[str] | None = None) -> RunContext:
+              steps: list[str] | None = None, *, into_existing: bool = False) -> RunContext:
     """新建结果包目录并写出 metadata/。"""
-    run_id = run_id or new_run_id()
-    run_dir = project.path("results") / experiment.id / run_id
-    if run_dir.exists():
-        raise RunError(f"{run_dir} 已存在")
+    base = project.path("results") / experiment.id
+    if run_id is None:
+        if into_existing:
+            raise RunError("into_existing=True 时必须指定 run_id")
+        run_dir = allocate_run_dir(base)
+        run_id = run_dir.name
+    else:
+        run_dir = base / run_id
+        if into_existing:
+            if (run_dir / MANIFEST_FILE).exists() or (run_dir / "omics").exists() or (run_dir / "integration").exists():
+                raise RunError(f"{run_dir} 已存在")
+        elif run_dir.exists():
+            raise RunError(f"{run_dir} 已存在")
     ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None)
     _write_metadata(ctx)
     return ctx
 
 
 def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], parameters: dict[str, Any],
-               command: list[str] | None = None) -> Path:
+               command: list[str] | None = None, input_kind: str | None = "omics") -> Path:
     """写出运行清单：登记实验配置、样本表与 ``inputs``，以及结果包内的全部输出文件。"""
     experiment = ctx.experiment
     design = experiment.config.design
     files = _expand([experiment.root / EXPERIMENT_FILE, experiment.root / design.subjects,
                      experiment.root / design.samples, *inputs])
-    outputs = sorted(p for p in ctx.run_dir.rglob("*") if p.is_file())
+    outputs = sorted(p for p in ctx.run_dir.rglob("*") if p.is_file() and is_bundle_output(p, ctx.run_dir))
     manifest = RunManifest(
         run_id=ctx.run_id,
         project_id=ctx.project.id,
@@ -200,7 +221,7 @@ def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], param
         config_sha256=sha256_file(experiment.root / EXPERIMENT_FILE),
         omics=omics,
         parameters=parameters,
-        files=[file_record(p, ctx.project.root, "input") for p in files]
+        files=[file_record(p, ctx.project.root, "input", kind=input_kind) for p in files]
         + [file_record(p, ctx.run_dir, "output") for p in outputs],
     )
     return write_manifest(manifest, ctx.run_dir)
@@ -208,7 +229,8 @@ def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], param
 
 def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
                    steps: list[str] | None = None, root: str | Path | Project | None = None,
-                   command: list[str] | None = None, run_id: str | None = None) -> tuple[Path, list[str]]:
+                   command: list[str] | None = None, run_id: str | None = None,
+                   *, into_existing: bool = False) -> tuple[Path, list[str]]:
     """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
     project, experiment = load_validated(experiment_id, root)
     chosen, notes = select_omics(experiment, list(omics))
@@ -222,7 +244,7 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
             raise RunError(f"{FIGURES} 步骤根据本次运行写出的差异结果表绘图，请与 differential 一起指定，"
                            f"如 --steps differential,{FIGURES}")
 
-    ctx = start_run(project, experiment, run_id, steps)
+    ctx = start_run(project, experiment, run_id, steps, into_existing=into_existing)
     runs: list[OmicsRun] = []
     for o in chosen:
         func, _ = runners[o]

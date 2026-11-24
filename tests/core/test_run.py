@@ -57,7 +57,7 @@ class RunFrameworkTest(unittest.TestCase):
         self.edit_experiment(lambda doc: doc["omics"]["mfa"]["input"].pop("model_id"))
         with self.assertRaisesRegex(RunError, "model_id"):
             run_experiment(EXP, root=self.root)
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
 
     def test_omics_selection(self) -> None:
         with self.assertRaisesRegex(RunError, "未在 experiment.yaml 中启用"):
@@ -100,7 +100,7 @@ class RunFrameworkTest(unittest.TestCase):
     def test_figures_step_needs_the_differential_table(self) -> None:
         with self.assertRaisesRegex(RunError, "differential,figures"):
             run_experiment(EXP, ["mfa"], steps=["qc", "figures"], root=self.root)
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
         run_dir, _ = _quiet(run_experiment, EXP, ["mfa"], steps=["differential", "figures"], root=self.root)
         figures = sorted(p.name for p in (run_dir / "omics" / "mfa" / "figures").iterdir())
         self.assertIn("volcano_liver_HFD_vs_LFD.png", figures)

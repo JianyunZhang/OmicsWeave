@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from omicsweave.contract.dataset import ContractError
-from omicsweave.contract.manifest import RunManifest, file_record, new_run_id, write_manifest
+from omicsweave.contract.manifest import RunManifest, allocate_run_dir, file_record, write_manifest
 from omicsweave.contract.query import open_run
 from omicsweave.contract.tables import effect_standard_errors
 from omicsweave.core.config import ConfigError, Project, load_experiment, load_project
@@ -235,10 +235,16 @@ def replicate_project(root: str | Path | None = None, set_ids: list[str] | None 
     if not sets:
         known = "、".join(s.id for s in project.config.replication) or "无"
         raise ReplicationError(f"project.yaml 的 replication 中没有要运行的复现组（已声明：{known}）")
-    run_id = run_id or new_run_id()
-    run_dir = project.path("results") / PROJECT_RUNS / run_id
+    parent = project.path("results") / PROJECT_RUNS
+    if run_id is None:
+        run_dir = allocate_run_dir(parent)
+        run_id = run_dir.name
+    else:
+        run_dir = parent / run_id
+        if run_dir.exists():
+            raise ReplicationError(f"{run_dir} 已存在")
     tables_dir = run_dir / "integration" / "replication" / "tables"
-    tables_dir.mkdir(parents=True)
+    tables_dir.mkdir(parents=True, exist_ok=True)
     results, baselines, inputs, sources, notes = [], [], [], {}, []
     for spec in sets:
         result, baseline, tables = replicate_set(project, spec)

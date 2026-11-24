@@ -15,9 +15,20 @@
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Sequence
+
+
+def tracer_directory_name(protocol: str) -> str:
+    """保留普通 protocol 名；含同位素记号、路径分隔符或大小写差异时生成可区分的目录名。"""
+    reserved = re.fullmatch(r"con|prn|aux|nul|com[1-9]|lpt[1-9]", protocol)
+    if re.fullmatch(r"[a-z0-9_-]{1,80}", protocol) and not reserved:
+        return protocol
+    label = re.sub(r"[^\w-]+", "_", protocol).strip("_")[:60]
+    digest = hashlib.sha256(protocol.encode("utf-8")).hexdigest()[:12]
+    return f"~{label}-{digest}"
 
 
 @dataclass(frozen=True)

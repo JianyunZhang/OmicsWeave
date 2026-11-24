@@ -112,7 +112,7 @@ def _is_abs_path_like(p: str) -> bool:
     return p.startswith("\\\\") or bool(re.match(r"^[A-Za-z]:[\\/]", p))
 
 
-_REPO_LEVEL_PREFIXES = ("analysis_results/", "analysis_tools/", "experiments/")
+_REPO_LEVEL_PREFIXES = ("results/", "analysis_results/", "analysis_tools/", "experiments/")
 
 
 def _resolve_path(p: str, base_dir: Path) -> Path:

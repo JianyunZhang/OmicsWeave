@@ -67,7 +67,7 @@ def fusion() -> pd.DataFrame:
 
 
 def build(root: Path, panels: dict | None = PANELS, decoys: bool = True) -> Path:
-    run = root / "analysis_results" / EXP / RUN
+    run = root / "results" / EXP / RUN
     base = run / "integration" / "reaction_dossier"
     for sub in ("tables", "evaluation", "qc"):
         (base / sub).mkdir(parents=True)

@@ -31,7 +31,7 @@ class ExportTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             cls.first, _ = run_experiment(EXP, ["mfa"], root=cls.root, run_id="run_20261101_000000_aaaa")
             cls.latest, _ = run_experiment(EXP, ["mfa"], root=cls.root, run_id="run_20261101_000001_bbbb")
-        cls.results = cls.root / "analysis_results"
+        cls.results = cls.root / "results"
 
     @classmethod
     def tearDownClass(cls) -> None:

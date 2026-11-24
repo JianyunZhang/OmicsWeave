@@ -21,7 +21,7 @@ project:
   species: {species}                # mus_musculus / homo_sapiens
   paths:                            # 均可省略，以下为默认值（相对于本目录）
     experiments: experiments
-    results: analysis_results
+    results: results
     references: references
     analysis: analysis              # 课题专用脚本
   references: {{}}                    # 例如 transcriptome: references/Mus_musculus.GRCm39.cdna.all.fa.gz
@@ -160,7 +160,7 @@ def create_project(root: str | Path, project_id: str, species: Species = Species
         raise FileExistsError(f"{project_file} 已存在；如需覆盖请加 --force")
 
     exp_dir = root / "experiments" / experiment_id
-    for directory in (exp_dir, root / "analysis_results", root / "references", root / "analysis"):
+    for directory in (exp_dir, root / "results", root / "references", root / "analysis"):
         directory.mkdir(parents=True, exist_ok=True)
 
     files = {

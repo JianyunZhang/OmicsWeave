@@ -59,7 +59,7 @@ class StatsCase(unittest.TestCase):
         prot = pd.DataFrame({"sample_id": "prot_" + samples["subject_id"], "subject_id": samples["subject_id"],
                              "omics": "proteomics", "tissue": "liver"})
         pd.concat([samples, prot]).to_csv(exp_dir / "samples.tsv", sep="\t", index=False)
-        self.run_dir = self.root / "analysis_results" / EXP / "run_test"
+        self.run_dir = self.root / "results" / EXP / "run_test"
         self.write_matrix(simulate())
 
     def tearDown(self) -> None:

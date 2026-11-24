@@ -89,7 +89,7 @@ def _as_str(value: Any) -> Any:
 
 class ProjectPaths(_Strict):
     experiments: str = "experiments"
-    results: str = "analysis_results"
+    results: str = "results"
     references: str = "references"
     analysis: str = "analysis"
 

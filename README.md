@@ -45,7 +45,7 @@ FASTQ 修剪（cutadapt）在 `upstream` extras 中；kallisto、DIA-NN 等外�
 │   ├── experiment.yaml                    # 实验因素、比较、启用的组学与输入、整合模式
 │   ├── subjects.tsv                       # 每只动物一行（组别、处理等）
 │   └── samples.tsv                        # 每次组学测量一行（组织、时间点、批次、文件）
-└── analysis_results/<experiment_id>/...   # 分析输出
+└── results/<experiment_id>/...            # 分析输出（latest.json 在 results/ 根目录）
 ```
 
 配置（`*.yaml`）与样本表（`*.tsv`）分开：配置是层级结构、手写，样本表每行一条记录、常在 Excel 中编辑。
@@ -84,15 +84,20 @@ omicsweave mfa run --help
 | `init [--id 项目ID] [--species mus_musculus\|homo_sapiens] [--experiment 实验ID]` | 生成项目模板（不会覆盖已有文件，除非加 `--force`） |
 | `validate [--experiment 实验ID ...]` | 检查配置、样本表、因素取值、每个比较的生物学重复数、输入文件与整合前提；有错误时退出码为 1 |
 | `migrate --experiment 实验ID [--dry-run] [--force]` | 把旧版各组学配置转换为上述格式，待补充项写在 `MIGRATION.md` |
-| `run --experiment 实验ID [--omics 组学\|all] [--steps 步骤]` | 按 `experiment.yaml` 运行，结果包写到 `analysis_results/<实验ID>/<run_id>/`；四个组学均已接入（转录组、蛋白组为表格层输入），写出差异与富集结果表，并为每个组织 × 比较画火山图（`figures` 步骤，`omics/<组学>/figures/`）；其他图件与解读报告暂用 `omicsweave <组学> run` |
+| `run --experiment 实验ID [--omics 组学\|all] [--steps 步骤]` | 按 `experiment.yaml` 运行，结果包写到 `results/<实验ID>/<run_id>/`；四个组学均已接入（转录组、蛋白组为表格层输入），写出差异与富集结果表，并为每个组织 × 比较画火山图（`figures` 步骤，`omics/<组学>/figures/`）；其他图件与解读报告暂用 `omicsweave <组学> run` |
 | `integrate --experiment 实验ID [--mode 模式] [--source 运行ID]` | 读取一次运行的统一结果表做多组学整合，结果写入新的结果包；目前已接入 `flux_anchored`、`pathway_convergence` |
 | `export --experiment 实验ID [--run 运行ID] [--format xlsx\|tsv]` | 把结果包中的结果表导出为 Excel（附运行信息）或 TSV，默认最近一次运行 |
 | `map --experiment 实验ID [--source 整合运行ID] [--tissue 组织] [--contrast 比较] [--layout 布局文件]` | 从已有整合包重画分组织代谢通路总图（图 E），写到 `<结果根>/<实验ID>/_redraws/<运行ID>/`，不改动原结果包 |
 | `pipeline [--experiment 实验ID ...] [--from run\|integrate\|scripts] [--source 运行ID] [--tag 标签] [--pin] [--dry-run]` | 标准流程：对 `project.yaml` 中 `pipeline.experiments` 的每个实验依次 validate → run → integrate → 课题脚本（见下） |
-| `latest [--experiment 实验ID ...] [--target dir\|summary\|index] [--path] [--json] [--open] [--list]` | 通过 `_deliveries/<实验>/latest.json` 指针查询、列出或打开最新一次成功交付（跨平台） |
+| `latest [--experiment 实验ID ...] [--target dir\|summary\|index] [--path] [--json] [--open] [--list]` | 通过 `results/latest.json` 指针查询、列出或打开最新一次成功交付（跨平台） |
 | `clean [--experiment 实验ID ...] [--keep-last N\|--keep-all] [--prune-bundles] [--dry-run\|--apply]` | 按保留策略预览或清理历史交付及可选的孤立 `run_*` 结果包（默认仅预览，加 `--apply` 才实际删除） |
 
 ### 标准流程（`pipeline`）
+
+当 MFA 样本在 `samples.tsv` 的 `protocol` 列中登记了多种示踪剂时，一次运行会按示踪剂分别做组间比较，同时输出跨示踪剂的分层合并结果。
+交付的 `summary.xlsx` 在「MFA统计与图」中链接各自的差异表和火山图，在「通路总图」中链接综合图、各示踪剂通路图和对应的 TSV。
+`reaction_dossier/pathway_maps.html` 可按组织、比较并排打开各套通路图。分示踪剂页只使用该队列的 MFA 拟合和动物重复，沿用同一网络布局；综合页保留 pooled MFA 与其他组学的证据。
+某个比较缺少对应示踪剂时，该格显示「无比较数据」。如只需原有综合图，可将 `integration.parameters.reaction_dossier.pathway_map.by_tracer` 设为 `false`；这项设置只控制通路出图。
 
 在 `project.yaml` 中写好 `pipeline` 一节后，一条命令完成整个项目的标准分析：
 
@@ -127,9 +132,9 @@ omicsweave --project-dir D:/lab_project pipeline --results-dir "D:/研究结果/
   （只改 `integration`，如打开 `panels`，仍可沿用）；整合结果包对照 `experiment.yaml`、样本表与 `panels.yaml`。
   有改动时拒绝沿用，并说明从哪一步重跑，避免交付旧的面板矩阵。
 
-结果根目录默认取 `project.paths.results`（缺省为 `analysis_results`）。单次调用可用 `--results-dir` 覆盖，相对路径以课题根目录为基准。
-每次正式执行在 `<结果根>/_deliveries/<实验 ID>/delivery_YYYYMMDD_HHMMSS_<4位hex>[_<标签>]/` 新建一次不可变交付，
-全部完成后原子更新同级 `latest.json` 跨平台相对路径指针（中途失败不覆盖 `latest.json`）；单组学与整合包仍在 `<结果根>/<实验 ID>/<运行 ID>/`。
+结果根目录默认取 `project.paths.results`（缺省为 `results`）。单次调用可用 `--results-dir` 覆盖，相对路径以课题根目录为基准。
+每次正式执行在 `<结果根>/<实验 ID>/run_YYYYMMDD_HHMMSS[_<标签>]/`（同秒冲突时自动附 `_02` 等序号）新建一次自包含的运行与交付目录，
+全部完成后原子更新 `<结果根>/latest.json` 跨平台相对路径指针（按实验索引，中途失败不覆盖 `latest.json`）；单组学、整合与交付表均在同一目录下（`--from integrate` / `scripts` 续跑时在同实验下新建目录并沿用指定源包）。
 日常可用 `omicsweave latest`（加 `--open` 打开最新 `summary.xlsx`、`--path` 输出路径、`--json` 输出指针、`--list` 列出全部交付）快速访问最新交付；
 重要里程碑可加 `--tag <标签> --pin`（或在目录内放 `.keep`）锁定以防被清理。
 保留策略与清理功能默认关闭（需在课题入口 `run_analysis.py` 中开启 `RETENTION_ENABLED` / `CLEAN_COMMAND_ENABLED`，或在 `project.yaml` 的 `pipeline.retention` 中启用，或使用 `omicsweave clean --apply`）。

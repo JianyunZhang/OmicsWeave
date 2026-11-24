@@ -90,7 +90,7 @@ class ReversalModeTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self._tmp.name).resolve()
         build_two_factor_project(self.root)
-        run_dir = self.root / "analysis_results" / EXP / "run_20261101_000000_src"
+        run_dir = self.root / "results" / EXP / "run_20261101_000000_src"
         write_differential(differential(), run_dir / "omics" / "transcriptomics" / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=run_dir.name, project_id="toy", experiment_id=EXP,
                                    omics=[Omics.TRANSCRIPTOMICS]), run_dir)

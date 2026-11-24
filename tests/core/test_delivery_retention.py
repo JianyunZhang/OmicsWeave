@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -20,9 +21,9 @@ from omicsweave import cli
 from omicsweave.contract.manifest import RunManifest, write_manifest
 from omicsweave.core.config import ConfigError, load_experiment, load_project
 from omicsweave.core.delivery import (
-    DELIVERIES_DIR,
     INDEX_FILE,
     LATEST_POINTER_FILE,
+    LATEST_SCHEMA_VERSION,
     PIN_FILE,
     SUMMARY_FILE,
     Delivery,
@@ -36,7 +37,7 @@ from omicsweave.core.retention import RetentionPolicy, apply_cleanup, plan_clean
 from omicsweave.core.scaffold import create_project
 from tests.mfa.test_mfa_runner import EXP, build_two_factor_project
 
-DELIVERY_ID_RE = re.compile(r"^delivery_\d{8}_\d{6}_[0-9a-f]{4}$")
+DELIVERY_ID_RE = re.compile(r"^run_\d{8}_\d{6}(?:_\d{2})?$")
 
 
 def run_cli(argv: list[str]) -> tuple[int, str]:
@@ -76,10 +77,12 @@ def _make_fake_delivery(
     tag: str | None = None,
     mtime: float | None = None,
     with_summary: bool = True,
+    with_manifest: bool = False,
 ) -> Path:
-    directory = results_root / DELIVERIES_DIR / exp_id / delivery_id
+    directory = results_root / exp_id / delivery_id
     directory.mkdir(parents=True, exist_ok=True)
     payload = {
+        "run_id": delivery_id,
         "delivery_id": delivery_id,
         "project": "test_proj",
         "experiment": exp_id,
@@ -94,6 +97,8 @@ def _make_fake_delivery(
     }
     index = directory / INDEX_FILE
     index.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if with_manifest:
+        write_manifest(RunManifest(run_id=delivery_id, project_id="test_proj", experiment_id=exp_id), directory)
     if with_summary and status == "completed":
         (directory / SUMMARY_FILE).write_bytes(b"fake-xlsx-content")
     if pin_file:
@@ -137,11 +142,10 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         fixed = datetime(2026, 11, 19, 23, 30, 12)
         plain = new_delivery_id(now=fixed)
         self.assertRegex(plain, DELIVERY_ID_RE)
-        self.assertTrue(plain.startswith("delivery_20261119_233012_"))
+        self.assertEqual(plain, "run_20261119_233012")
 
         tagged = new_delivery_id(now=fixed, tag="manuscript_v1.0")
-        self.assertTrue(tagged.startswith("delivery_20261119_233012_"))
-        self.assertTrue(tagged.endswith("_manuscript_v1.0"))
+        self.assertEqual(tagged, "run_20261119_233012_manuscript_v1.0")
         self.assertEqual(validate_delivery_tag("  v2-draft  "), "v2-draft")
 
         for bad in ("", "   ", "../escape", "a/b", "has space", ".hidden", "a" * 65):
@@ -152,7 +156,7 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         code, output = run_cli(["--project-dir", str(self.root), "pipeline", "--tag", "../evil"])
         self.assertEqual(code, 1, output)
         self.assertIn("无效", output)
-        self.assertFalse((self.root / "analysis_results").exists())
+        self.assertFalse((self.root / "results").exists())
 
     def test_delivery_avoids_same_second_collision(self) -> None:
         experiment = load_experiment(load_project(self.root), EXP)
@@ -160,29 +164,36 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         d1 = Delivery(experiment, [], [], now=fixed)
         d2 = Delivery(experiment, [], [], now=fixed)
         self.assertNotEqual(d1.directory, d2.directory)
+        self.assertEqual(d1.directory.name, "run_20261119_233012")
+        self.assertEqual(d2.directory.name, "run_20261119_233012_02")
+        self.assertLess(d1.directory.name, d2.directory.name)
         self.assertRegex(d1.directory.name, DELIVERY_ID_RE)
         self.assertRegex(d2.directory.name, DELIVERY_ID_RE)
 
     def test_latest_pointer_updated_only_on_success_and_cli_latest(self) -> None:
-        # 首次成功运行：生成时间戳目录与 latest.json 指针
+        # 首次成功运行：生成时间戳目录与 results/latest.json 指针
         code, output = run_cli(["--project-dir", str(self.root), "pipeline", "--tag", "baseline", "--pin"])
         self.assertEqual(code, 0, output)
-        exp_deliveries = self.root / "analysis_results" / DELIVERIES_DIR / EXP
-        pointer_path = exp_deliveries / LATEST_POINTER_FILE
+        results_root = self.root / "results"
+        exp_dir = results_root / EXP
+        pointer_path = results_root / LATEST_POINTER_FILE
         self.assertTrue(pointer_path.is_file())
         self.assertIn(f"[{EXP}] 最新指针：{pointer_path}", output)
 
-        pointer = read_latest_pointer(self.root / "analysis_results", EXP)
+        root_pointer = read_latest_pointer(results_root)
+        self.assertEqual(root_pointer["schema_version"], LATEST_SCHEMA_VERSION)
+        self.assertEqual(root_pointer["default_experiment"], EXP)
+        pointer = read_latest_pointer(results_root, EXP)
         self.assertIsNotNone(pointer)
         first_id = pointer["delivery_id"]
-        self.assertTrue(first_id.startswith("delivery_"))
+        self.assertTrue(first_id.startswith("run_"))
         self.assertTrue(first_id.endswith("_baseline"))
         # 指针内仅存跨平台 POSIX 相对路径
-        self.assertEqual(pointer["path"], first_id)
-        self.assertEqual(pointer["summary"], f"{first_id}/{SUMMARY_FILE}")
-        self.assertEqual(pointer["index"], f"{first_id}/{INDEX_FILE}")
+        self.assertEqual(pointer["path"], f"{EXP}/{first_id}")
+        self.assertEqual(pointer["summary"], f"{EXP}/{first_id}/{SUMMARY_FILE}")
+        self.assertEqual(pointer["index"], f"{EXP}/{first_id}/{INDEX_FILE}")
         self.assertTrue(pointer["pinned"])
-        self.assertTrue((exp_deliveries / first_id / PIN_FILE).is_file())
+        self.assertTrue((exp_dir / first_id / PIN_FILE).is_file())
 
         # 配置一个必败脚本重跑：新建失败交付，但不覆盖 latest.json
         (self.root / "analysis").mkdir(exist_ok=True)
@@ -190,7 +201,7 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         self.edit("project.yaml", lambda d: d.update(pipeline={"scripts": [{"command": "analysis/fail.py"}]}))
         code, output = run_cli(["--project-dir", str(self.root), "pipeline", "--from", "scripts"])
         self.assertEqual(code, 1, output)
-        after_fail = read_latest_pointer(self.root / "analysis_results", EXP)
+        after_fail = read_latest_pointer(results_root, EXP)
         self.assertEqual(after_fail["delivery_id"], first_id)
 
         # CLI: latest 默认输出 / --path / --target / --json / --list / --open
@@ -201,7 +212,7 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
 
         code, out_path = run_cli(["--project-dir", str(self.root), "latest", "--path", "--target", "summary"])
         self.assertEqual(code, 0, out_path)
-        self.assertEqual(Path(out_path.strip()), (exp_deliveries / first_id / SUMMARY_FILE))
+        self.assertEqual(Path(out_path.strip()), (exp_dir / first_id / SUMMARY_FILE))
 
         code, out_json = run_cli(["--project-dir", str(self.root), "latest", "--json"])
         self.assertEqual(code, 0, out_json)
@@ -218,10 +229,23 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         with mock.patch("omicsweave.core.delivery.open_path") as mocked_open:
             code, out_open = run_cli(["--project-dir", str(self.root), "latest", "--open"])
             self.assertEqual(code, 0, out_open)
-            mocked_open.assert_called_once_with(exp_deliveries / first_id / SUMMARY_FILE)
+            mocked_open.assert_called_once_with(exp_dir / first_id / SUMMARY_FILE)
+
+        # 多实验并发指针隔离：新增另一个实验运行后，results/latest.json 同时保留两个实验条目互不覆盖
+        second_exp = "other_exp"
+        shutil.copytree(self.root / "experiments" / EXP, self.root / "experiments" / second_exp)
+        self.edit(f"experiments/{second_exp}/experiment.yaml",
+                  lambda d: d["experiment"].update(id=second_exp))
+        self.edit("project.yaml", lambda d: d.update(pipeline={"experiments": [EXP]}))
+        code, out_other = run_cli(["--project-dir", str(self.root), "pipeline", "--experiment", second_exp])
+        self.assertEqual(code, 0, out_other)
+        both = read_latest_pointer(results_root)
+        self.assertEqual(set(both["experiments"]), {EXP, second_exp})
+        self.assertEqual(both["experiments"][EXP]["delivery_id"], first_id)
+        self.assertNotEqual(both["experiments"][second_exp]["delivery_id"], first_id)
 
     def test_latest_fallback_for_legacy_uuid_and_corrupt_pointer(self) -> None:
-        results = self.root / "analysis_results"
+        results = self.root / "results"
         t1 = datetime(2026, 11, 18, 10, 0, 0, tzinfo=timezone.utc)
         t2 = datetime(2026, 11, 19, 12, 0, 0, tzinfo=timezone.utc)
         _make_fake_delivery(results, EXP, "767b49fac9fb4257a8848a2a2bd879bf", created_at="", mtime=t1.timestamp())
@@ -235,8 +259,9 @@ class DeliveryNamingAndPointerTest(unittest.TestCase):
         self.assertEqual(rec.delivery_id, "b6352c7cc6384b769165d6e3168121a6")
 
         # 指针含路径穿越或指向不存在目录时拒绝指针并安全回退
-        pointer_path = results / DELIVERIES_DIR / EXP / LATEST_POINTER_FILE
-        pointer_path.write_text(json.dumps({"path": "../outside"}), encoding="utf-8")
+        pointer_path = results / LATEST_POINTER_FILE
+        pointer_path.write_text(json.dumps({"schema_version": 2, "experiments": {EXP: {"path": "../outside"}}}),
+                                encoding="utf-8")
         rec2, source2 = resolve_latest_delivery(results, EXP)
         self.assertEqual(source2, "scan")
         self.assertEqual(rec2.delivery_id, "b6352c7cc6384b769165d6e3168121a6")
@@ -264,7 +289,7 @@ class RetentionAndCleanTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self._tmp.name).resolve()
         build_two_factor_project(self.root)
-        self.results = self.root / "analysis_results"
+        self.results = self.root / "results"
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -308,38 +333,44 @@ class RetentionAndCleanTest(unittest.TestCase):
         # 独立实验（没有任何交付记录）：孤立清理绝不应清空它
         _make_fake_bundle(self.results, "standalone_exp", "run_20261118_000001_ffff")
 
-        # 构造交付：1 个旧的 pinned、2 个旧的普通成功、1 个最新成功、1 个 failed、1 个超时 running、1 个刚启动 running
+        # 构造交付：1 个旧的 pinned、2 个旧的普通成功、1 个最新成功、1 个 failed、1 个带被引用的 failed 统一运行、1 个超时 running、1 个刚启动 running
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261111_000001_1111_milestone",
+            self.results, EXP, "run_20261111_000001_1111_milestone",
             created_at=(now - timedelta(days=9)).isoformat(),
             bundles={"run": {"run_id": "run_20261111_000001_cccc"}},
             pin_file=True,
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261112_000001_2222",
+            self.results, EXP, "run_20261112_000001_2222",
             created_at=(now - timedelta(days=8)).isoformat(),
             bundles={"run": {"run_id": "run_20261110_000001_aaaa"}},
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261115_000001_3333",
+            self.results, EXP, "run_20261115_000001_3333",
             created_at=(now - timedelta(days=5)).isoformat(),
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261119_000001_4444",
-            created_at=(now - timedelta(days=1)).isoformat(),
-            bundles={"integrate": {"run_id": "run_20261119_000002_eeee"}},
+            self.results, EXP, "run_20261118_000002_refs",
+            status="failed", created_at=(now - timedelta(days=2)).isoformat(),
+            with_manifest=True,
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261118_000001_5555",
+            self.results, EXP, "run_20261119_000001_4444",
+            created_at=(now - timedelta(days=1)).isoformat(),
+            bundles={"run": {"run_id": "run_20261118_000002_refs"},
+                     "integrate": {"run_id": "run_20261119_000002_eeee"}},
+        )
+        _make_fake_delivery(
+            self.results, EXP, "run_20261118_000001_5555",
             status="failed", created_at=(now - timedelta(days=2)).isoformat(),
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261117_000001_6666",
+            self.results, EXP, "run_20261117_000001_6666",
             status="running", created_at=(now - timedelta(hours=30)).isoformat(),
             mtime=(now - timedelta(hours=30)).timestamp(),
         )
         _make_fake_delivery(
-            self.results, EXP, "delivery_20261120_113000_7777",
+            self.results, EXP, "run_20261120_113000_7777",
             status="running", created_at=(now - timedelta(minutes=30)).isoformat(),
             mtime=(now - timedelta(minutes=30)).timestamp(),
         )
@@ -350,10 +381,10 @@ class RetentionAndCleanTest(unittest.TestCase):
         plan = plan_cleanup(self.results, policy, [EXP, "standalone_exp"], now=now)
         planned_ids = {(item.kind, item.item_id) for item in plan.to_remove}
         self.assertEqual(planned_ids, {
-            ("delivery", "delivery_20261112_000001_2222"),
-            ("delivery", "delivery_20261115_000001_3333"),
-            ("delivery", "delivery_20261118_000001_5555"),
-            ("delivery", "delivery_20261117_000001_6666"),
+            ("delivery", "run_20261112_000001_2222"),
+            ("delivery", "run_20261115_000001_3333"),
+            ("delivery", "run_20261118_000001_5555"),
+            ("delivery", "run_20261117_000001_6666"),
             ("bundle", "run_20261110_000001_aaaa"),
         })
         self.assertTrue(any("standalone_exp" in note for note in plan.notes))
@@ -361,19 +392,20 @@ class RetentionAndCleanTest(unittest.TestCase):
         # dry_run=True 不删除任何文件
         dry_report = apply_cleanup(self.results, policy, [EXP, "standalone_exp"], dry_run=True, now=now)
         self.assertEqual(dry_report.removed, [])
-        self.assertTrue((self.results / DELIVERIES_DIR / EXP / "delivery_20261112_000001_2222").is_dir())
+        self.assertTrue((self.results / EXP / "run_20261112_000001_2222").is_dir())
 
         # 执行清理
         report = apply_cleanup(self.results, policy, [EXP, "standalone_exp"], dry_run=False, now=now)
         self.assertEqual(len(report.removed), 5)
         self.assertEqual(report.failed, [])
-        # 应保留的交付与结果包均健在
+        # 应保留的交付与结果包均健在（包括被最新交付引用的失败统一目录 run_20261118_000002_refs）
         for kept_del in (
-            "delivery_20261111_000001_1111_milestone",
-            "delivery_20261119_000001_4444",
-            "delivery_20261120_113000_7777",
+            "run_20261111_000001_1111_milestone",
+            "run_20261118_000002_refs",
+            "run_20261119_000001_4444",
+            "run_20261120_113000_7777",
         ):
-            self.assertTrue((self.results / DELIVERIES_DIR / EXP / kept_del).is_dir())
+            self.assertTrue((self.results / EXP / kept_del).is_dir())
         for kept_bundle in (
             "run_20261110_000002_bbbb",
             "run_20261111_000001_cccc",
@@ -385,36 +417,36 @@ class RetentionAndCleanTest(unittest.TestCase):
         self.assertTrue((self.results / "standalone_exp" / "run_20261118_000001_ffff").is_dir())
         # latest.json 自动同步为最新成功交付
         pointer = read_latest_pointer(self.results, EXP)
-        self.assertEqual(pointer["delivery_id"], "delivery_20261119_000001_4444")
+        self.assertEqual(pointer["delivery_id"], "run_20261119_000001_4444")
 
     def test_clean_cli_defaults_to_preview_and_applies_only_with_flag(self) -> None:
         now = datetime.now(timezone.utc)
-        _make_fake_delivery(self.results, EXP, "delivery_20261110_000001_1111",
+        _make_fake_delivery(self.results, EXP, "run_20261110_000001_1111",
                             created_at=(now - timedelta(days=3)).isoformat())
-        _make_fake_delivery(self.results, EXP, "delivery_20261111_000001_2222",
+        _make_fake_delivery(self.results, EXP, "run_20261111_000001_2222",
                             created_at=(now - timedelta(days=2)).isoformat())
-        _make_fake_delivery(self.results, EXP, "delivery_20261112_000001_3333",
+        _make_fake_delivery(self.results, EXP, "run_20261112_000001_3333",
                             created_at=(now - timedelta(days=1)).isoformat())
 
         # 不传 --apply 仅预览，不删文件
         code, output = run_cli(["--project-dir", str(self.root), "clean", "--keep-last", "1"])
         self.assertEqual(code, 0, output)
         self.assertIn("预览模式", output)
-        self.assertTrue((self.results / DELIVERIES_DIR / EXP / "delivery_20261110_000001_1111").is_dir())
+        self.assertTrue((self.results / EXP / "run_20261110_000001_1111").is_dir())
 
         # 传 --apply 后执行清理
         code, output = run_cli(["--project-dir", str(self.root), "clean", "--keep-last", "1", "--apply"])
         self.assertEqual(code, 0, output)
         self.assertIn("已执行清理", output)
-        self.assertFalse((self.results / DELIVERIES_DIR / EXP / "delivery_20261110_000001_1111").exists())
-        self.assertFalse((self.results / DELIVERIES_DIR / EXP / "delivery_20261111_000001_2222").exists())
-        self.assertTrue((self.results / DELIVERIES_DIR / EXP / "delivery_20261112_000001_3333").is_dir())
+        self.assertFalse((self.results / EXP / "run_20261110_000001_1111").exists())
+        self.assertFalse((self.results / EXP / "run_20261111_000001_2222").exists())
+        self.assertTrue((self.results / EXP / "run_20261112_000001_3333").is_dir())
 
     def test_locked_file_does_not_crash_cleanup(self) -> None:
         now = datetime.now(timezone.utc)
-        d_old = _make_fake_delivery(self.results, EXP, "delivery_20261110_000001_1111",
+        d_old = _make_fake_delivery(self.results, EXP, "run_20261110_000001_1111",
                                     created_at=(now - timedelta(days=2)).isoformat())
-        _make_fake_delivery(self.results, EXP, "delivery_20261112_000001_2222",
+        _make_fake_delivery(self.results, EXP, "run_20261112_000001_2222",
                             created_at=(now - timedelta(days=1)).isoformat())
         policy = RetentionPolicy(enabled=True, keep_last=1)
         with mock.patch("omicsweave.core.retention.shutil.rmtree", side_effect=PermissionError("Excel locked")):
@@ -440,7 +472,7 @@ class EntryFileSwitchTest(unittest.TestCase):
         self.assertEqual(code1, 0, out1)
         code2, out2 = run_entry(self.root, [], retention=disabled, allow_clean=False)
         self.assertEqual(code2, 0, out2)
-        exp_dir = self.root / "analysis_results" / DELIVERIES_DIR / EXP
+        exp_dir = self.root / "results" / EXP
         deliveries = sorted(p.parent for p in exp_dir.glob("*/index.json"))
         self.assertEqual(len(deliveries), 2)
 
@@ -469,14 +501,14 @@ class EntryFileSwitchTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(len(list(exp_dir.glob("*/index.json"))), 1)
         # 孤立的旧 run_* 结果包也已联动清理
-        self.assertEqual(len(list((self.root / "analysis_results" / EXP).glob("run_*/manifest.json"))), 1)
+        self.assertEqual(len(list(exp_dir.glob("run_*/manifest.json"))), 1)
 
         # 开启 RETENTION_ENABLED 后，运行 pipeline 结束自动按保留策略清理旧交付
         code3, out3 = run_entry(self.root, [], retention=enabled, allow_clean=True)
         self.assertEqual(code3, 0, out3)
         self.assertIn("已按保留策略清理", out3)
         self.assertEqual(len(list(exp_dir.glob("*/index.json"))), 1)
-        self.assertEqual(len(list((self.root / "analysis_results" / EXP).glob("run_*/manifest.json"))), 1)
+        self.assertEqual(len(list(exp_dir.glob("run_*/manifest.json"))), 1)
 
     def test_scaffold_creates_entry_file_with_switches_off(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

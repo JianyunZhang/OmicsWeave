@@ -106,7 +106,7 @@ class DecoyBundleTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.root = Path(self._tmp.name).resolve()
         build_two_factor_project(self.root)
-        source = self.root / "analysis_results" / EXP / "run_20261101_000000_src"
+        source = self.root / "results" / EXP / "run_20261101_000000_src"
         for name, table in contract_tables().items():
             write_differential(table, source / "omics" / name / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=source.name, project_id="toy", experiment_id=EXP, omics=list(Omics)), source)

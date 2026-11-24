@@ -107,7 +107,8 @@ def latest_integration(results_root: str | Path, experiment_id: str, source: str
     return found[-1] if found else None
 
 
-def _changed_inputs(project: Project, bundle: Path, skip: frozenset[Path] = frozenset()) -> list[str]:
+def _changed_inputs(project: Project, bundle: Path, skip: frozenset[Path] = frozenset(),
+                    *, ignore_kinds: frozenset[str] = frozenset()) -> list[str]:
     """结果包登记的项目内输入文件（实验配置、样本表、数据、参考、panels.yaml）中，内容与当前不同或已不存在的文件。
 
     结果根目录下的输入（源结果包中的表）按运行 ID 固定，不再核对。
@@ -115,7 +116,7 @@ def _changed_inputs(project: Project, bundle: Path, skip: frozenset[Path] = froz
     results = project.path("results").resolve()
     changed = []
     for item in read_manifest(bundle).files:
-        if item.role != "input":
+        if item.role != "input" or item.kind in ignore_kinds:
             continue
         path = (project.root / item.path).resolve()
         if path in skip or path.is_relative_to(results):
@@ -187,8 +188,12 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
         else:
             differential = {Omics(p.parent.parent.name) for p in bundle.glob("omics/*/tables/differential.parquet")}
             enrichment = {Omics(p.parent.parent.name) for p in bundle.glob("omics/*/tables/enrichment.parquet")}
-            # 沿用的单组学结果包须与当前数据、样本表和分析设置一致；只改 integration 一节（如 panels）不影响它
-            stale = _changed_inputs(project, bundle, frozenset({(experiment.root / EXPERIMENT_FILE).resolve()}))
+            # 沿用的单组学结果包须与当前数据、样本表和分析设置一致；只改 integration 一节或整合输入（如 panels）不影响它
+            stale = _changed_inputs(
+                project, bundle,
+                frozenset({(experiment.root / EXPERIMENT_FILE).resolve()}),
+                ignore_kinds=frozenset({"integration"}),
+            )
             stale += [f"experiment.yaml 的 {key} 一节" for key in _analysis_config_changes(experiment, bundle)]
             if stale:
                 problems.append(f"{exp_id} 的单组学结果包 {bundle.name} 已过期：{'、'.join(stale)} 在该次运行之后改过；"
@@ -301,7 +306,10 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
             else:
                 step(current, f"omicsweave run --experiment {exp_id} --omics {','.join(omics)}")
                 if delivery:
-                    result.run_dir, notes = run_experiment(exp_id, omics, root=project, command=command)
+                    result.run_dir, notes = run_experiment(
+                        exp_id, omics, root=project, command=command,
+                        run_id=delivery.directory.name, into_existing=True,
+                    )
                     for note in notes:
                         log(f"[提示] {note}")
                     delivery.stages[current]["notes"] = notes
@@ -321,8 +329,15 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
             else:
                 step(current, f"omicsweave integrate --experiment {exp_id} --source {run_name}")
                 if delivery:
-                    result.integration_dir, notes = integrate_experiment(exp_id, source=run_name, root=project,
-                                                                         command=command)
+                    if plan.source is None:
+                        result.integration_dir, notes = integrate_experiment(
+                            exp_id, source=run_name, root=project, command=command, into_source=True,
+                        )
+                    else:
+                        result.integration_dir, notes = integrate_experiment(
+                            exp_id, source=run_name, root=project, command=command,
+                            run_id=delivery.directory.name, into_existing=True,
+                        )
                     for note in notes:
                         log(f"[提示] {note}")
                     delivery.stages[current]["notes"] = notes

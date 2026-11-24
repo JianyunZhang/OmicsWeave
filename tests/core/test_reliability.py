@@ -111,7 +111,7 @@ class RunReliabilityTest(ReliabilityCase):
 
 class IntegrationReliabilityTest(ReliabilityCase):
     def source_bundle(self) -> Path:
-        run_dir = self.root / "analysis_results" / EXP / "run_20261101_000000_src"
+        run_dir = self.root / "results" / EXP / "run_20261101_000000_src"
         for name, table in contract_tables().items():
             write_differential(table, run_dir / "omics" / name / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=run_dir.name, project_id="toy", experiment_id=EXP,

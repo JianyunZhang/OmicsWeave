@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+from PIL import Image
 
 from omicsweave.integration.mappings.network_layout import default_layout
 from omicsweave.integration.plotting.pathway_map_html import write_pathway_map_html
@@ -128,6 +130,10 @@ class CellPressStandardsTest(unittest.TestCase):
                     spec, Path(tmp) / "ga_cp",
                     style="metro_atlas", formats=("pdf", "png", "tiff"),
                 )
+            with Image.open(BytesIO((Path(tmp) / "ga_cp.tiff").read_bytes())) as tiff:
+                tiff.load()
+                self.assertEqual(tiff.size, (1200, 1200))
+                self.assertEqual(tiff.tag_v2[259], 5)  # TIFF compression tag 5 = LZW
             self.assertEqual([p.suffix for p in paths], [".pdf", ".png", ".tiff"])
             png_arr = mpimg.imread(paths[1])
             self.assertEqual(png_arr.shape[:2], (1200, 1200), f"Expected exact 1200x1200 px, got {png_arr.shape[:2]}")

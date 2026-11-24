@@ -145,7 +145,9 @@ class BundleTest(unittest.TestCase):
             samples, _ = dossier_samples(source, members)
         self.assertEqual(set(groups.loc[groups["tissue"] == "liver", "reaction"]), {"CS_m", "PDH_m"})
         self.assertEqual(list(fits_table.columns), ["sample_id", "tissue", "reaction", "tracer", "net_flux", "n_fits",
-                                                    "fit_q25", "fit_q75", "fit_p25", "fit_p75", "fit_std", "at_bound"])
+                                                    "fit_q25", "fit_q75", "fit_p25", "fit_p75", "fit_std",
+                                                    "at_bound", "at_upper_bound"])
+        self.assertFalse((fits_table["at_upper_bound"] & ~fits_table["at_bound"]).any())
         self.assertTrue((fits_table["n_fits"] == 6).all())
         self.assertTrue((fits_table["fit_q25"] <= fits_table["fit_q75"]).all())
         liver = table[(table["tissue"] == "liver") & (table["contrast_id"] == "HFD_vs_LFD")].set_index("feature_id")

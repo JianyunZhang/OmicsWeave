@@ -435,6 +435,34 @@ class MultiTracerRunTest(unittest.TestCase):
         self.assertEqual(len(self.table), len(REACTIONS))
         self.assertTrue((self.table["inference_unit"] == "biological_replicate").all())
 
+    def test_pooled_and_each_tracer_have_separate_tables_and_volcanoes(self) -> None:
+        from openpyxl import load_workbook
+        from urllib.parse import unquote
+        from omicsweave.core.config import load_experiment, load_project
+        from omicsweave.core.delivery import Delivery
+
+        pooled = pd.read_csv(self.mfa / "tables/differential_pooled.tsv", sep="\t")
+        self.assertEqual(len(pooled), len(self.table))
+        self.assertEqual(pooled["flags"].fillna("").tolist(), self.table["flags"].fillna("").tolist())
+        self.assertTrue(list((self.mfa / "figures").glob("volcano_*.pdf")))
+        source = pd.read_parquet(self.mfa / "tables/differential_by_tracer.parquet")
+        for name, expected in source.groupby("tracer"):
+            data = pd.read_csv(self.mfa / "tables/by_tracer" / name / "differential.tsv", sep="\t")
+            self.assertEqual(set(data.tracer), {name})
+            np.testing.assert_allclose(data.log2fc, expected.log2fc, equal_nan=True)
+            self.assertTrue(list((self.mfa / "figures/by_tracer" / name).glob("volcano_*.pdf")))
+        delivery = Delivery(load_experiment(load_project(self.root), EXP), [], [])
+        delivery.bundle("run", self.run_dir)
+        delivery.write_summary()
+        book = load_workbook(delivery.directory / "summary.xlsx")
+        try:
+            links = list(book["MFA统计与图"].iter_rows(min_row=2))
+            self.assertEqual({scope.value for scope, kind, _ in links if kind.value == "差异统计"}, {*TRACERS, "pooled"})
+            for _, _, cell in links:
+                self.assertTrue((delivery.directory / unquote(cell.hyperlink.target)).is_file())
+        finally:
+            book.close()
+
     def test_pooled_table_carries_flux_groups_and_standardized_scale(self) -> None:
         # 合并结果也按通量组做 BH（G10）；标准化尺度的异质性列与各示踪剂的 g 一并写出
         for column in ("flux_group", "flux_group_size", "smd", "smd_heterogeneity_pvalue", "tracer_smd", "smd_weights"):

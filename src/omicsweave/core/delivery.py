@@ -18,17 +18,22 @@ from urllib.parse import quote
 import pandas as pd
 import pyarrow.parquet as pq
 
-from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
+from omicsweave.contract.manifest import (
+    MANIFEST_FILE,
+    allocate_run_dir,
+    new_run_id,
+    read_manifest,
+    validate_run_tag,
+)
 from .config import EXPERIMENT_FILE, PROJECT_FILE, Experiment
 from .provenance import sha256_file
 
-DELIVERIES_DIR = "_deliveries"
 INDEX_FILE = "index.json"
 SUMMARY_FILE = "summary.xlsx"
 LATEST_POINTER_FILE = "latest.json"
-LATEST_SCHEMA_VERSION = 1
+LATEST_SCHEMA_VERSION = 2
 PIN_FILE = ".keep"
-DELIVERY_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+validate_delivery_tag = validate_run_tag
 
 # 交付目录中反应档案面板产出的子目录，与无面板候选表的子目录
 PANELS_DIR = "panels"
@@ -37,23 +42,26 @@ CANDIDATES_DIR = "candidates"
 MAPS_DIR = "pathway_map"
 
 
-def validate_delivery_tag(tag: str) -> str:
-    """校验交付标签：仅允许字母、数字及 ``_`` / ``.`` / ``-``，长度 1–64，避免跨平台路径问题。"""
-    cleaned = tag.strip()
-    if not cleaned or not DELIVERY_TAG_PATTERN.match(cleaned) or cleaned in {".", ".."}:
-        raise ValueError(
-            f"交付标签 {tag!r} 无效：请以字母或数字开头，仅使用字母、数字、_、.、-，且不超过 64 个字符"
-        )
-    return cleaned
+def new_delivery_id(now: datetime | None = None, tag: str | None = None, *, seq: int = 1) -> str:
+    """形如 ``run_20261119_233012``（同秒冲突时附 ``_02``..``_99``，带标签时附 ``_<tag>``）的运行与交付 ID。"""
+    return new_run_id(now=now, tag=tag, seq=seq)
 
 
-def new_delivery_id(now: datetime | None = None, tag: str | None = None) -> str:
-    """形如 ``delivery_20261119_233012_a3f9``（带标签时附 ``_<tag>``）的交付 ID：按时间排序，末尾随机后缀避免同秒冲突。"""
-    current = now or datetime.now()
-    base = f"delivery_{current:%Y%m%d_%H%M%S}_{secrets.token_hex(2)}"
-    if tag is not None:
-        return f"{base}_{validate_delivery_tag(tag)}"
-    return base
+def _link_or_copy(src: Path, dst: Path) -> None:
+    """优先建立硬链接以零拷贝共享文件，跨文件系统或不支持时回退复制。"""
+    src_resolved = src.resolve()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        try:
+            if os.path.samefile(src_resolved, dst):
+                return
+        except OSError:
+            pass
+        dst.unlink()
+    try:
+        os.link(src_resolved, dst)
+    except OSError:
+        shutil.copy2(src_resolved, dst)
 
 
 class Delivery:
@@ -61,20 +69,15 @@ class Delivery:
                  tag: str | None = None, pinned: bool = False, now: datetime | None = None):
         project = experiment.project
         self.project_root = project.root
+        self.results_root = project.path("results")
+        self._default_experiment = (
+            project.config.pipeline.experiments[0]
+            if project.config.pipeline.experiments
+            else experiment.id
+        )
         validated_tag = validate_delivery_tag(tag) if tag is not None else None
-        parent = project.path("results") / DELIVERIES_DIR / experiment.id
-        directory: Path | None = None
-        for _ in range(16):
-            candidate = parent / new_delivery_id(now=now, tag=validated_tag)
-            try:
-                candidate.mkdir(parents=True, exist_ok=False)
-                directory = candidate
-                break
-            except FileExistsError:
-                continue
-        if directory is None:
-            raise FileExistsError(f"无法在 {parent} 创建唯一的交付目录")
-        self.directory = directory
+        parent = self.results_root / experiment.id
+        self.directory = allocate_run_dir(parent, now=now, tag=validated_tag)
         if pinned:
             (self.directory / PIN_FILE).write_text("pinned\n", encoding="utf-8")
         self.stages = {"validate": {"status": "completed"}}
@@ -82,6 +85,7 @@ class Delivery:
         self.bundles: dict[str, dict] = {}
         self.artifacts: list[dict] = []
         self.data = {
+            "run_id": self.directory.name,
             "delivery_id": self.directory.name, "project": project.id, "experiment": experiment.id,
             "created_at": datetime.now(timezone.utc).isoformat(), "tag": validated_tag, "pinned": bool(pinned),
             "command": command, "status": "running",
@@ -99,31 +103,37 @@ class Delivery:
         pending.replace(index)
 
     def complete(self) -> Path:
-        """标记交付完成并原子更新同实验下的 ``latest.json`` 指针。"""
+        """标记交付完成并原子更新结果根目录下的 ``latest.json`` 指针。"""
         self.data["status"] = "completed"
         self.data["completed_at"] = datetime.now(timezone.utc).isoformat()
         self.save()
         return self.update_latest_pointer()
 
     def update_latest_pointer(self) -> Path:
-        """写出指向本次交付的跨平台相对路径 JSON 指针（``_deliveries/<实验>/latest.json``）。"""
-        delivery_id = self.directory.name
-        summary = PurePosixPath(delivery_id, SUMMARY_FILE).as_posix() if (self.directory / SUMMARY_FILE).is_file() else None
-        payload = {
-            "schema_version": LATEST_SCHEMA_VERSION,
-            "project": self.data.get("project"),
-            "experiment": self.data.get("experiment"),
-            "delivery_id": delivery_id,
-            "path": delivery_id,
+        """写出指向本次交付的跨平台相对路径 JSON 指针（``<结果根>/latest.json``）。"""
+        exp_id = self.data["experiment"]
+        run_id = self.directory.name
+        rel_dir = PurePosixPath(exp_id, run_id)
+        summary = (rel_dir / SUMMARY_FILE).as_posix() if (self.directory / SUMMARY_FILE).is_file() else None
+        entry = {
+            "experiment": exp_id,
+            "run_id": run_id,
+            "delivery_id": run_id,
+            "path": rel_dir.as_posix(),
             "summary": summary,
-            "index": PurePosixPath(delivery_id, INDEX_FILE).as_posix(),
+            "index": (rel_dir / INDEX_FILE).as_posix(),
             "tag": self.data.get("tag"),
             "pinned": bool(self.data.get("pinned")) or (self.directory / PIN_FILE).is_file(),
             "created_at": self.data.get("created_at"),
             "completed_at": self.data.get("completed_at"),
             "bundles": {stage: info["run_id"] for stage, info in self.bundles.items() if isinstance(info, dict) and info.get("run_id")},
         }
-        return write_latest_pointer(self.directory.parent, payload)
+        return write_latest_pointer(
+            self.results_root,
+            entry,
+            project_id=self.data.get("project"),
+            default_experiment=self._default_experiment,
+        )
 
     @contextmanager
     def stage(self, name: str, success: str = "completed", **details) -> Iterator[None]:
@@ -146,12 +156,27 @@ class Delivery:
 
     def bundle(self, stage: str, directory: Path) -> None:
         manifest = read_manifest(directory)
-        base = Path(os.path.relpath(directory, self.directory))
+        same_dir = directory.resolve() == self.directory.resolve()
+        base = PurePosixPath(".") if same_dir else PurePosixPath(Path(os.path.relpath(directory, self.directory)).as_posix())
+        manifest_sha = sha256_file(directory / MANIFEST_FILE)
         self.bundles[stage] = {"run_id": manifest.run_id, "path": base.as_posix(),
                                "config_sha256": manifest.config_sha256, "created_at": manifest.created_at.isoformat(),
-                               "manifest_sha256": sha256_file(directory / MANIFEST_FILE)}
+                               "manifest_sha256": manifest_sha}
+        run_info = self.bundles.get("run")
+        same_as_run = isinstance(run_info, dict) and (
+            same_dir if run_info.get("path") == "." else
+            (self.directory / str(run_info.get("path", ""))).resolve() == directory.resolve()
+        )
+        if stage == "integrate" and same_as_run and isinstance(run_info, dict):
+            run_info["manifest_sha256"] = manifest_sha
+        self.artifacts[:] = [item for item in self.artifacts if item["stage"] != stage]
         for item in manifest.files:
             if item.role != "output":
+                continue
+            top = PurePosixPath(item.path).parts[0] if item.path else ""
+            if stage == "run" and top == "integration":
+                continue
+            if stage == "integrate" and same_as_run and top != "integration":
                 continue
             record = {"stage": stage, "path": (base / item.path).as_posix(),
                       "size": item.size, "sha256": item.sha256}
@@ -161,11 +186,21 @@ class Delivery:
 
     def collect_exports(self) -> None:
         self.artifacts[:] = [item for item in self.artifacts if item["stage"] != "delivery"]
-        ignored = {self.directory / INDEX_FILE, self.directory / ".index.tmp", self.directory / PIN_FILE}
+        ignored_root = {
+            self.directory / INDEX_FILE,
+            self.directory / ".index.tmp",
+            self.directory / PIN_FILE,
+            self.directory / MANIFEST_FILE,
+        }
+        ignored_dirs = {"omics", "integration", "metadata", "qc", "exports"}
         for path in sorted(self.directory.rglob("*")):
-            if path.is_file() and path not in ignored:
-                self.artifacts.append({"stage": "delivery", "path": path.relative_to(self.directory).as_posix(),
-                                       "size": path.stat().st_size, "sha256": sha256_file(path)})
+            if not path.is_file() or path in ignored_root:
+                continue
+            rel = path.relative_to(self.directory)
+            if rel.parts[0] in ignored_dirs:
+                continue
+            self.artifacts.append({"stage": "delivery", "path": rel.as_posix(),
+                                   "size": path.stat().st_size, "sha256": sha256_file(path)})
 
     def _panel_rows(self) -> list[dict]:
         """整合结果包中反应档案面板的产出：矩阵（有 XLSX 时只取 XLSX）、图件（有 PDF 时只取 PDF）、节点分流与检验表。"""
@@ -195,7 +230,7 @@ class Delivery:
         return rows
 
     def copy_panels(self) -> list[dict]:
-        """把面板产出复制到交付目录 ``panels/<面板>/<组织>/``：只看交付目录就能拿到感兴趣通路的矩阵与图件。
+        """把面板产出链接（或复制）到交付目录 ``panels/<面板>/<组织>/``：只看交付目录就能拿到感兴趣通路的矩阵与图件。
 
         逐反应的档案页（图 B）与 PNG 仍只在整合结果包中。
         """
@@ -203,41 +238,35 @@ class Delivery:
         for row in rows:
             row["target"] = PurePosixPath(PANELS_DIR, row["面板"], row["组织"], row["文件"])
             destination = self.directory / row["target"]
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2((self.directory / row["source"]).resolve(), destination)
+            _link_or_copy(self.directory / row["source"], destination)
         return rows
 
     def copy_maps(self) -> list[dict]:
-        """把通路总图（图 E）、分专题子通路图与概念摘要图复制到交付目录 ``pathway_map/<组织>/``。"""
+        """把通路总图（图 E）、分专题子通路图与概念摘要图链接（或复制）到交付目录 ``pathway_map/<组织>/``。"""
         paths = {PurePosixPath(item["path"]) for item in self.artifacts
                  if item["stage"] == "integrate" and not item.get("missing")}
         rows = []
         prefix = ("integration", "reaction_dossier", "figures", "pathway_map")
         for path in sorted(paths):
-            # 1) 全景总图 map_<比较> 与概念摘要 abstract_<比较>：.../pathway_map/<组织>/<文件>
-            if len(path.parts) >= 6 and path.parts[-6:-2] == prefix:
-                if path.name.startswith("map_"):
-                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".html", ".tsv"):
-                        continue
-                    tissue = path.parts[-2]
-                    kind_label = "视图表" if path.suffix == ".tsv" else ("交互图件" if path.suffix == ".html" else "图件")
-                    row = {"组织": tissue, "比较": path.stem.removeprefix("map_"),
-                           "内容": kind_label, "文件": path.name,
-                           "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
-                elif path.name.startswith("abstract_"):
-                    if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tiff", ".tif", ".txt"):
-                        continue
-                    tissue = path.parts[-2]
-                    kind_label = "概念摘要图注" if path.suffix == ".txt" else "概念摘要"
-                    row = {"组织": tissue, "比较": path.stem.removeprefix("abstract_").removesuffix("_caption"),
-                           "内容": kind_label, "文件": path.name,
-                           "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
-                else:
-                    continue
+            overview = path.parts[-6:-2] == prefix
+            by_tracer = path.parts[-8:-4] == prefix and path.parts[-3] == "by_tracer"
+            if path.suffix == ".png" and path.with_suffix(".pdf") in paths:
+                continue
+            if (overview or by_tracer) and path.name.startswith("map_"):
+                tissue = path.parts[-4] if by_tracer else path.parts[-2]
+                relative = PurePosixPath(*path.parts[-3:]) if by_tracer else PurePosixPath(path.name)
+                kind = {".tsv": "视图表", ".html": "交互图件", ".txt": "图注"}.get(path.suffix, "图件")
+                contrast = path.stem.removeprefix("map_")
+                row = {"组织": tissue, "比较": contrast.removesuffix("_caption") if path.suffix == ".txt" else contrast,
+                       "内容": f"{path.parts[-2]} · {kind}" if by_tracer else kind, "文件": relative.as_posix(),
+                       "target": PurePosixPath(MAPS_DIR, tissue, relative)}
+            elif overview and path.name.startswith("abstract_"):
+                tissue = path.parts[-2]
+                kind_label = "概念摘要图注" if path.suffix == ".txt" else "概念摘要"
+                row = {"组织": tissue, "比较": path.stem.removeprefix("abstract_").removesuffix("_caption"),
+                       "内容": kind_label, "文件": path.name, "target": PurePosixPath(MAPS_DIR, tissue, path.name)}
             # 2) 正文分专题子通路图：.../pathway_map/<组织>/submaps/<比较>_<子图ID>.{pdf,png,tiff} 及配套 _caption.txt
             elif len(path.parts) >= 7 and path.parts[-7:-3] == prefix and path.parts[-2] == "submaps":
-                if path.suffix == ".png" and path.with_suffix(".pdf") in paths or path.suffix not in (".pdf", ".png", ".tiff", ".tif", ".txt"):
-                    continue
                 tissue = path.parts[-3]
                 kind_label = "子通路图注" if path.suffix == ".txt" else "子通路图"
                 row = {"组织": tissue, "比较": path.stem.removesuffix("_caption"),
@@ -246,23 +275,54 @@ class Delivery:
             else:
                 continue
             destination = self.directory / row["target"]
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2((self.directory / path).resolve(), destination)
+            _link_or_copy(self.directory / path, destination)
             rows.append(row)
         return rows
+
+    def _write_mfa_index(self, writer: pd.ExcelWriter) -> None:
+        """链接到本次运行包中的逐示踪剂和 pooled 统计表及火山图。"""
+        run = self.bundles.get("run")
+        if not run:
+            return
+        mfa = PurePosixPath(run["path"], "omics", "mfa")
+        paths = {PurePosixPath(item["path"]) for item in self.artifacts
+                 if item["stage"] == "run" and not item.get("missing")}
+        if mfa / "tables" / "differential_by_tracer.parquet" not in paths:
+            return
+        rows = []
+        for path in sorted(p for p in paths if p.is_relative_to(mfa)):
+            parts = path.relative_to(mfa).parts
+            if parts == ("tables", "differential_pooled.tsv"):
+                scope, kind = "pooled", "差异统计"
+            elif len(parts) == 4 and parts[:2] == ("tables", "by_tracer") and parts[-1] == "differential.tsv":
+                scope, kind = parts[2], "差异统计"
+            elif parts[0] == "figures" and path.name.startswith("volcano_") and path.suffix in (".pdf", ".png"):
+                if path.suffix == ".png" and path.with_suffix(".pdf") in paths:
+                    continue
+                scope = parts[2] if len(parts) == 4 and parts[1] == "by_tracer" else "pooled"
+                kind = "火山图"
+            else:
+                continue
+            rows.append({"示踪剂或合并": scope, "内容": kind, "文件": path.name, "target": path})
+        if rows:
+            self._write_link_index(writer, rows, "MFA统计与图", ["示踪剂或合并", "内容", "文件"], [28, 16, 52])
 
     def _write_map_index(self, writer: pd.ExcelWriter, rows: list[dict]) -> None:
         if not rows:
             return
-        pd.DataFrame([{k: row[k] for k in ("组织", "比较", "内容", "文件")} for row in rows]).to_excel(
-            writer, sheet_name="通路总图", index=False)
-        sheet = writer.sheets["通路总图"]
+        self._write_link_index(writer, rows, "通路总图", ["组织", "比较", "内容", "文件"], [18, 24, 28, 64])
+
+    @staticmethod
+    def _write_link_index(writer: pd.ExcelWriter, rows: list[dict], title: str,
+                          columns: list[str], widths: list[int]) -> None:
+        pd.DataFrame(rows, columns=columns).to_excel(writer, sheet_name=title, index=False)
+        sheet = writer.sheets[title]
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
-        for column, width in zip("ABCD", (18, 24, 10, 40)):
+        for column, width in zip("ABCD", widths):
             sheet.column_dimensions[column].width = width
         for index, row in enumerate(rows, start=2):
-            cell = sheet.cell(index, 4)
+            cell = sheet.cell(index, len(columns))
             cell.hyperlink = quote(row["target"].as_posix(), safe="/")
             cell.style = "Hyperlink"
 
@@ -337,6 +397,7 @@ class Delivery:
                 self._write_candidate_overview(writer, candidates)
             self._write_panel_index(writer, panels)
             self._write_map_index(writer, maps)
+            self._write_mfa_index(writer)
             pd.DataFrame(tables).to_excel(writer, sheet_name="结果表与质控", index=False)
             pd.DataFrame(self.artifacts).to_excel(writer, sheet_name="文件索引", index=False)
 
@@ -389,28 +450,50 @@ def _parse_iso_timestamp(value: object) -> float | None:
     return parsed.timestamp()
 
 
-def write_latest_pointer(experiment_deliveries_dir: Path, payload: dict) -> Path:
-    """原子写出 ``_deliveries/<实验>/latest.json``，仅使用相对路径以保证跨平台和可搬迁。"""
-    experiment_deliveries_dir.mkdir(parents=True, exist_ok=True)
-    pointer = experiment_deliveries_dir / LATEST_POINTER_FILE
-    pending = experiment_deliveries_dir / f".{LATEST_POINTER_FILE}.tmp.{os.getpid()}.{secrets.token_hex(2)}"
+def latest_pointer_path(results_root: str | Path) -> Path:
+    return Path(results_root) / LATEST_POINTER_FILE
+
+
+def write_latest_pointer(
+    results_root: Path,
+    entry: dict,
+    *,
+    project_id: str | None = None,
+    default_experiment: str | None = None,
+) -> Path:
+    """原子更新 ``<results_root>/latest.json`` 中的实验指针，仅使用相对路径以保证跨平台和可搬迁。"""
+    results_root = Path(results_root)
+    results_root.mkdir(parents=True, exist_ok=True)
+    pointer = latest_pointer_path(results_root)
+    existing = read_latest_pointer(results_root) or {}
+    experiments = dict(existing.get("experiments")) if isinstance(existing.get("experiments"), dict) else {}
+    exp_id = entry["experiment"]
+    experiments[exp_id] = entry
+    payload = {
+        "schema_version": LATEST_SCHEMA_VERSION,
+        "project": project_id or existing.get("project"),
+        "default_experiment": default_experiment or existing.get("default_experiment") or exp_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "experiments": dict(sorted(experiments.items())),
+    }
+    pending = results_root / f".{LATEST_POINTER_FILE}.tmp.{os.getpid()}.{secrets.token_hex(2)}"
     pending.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     pending.replace(pointer)
     return pointer
 
 
 def build_latest_payload(record: DeliveryRecord) -> dict:
-    """由 :class:`DeliveryRecord` 生成可写入 ``latest.json`` 的跨平台指针字典。"""
-    delivery_id = record.directory.name
-    summary = PurePosixPath(delivery_id, SUMMARY_FILE).as_posix() if (record.summary_path and record.summary_path.is_file()) else None
+    """由 :class:`DeliveryRecord` 生成可写入 ``latest.json`` 的跨平台指针条目字典。"""
+    run_id = record.directory.name
+    rel_dir = PurePosixPath(record.experiment, run_id)
+    summary = (rel_dir / SUMMARY_FILE).as_posix() if (record.summary_path and record.summary_path.is_file()) else None
     return {
-        "schema_version": LATEST_SCHEMA_VERSION,
-        "project": record.project,
         "experiment": record.experiment,
-        "delivery_id": delivery_id,
-        "path": delivery_id,
+        "run_id": run_id,
+        "delivery_id": run_id,
+        "path": rel_dir.as_posix(),
         "summary": summary,
-        "index": PurePosixPath(delivery_id, INDEX_FILE).as_posix(),
+        "index": (rel_dir / INDEX_FILE).as_posix(),
         "tag": record.tag,
         "pinned": record.pinned,
         "created_at": record.created_at,
@@ -482,21 +565,30 @@ def read_delivery_record(delivery_dir: Path, experiment_id: str | None = None) -
 
 
 def delivery_experiments(results_root: str | Path) -> list[str]:
-    """返回 ``<results_root>/_deliveries/`` 下存在交付目录的实验 ID（按名称排序）。"""
-    base = Path(results_root) / DELIVERIES_DIR
-    if not base.is_dir():
+    """返回 ``<results_root>/`` 下存在交付目录（含 ``index.json``）的实验 ID（按名称排序）。"""
+    root = Path(results_root)
+    if not root.is_dir():
         return []
-    return sorted(entry.name for entry in base.iterdir() if entry.is_dir() and not entry.name.startswith("."))
+    found = []
+    for entry in root.iterdir():
+        if not entry.is_dir() or entry.name.startswith((".", "_")):
+            continue
+        if any(
+            child.is_dir() and not child.name.startswith((".", "_")) and (child / INDEX_FILE).is_file()
+            for child in entry.iterdir()
+        ):
+            found.append(entry.name)
+    return sorted(found)
 
 
 def list_deliveries(results_root: str | Path, experiment_id: str) -> list[DeliveryRecord]:
-    """列出某实验的全部交付记录，按时间从旧到新排序（兼容旧版 UUID 交付目录）。"""
-    base = Path(results_root) / DELIVERIES_DIR / experiment_id
+    """列出某实验的全部交付记录，按时间从旧到新排序。"""
+    base = Path(results_root) / experiment_id
     if not base.is_dir():
         return []
     records: list[DeliveryRecord] = []
     for entry in base.iterdir():
-        if not entry.is_dir() or entry.name.startswith("."):
+        if not entry.is_dir() or entry.name.startswith((".", "_")):
             continue
         record = read_delivery_record(entry, experiment_id=experiment_id)
         if record is not None:
@@ -505,55 +597,91 @@ def list_deliveries(results_root: str | Path, experiment_id: str) -> list[Delive
     return records
 
 
-def read_latest_pointer(results_root: str | Path, experiment_id: str) -> dict | None:
-    """读取 ``_deliveries/<实验>/latest.json``；不存在或格式损坏时返回 None。"""
-    pointer = Path(results_root) / DELIVERIES_DIR / experiment_id / LATEST_POINTER_FILE
+def read_latest_pointer(results_root: str | Path, experiment_id: str | None = None) -> dict | None:
+    """读取 ``<results_root>/latest.json``（或指定实验的条目）；不存在或格式损坏时返回 None。"""
+    pointer = latest_pointer_path(results_root)
     if not pointer.is_file():
         return None
     try:
         data = json.loads(pointer.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
     except (OSError, ValueError):
         return None
+    if experiment_id is None:
+        return data
+    experiments = data.get("experiments")
+    if not isinstance(experiments, dict):
+        return None
+    entry = experiments.get(experiment_id)
+    return entry if isinstance(entry, dict) else None
 
 
 def resolve_latest_delivery(results_root: str | Path, experiment_id: str) -> tuple[DeliveryRecord | None, str]:
     """解析某实验最新一次成功交付，返回 ``(记录, 来源)``，来源为 ``pointer`` / ``scan`` / ``none``。
 
-    优先读取 ``latest.json`` 指针并核对目标目录仍有效且状态为 ``completed``；若指针缺失或已失效，
-    自动回退到扫描全部交付目录并取最新一次成功交付（兼容历史 UUID 交付）。
+    优先读取 ``<results_root>/latest.json`` 指针并核对目标目录仍有效且状态为 ``completed``；
+    若指针缺失或已失效，自动回退到扫描该实验的全部交付目录并取最新一次成功交付。
     """
-    base = Path(results_root) / DELIVERIES_DIR / experiment_id
-    pointer = read_latest_pointer(results_root, experiment_id)
-    if pointer and isinstance(pointer.get("path"), str) and pointer["path"].strip():
+    root = Path(results_root)
+    exp_dir = root / experiment_id
+    entry = read_latest_pointer(root, experiment_id)
+    if entry and isinstance(entry.get("path"), str) and entry["path"].strip():
         try:
-            base_resolved = base.resolve()
-            target = (base / pointer["path"]).resolve()
-            if target.parent == base_resolved and target.is_dir():
+            exp_resolved = exp_dir.resolve()
+            target = (root / entry["path"]).resolve()
+            if target.parent == exp_resolved and target.is_dir():
                 record = read_delivery_record(target, experiment_id=experiment_id)
                 if record is not None and record.status == "completed":
                     return record, "pointer"
         except OSError:
             pass
-    completed = [item for item in list_deliveries(results_root, experiment_id) if item.status == "completed"]
+    completed = [item for item in list_deliveries(root, experiment_id) if item.status == "completed"]
     if completed:
         return completed[-1], "scan"
     return None, "none"
 
 
 def sync_latest_pointer(results_root: str | Path, experiment_id: str) -> Path | None:
-    """根据当前磁盘上的成功交付重建或清理 ``latest.json``，确保指针始终有效。"""
-    base = Path(results_root) / DELIVERIES_DIR / experiment_id
-    completed = [item for item in list_deliveries(results_root, experiment_id) if item.status == "completed"]
-    pointer = base / LATEST_POINTER_FILE
+    """根据当前磁盘上的成功交付重建或清理 ``<results_root>/latest.json`` 中的实验条目。"""
+    root = Path(results_root)
+    completed = [item for item in list_deliveries(root, experiment_id) if item.status == "completed"]
     if completed:
-        return write_latest_pointer(base, build_latest_payload(completed[-1]))
-    if pointer.is_file():
-        try:
-            pointer.unlink()
-        except OSError:
-            pass
-    return None
+        latest_rec = completed[-1]
+        return write_latest_pointer(root, build_latest_payload(latest_rec), project_id=latest_rec.project)
+    pointer = latest_pointer_path(root)
+    existing = read_latest_pointer(root)
+    if not existing or not isinstance(existing.get("experiments"), dict):
+        if pointer.is_file():
+            try:
+                pointer.unlink()
+            except OSError:
+                pass
+        return None
+    experiments = dict(existing["experiments"])
+    if experiment_id in experiments:
+        del experiments[experiment_id]
+        if not experiments:
+            try:
+                pointer.unlink()
+            except OSError:
+                pass
+            return None
+        default_exp = existing.get("default_experiment")
+        if default_exp == experiment_id:
+            default_exp = next(iter(sorted(experiments)))
+        payload = {
+            "schema_version": LATEST_SCHEMA_VERSION,
+            "project": existing.get("project"),
+            "default_experiment": default_exp,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "experiments": dict(sorted(experiments.items())),
+        }
+        pending = root / f".{LATEST_POINTER_FILE}.tmp.{os.getpid()}.{secrets.token_hex(2)}"
+        pending.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        pending.replace(pointer)
+        return pointer
+    return pointer if pointer.is_file() else None
 
 
 def open_path(path: Path) -> None:

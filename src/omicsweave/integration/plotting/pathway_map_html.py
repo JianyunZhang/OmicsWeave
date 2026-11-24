@@ -1526,6 +1526,7 @@ def _extract_payload(
     return {
         "meta": {
             "title": title,
+            "tracer": str(view["tracer"].iloc[0]) if "tracer" in view and not view.empty else "",
             "tissue": tissue,
             "contrast": contrast_id,
             "caption": list(caption),
@@ -2698,7 +2699,7 @@ _JS = r"""
         if (el.flux_pooling_mode === "multi_tracer_pooled") {
           modeDesc = `<strong>Pooled IVW (${el.flux_tracers.length} identifiable tracers):</strong> ${esc(tList)} — combined via tracer-stratified inverse-variance fixed-effects pooling (unconstrained / low-n tracers gated out).`;
         } else if (el.flux_pooling_mode === "single_tracer") {
-          modeDesc = `<strong>Active MFA Tracer:</strong> ${esc(tList)} (only 1 identifiable tracer with sufficient n; Pooled estimate = ${esc(tList)}).`;
+          modeDesc = `<strong>Active MFA Tracer:</strong> ${esc(tList)} (one identifiable tracer with sufficient animals).`;
         } else if (el.flux_pooling_mode === "multi_tracer_conflict") {
           modeDesc = `<strong>Multi-Tracer Conflict:</strong> ${esc(tList)} have opposing clear effects (|g| ≥ 1); no pooled flux direction assigned.`;
         }
@@ -2901,7 +2902,7 @@ _JS = r"""
         <button class="btn" id="btn-close-lg" style="padding:1px 6px;">×</button>
       </div>
       <div class="legend-grid">
-        <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="1" y1="5" x2="31" y2="5" stroke="${pal.up}" stroke-width="4"/></svg></span><span><strong>Solid Red / Blue rail:</strong> Measured MFA flux — Pooled IVW across identifiable tracers (k=1 → single tracer; badge shows active tracer e.g. <code>●●○ U-13C-Glc Flux</code>, <code>●●● U-13C-Glc+Ala</code>)</span></div>
+        <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="1" y1="5" x2="31" y2="5" stroke="${pal.up}" stroke-width="4"/></svg></span><span><strong>Solid Red / Blue rail:</strong> ${DATA.meta.tracer ? "Net flux assessed within the displayed tracer cohort." : "MFA net flux assessed across informative tracers (k=1: single-tracer evidence)."}</span></div>
         <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="1" y1="5" x2="15" y2="5" stroke="${softUp}" stroke-width="4"/><line x1="2" y1="5" x2="14" y2="5" stroke="${pal.card_bg}" stroke-width="1.8"/><line x1="17" y1="5" x2="31" y2="5" stroke="${softDn}" stroke-width="4"/><line x1="18" y1="5" x2="30" y2="5" stroke="${pal.card_bg}" stroke-width="1.8"/></svg></span><span><strong>Hollow soft red/blue rail:</strong> Enz-pred (L1) inferred dir. (≤72% sat., lower conf.; never metabolite-only)</span></div>
         <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="1" y1="5" x2="31" y2="5" stroke="${pal.edge_grey}" stroke-width="3"/><text x="7" y="8" font-size="9" fill="${pal.card_bg}">&lt;</text><text x="22" y="8" font-size="9" fill="${pal.card_bg}">&gt;</text></svg></span><span><strong>Opposing &lt; &gt; grey rail:</strong> Reversible reaction without single net direction (or multi-tracer conflict)</span></div>
         <div class="lg-row"><span class="lg-swatch"><svg width="32" height="10"><line x1="2" y1="5" x2="30" y2="5" stroke="${pal.coupled_track}" stroke-width="8" stroke-linecap="round"/><line x1="2" y1="5" x2="30" y2="5" stroke="${pal.up}" stroke-width="3"/></svg></span><span><strong>Linked flux (Shared 1 DOF — NOT extra confidence):</strong> Per-fit |r| ≥ 1−1e-6 across fits (mass balance); 1 hypothesis in grouped BH-FDR</span></div>

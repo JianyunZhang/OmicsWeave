@@ -71,7 +71,7 @@ def _resolve_path(value: str | Path, config_dir: Path) -> Path:
     if path.is_absolute():
         return path
     repo_candidate = project_dir() / path
-    if str(path).replace("\\", "/").startswith(("analysis_results/", "experiments/")):
+    if str(path).replace("\\", "/").startswith(("results/", "analysis_results/", "experiments/")):
         return repo_candidate.resolve()
     config_candidate = (config_dir / path).resolve()
     return config_candidate if config_candidate.exists() else repo_candidate.resolve()

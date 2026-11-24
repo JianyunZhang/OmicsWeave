@@ -298,6 +298,42 @@ class PathwayMapBundleTest(unittest.TestCase):
         with self.assertRaises(RunError):
             self.run_dossier(reactions=["HEX_c"], pathway_map={"layout": "bad_layout.yaml"})
 
+    def test_each_tracer_map_uses_its_own_statistics_and_animals(self) -> None:
+        from tests.visualization.test_pathway_map_html import _extract_payload_json
+
+        source = self.source_bundle()
+        pooled = self.tables["mfa"]
+        base_rows = pooled[(pooled.contrast_id == DIET) & (pooled.tissue == "liver")]
+        up = base_rows.assign(tracer="glucose", log2fc=1., mean_numerator=20., mean_denominator=10.,
+                              effect_size=1.5, direction_stability=1., n_numerator=4, n_denominator=3)
+        down = up.assign(tracer="lactate", log2fc=-1., mean_numerator=5., effect_size=-1.5, n_numerator=2)
+        pd.concat([up, down]).to_parquet(source / "omics/mfa/tables/differential_by_tracer.parquet", index=False)
+        base = self.run_dossier(reactions=["HEX_c"], tracers=["glucose", "lactate", "absent"], label="A",
+                                pathway_map={"tissues": ["liver"], "contrasts": [DIET], "formats": ["html", "svg"],
+                                             "submaps": False, "abstract": False})
+        summary = base / "figures/pathway_map/liver"
+        combined = _extract_payload_json((summary / f"map_{DIET}.html").read_text(encoding="utf-8"))
+        self.assertEqual(combined["elements"]["rxn:HEX_c"]["flux_claim"], "LX")
+        self.assertFalse((summary / "by_tracer/absent").exists())
+        index = (base / "pathway_maps.html").read_text(encoding="utf-8")
+        for name, sign, n in (("glucose", 1, 4), ("lactate", -1, 2)):
+            stem = summary / "by_tracer" / name / f"map_{DIET}"
+            page = _extract_payload_json(stem.with_suffix(".html").read_text(encoding="utf-8"))
+            self.assertEqual(page["meta"]["tracer"], name)
+            reaction = page["elements"]["rxn:HEX_c"]
+            self.assertEqual({m["tracer"] for m in reaction["members"]}, {name})
+            row = pd.read_csv(stem.with_suffix(".tsv"), sep="\t").set_index("element_id").loc["HEX_c"]
+            self.assertEqual((row["F_direction"], row["F_state"], row["flux_claim"]), (sign, "suggestive", "L2"))
+            self.assertEqual((row["n_numerator"], row["hedges_g"]), (n, sign * 1.5))
+            self.assertIn(f"by_tracer/{name}/map_{DIET}.html", index)
+        delivery = Delivery(load_experiment(load_project(self.root), EXP), [], [])
+        delivery.bundle("integrate", base.parents[1])
+        copies = delivery.copy_maps()
+        self.assertTrue(all((delivery.directory / r["target"]).is_file() for r in copies))
+        self.assertIn(f"by_tracer/lactate/map_{DIET}.html", {r["文件"] for r in copies})
+        self.assertIn(f"by_tracer/lactate/map_{DIET}.svg", {r["文件"] for r in copies})
+        self.assertIn(f"map_{DIET}.svg", {r["文件"] for r in copies})
+
 
 if __name__ == "__main__":
     unittest.main()

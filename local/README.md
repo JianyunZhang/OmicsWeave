@@ -12,7 +12,7 @@ local/
 └── projects/
     └── <课题名>/                      # 例如 dio_project、dio_glp1ra_project
         ├── experiments/<experiment_id>/...   # 从实验项目仓库拷贝的配置与输入数据
-        ├── analysis_results/                 # 在本地运行产生的结果
+        ├── results/                          # 在本地运行产生的结果
         ├── references/                       # 参考基因组、FASTA、通路库等（可选）
         └── analysis/                         # 课题专用脚本（如六组织通路图），以库的方式调用 omicsweave
 ```
@@ -29,7 +29,7 @@ local/
 ```
 
 在 PyCharm 中可直接运行相应项目的 `run_analysis.py`。加 `--dry-run` 只做预检，加 `--tag v1 --pin` 给交付加标签并锁定，加 `--results-dir "D:/课题结果/DIO"` 可指定单次输出根目录。
-每次调用各有 `_deliveries/<实验>/delivery_YYYYMMDD_HHMMSS_<4位hex>/summary.xlsx` 和 `index.json`，成功后原子更新 `_deliveries/<实验>/latest.json`；DIO 的课题图件与关键表也在该次交付下。
+每次调用在 `results/<实验>/run_YYYYMMDD_HHMMSS/` 下生成一个自包含的运行与交付目录（含 `summary.xlsx`、`index.json`、课题图表及组学/整合结果），成功后原子更新 `results/latest.json`；DIO 的课题图件与关键表也在该次目录中。
 通过 `run_analysis.py latest`（支持 `--open` / `--path` / `--json` / `--list`）可快速定位最新成功交付；交付保留策略与 `clean` 命令在 `run_analysis.py` 顶部开关中默认关闭（`RETENTION_ENABLED = False`、`CLEAN_COMMAND_ENABLED = False`），按需开启。
 
 | 场景 | 写法 |

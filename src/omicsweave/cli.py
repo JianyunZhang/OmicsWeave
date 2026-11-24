@@ -30,7 +30,7 @@ omicsweave 命令行入口。
     omicsweave mfa run --experiment 20250425_cimr_wt_mice_dio      # 旧版流程，读取旧版配置
     omicsweave mfa run --help          # 查看该动作自身的参数
 
-``--project-dir`` 指定实验项目目录（包含 ``project.yaml``、``experiments/`` 与 ``analysis_results/``），
+``--project-dir`` 指定实验项目目录（包含 ``project.yaml``、``experiments/`` 与 ``results/``），
 省略时见 :func:`omicsweave.core.project.project_dir` 的查找顺序。
 模块动作之后的参数原样转交给对应模块的 ``main()``。
 """
@@ -101,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "--project-dir", type=Path, default=None,
-        help="实验项目目录（包含 project.yaml、experiments/ 与 analysis_results/）",
+        help="实验项目目录（包含 project.yaml、experiments/ 与 results/）",
     )
     modules = parser.add_subparsers(dest="module", metavar="<命令>", required=True)
 
@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--pin", action="store_true", help="锁定本次交付（写入 .keep 与 pinned 标记），避免被保留策略清理")
     pipeline.add_argument("--dry-run", action="store_true", help="只做检查并列出各步命令，不运行")
 
-    latest = modules.add_parser("latest", help="通过 latest.json 指针查询、列出或打开最新一次成功交付")
+    latest = modules.add_parser("latest", help="通过 results/latest.json 指针查询、列出或打开最新一次成功交付")
     latest.add_argument("--experiment", action="append", default=None,
                         help="指定实验 ID，可重复；默认查询结果目录下已有交付的全部实验")
     latest.add_argument("--results-dir", type=Path, default=None, help="覆盖结果根目录，相对路径以项目为基准")
@@ -243,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     clean = modules.add_parser("clean", help="按保留策略预览或清理历史交付目录（及可选的孤立结果包），默认仅预览")
     clean.add_argument("--experiment", action="append", default=None,
-                       help="只清理这些实验，可重复；默认处理 _deliveries/ 下已有交付的全部实验")
+                       help="只清理这些实验，可重复；默认处理结果目录下已有交付的全部实验")
     clean.add_argument("--results-dir", type=Path, default=None, help="覆盖结果根目录，相对路径以项目为基准")
     keep_group = clean.add_mutually_exclusive_group()
     keep_group.add_argument("--keep-last", type=int, default=None,
@@ -625,12 +625,12 @@ def _resolve_results_root(results_dir: Path | None):
 def _run_latest(args: argparse.Namespace) -> int:
     from omicsweave.core.config import ConfigError
     from omicsweave.core.delivery import (
-        DELIVERIES_DIR,
-        LATEST_POINTER_FILE,
         build_latest_payload,
         delivery_experiments,
+        latest_pointer_path,
         list_deliveries,
         open_path,
+        read_latest_pointer,
         resolve_latest_delivery,
     )
     from omicsweave.core.retention import directory_size, format_bytes
@@ -647,7 +647,7 @@ def _run_latest(args: argparse.Namespace) -> int:
         else (delivery_experiments(results_root) or list(project.config.pipeline.experiments))
     )
     if not experiments:
-        print(f"错误：{results_root / DELIVERIES_DIR} 下没有找到任何交付目录", file=sys.stderr)
+        print(f"错误：{results_root} 下没有找到任何交付目录", file=sys.stderr)
         return 1
 
     if args.list_all:
@@ -666,7 +666,7 @@ def _run_latest(args: argparse.Namespace) -> int:
                         "size_bytes": directory_size(rec.directory),
                     })
                 continue
-            print(f"[{exp_id}] 共 {len(records)} 个交付目录（{results_root / DELIVERIES_DIR / exp_id}）：")
+            print(f"[{exp_id}] 共 {len(records)} 个交付目录（{results_root / exp_id}）：")
             if not records:
                 print("  （无）")
                 continue
@@ -697,7 +697,7 @@ def _run_latest(args: argparse.Namespace) -> int:
 
     if not found:
         names = "、".join(missing)
-        print(f"错误：实验 {names} 在 {results_root / DELIVERIES_DIR} 下没有已完成的交付", file=sys.stderr)
+        print(f"错误：实验 {names} 在 {results_root} 下没有已完成的交付", file=sys.stderr)
         return 1
 
     if (args.path or args.open_target) and len(found) > 1:
@@ -706,15 +706,16 @@ def _run_latest(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
 
+    pointer_file = latest_pointer_path(results_root)
     if args.as_json:
         items = []
         for rec, source in found:
-            pointer_file = results_root / DELIVERIES_DIR / rec.experiment / LATEST_POINTER_FILE
+            entry_exists = read_latest_pointer(results_root, rec.experiment) is not None
             items.append({
                 **build_latest_payload(rec),
                 "source": source,
                 "pointer_path": str(pointer_file),
-                "pointer_exists": pointer_file.is_file(),
+                "pointer_exists": entry_exists,
                 "directory": str(rec.directory),
                 "summary_path": str(rec.summary_path) if rec.summary_path else None,
                 "index_path": str(rec.index_path),
@@ -747,13 +748,13 @@ def _run_latest(args: argparse.Namespace) -> int:
 
     for rec, source in found:
         source_label = "latest.json 指针" if source == "pointer" else "目录扫描回退"
-        pointer_file = results_root / DELIVERIES_DIR / rec.experiment / LATEST_POINTER_FILE
+        has_pointer = read_latest_pointer(results_root, rec.experiment) is not None
         print(f"[{rec.experiment}] 最新交付：{rec.delivery_id}（来源：{source_label}）")
         print(f"  目录：{rec.directory}")
         if rec.summary_path:
             print(f"  摘要：{rec.summary_path}")
         print(f"  索引：{rec.index_path}")
-        print(f"  指针：{pointer_file}{'（存在）' if pointer_file.is_file() else '（未生成）'}")
+        print(f"  指针：{pointer_file}{'（存在）' if has_pointer else '（未生成）'}")
         meta = [f"时间：{rec.completed_at or rec.created_at or '-'}"]
         if rec.tag:
             meta.append(f"标签：{rec.tag}")

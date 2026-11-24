@@ -7,6 +7,7 @@ import json
 import re
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ from omicsweave.contract import (
     Dataset,
     DatasetMeta,
     RunManifest,
+    allocate_run_dir,
     export_json_schema,
     file_record,
     new_run_id,
@@ -105,7 +107,17 @@ class DifferentialTest(unittest.TestCase):
 
 class ManifestTest(unittest.TestCase):
     def test_run_id_format(self) -> None:
-        self.assertRegex(new_run_id(), r"^run_\d{8}_\d{6}_[0-9a-f]{4}$")
+        self.assertRegex(new_run_id(), r"^run_\d{8}_\d{6}$")
+        fixed = datetime(2026, 11, 24, 13, 45, 0)
+        self.assertEqual(new_run_id(fixed), "run_20261124_134500")
+        self.assertEqual(new_run_id(fixed, seq=2), "run_20261124_134500_02")
+        self.assertEqual(new_run_id(fixed, tag="v1", seq=2), "run_20261124_134500_02_v1")
+        with tempfile.TemporaryDirectory() as tmp:
+            d1 = allocate_run_dir(tmp, now=fixed)
+            d2 = allocate_run_dir(tmp, now=fixed)
+            self.assertEqual(d1.name, "run_20261124_134500")
+            self.assertEqual(d2.name, "run_20261124_134500_02")
+            self.assertLess(d1.name, d2.name)
 
     def test_roundtrip_with_file_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

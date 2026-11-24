@@ -35,6 +35,9 @@ MFA 的统一运行器（``omicsweave run --omics mfa``）：读取 ``experiment
 多示踪剂时另有::
 
     tables/differential_by_tracer.parquet   各示踪剂单独分析的差异结果（多一列 tracer）
+    tables/by_tracer/<示踪剂>/differential.tsv  各独立队列的差异统计
+    tables/differential_pooled.tsv          后处理完成的合并差异统计，含稳健性标记
+    figures/by_tracer/<示踪剂>/             各队列的火山图，figures/ 下为合并火山图
     tables/tracer_coverage.parquet          各示踪剂对每条反应的可辨识性与是否参与合并
     tables/tracer_flux_levels.parquet       按条件合并的绝对通量及示踪剂间一致性检验
     qc/tracer_concordance.parquet           各示踪剂相对其余示踪剂的系统偏离
@@ -54,13 +57,14 @@ from omicsweave.adapters.mfa.legacy import (
     read_input_sets,
 )
 from omicsweave.contract.dataset import ContractError, Dataset, DatasetMeta, ValueType, empty_features, write_dataset
+from omicsweave.contract.export import write_excel_tsv
 from omicsweave.contract.mfa import MFAResults, apply_mfa_tissue_aliases, validate_mfa
 from omicsweave.contract.tables import validate_differential, write_differential
 from omicsweave.core.config import Experiment, Project
 from omicsweave.core.model import Omics
 from omicsweave.core.run import OmicsRun, RunContext, RunError, contrast_groups, sample_labels
 from omicsweave.core.tissues import format_alias_note
-from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes
+from omicsweave.visualization.volcano import Thresholds, write_bundle_volcanoes, write_volcanoes
 
 from . import flux_groups as fg
 from . import multi_tracer
@@ -73,6 +77,7 @@ from .df_analysis import (
 )
 from .export import differential_flux_to_contract
 from .sample_qc import MFAQualityResult, apply_scale_drift_flags, evaluate_mfa_quality
+from .tracers import format_tracer_display, tracer_directory_name
 
 STEPS = ("qc", "differential", "figures")
 # 火山图横轴半宽的上限（log2FC = 10，即 1024 倍）：净通量的分母接近 0 时 |log2FC| 可达 20 以上，属于数值假象
@@ -295,7 +300,7 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
     group_maps = _flux_groups({t: f for t, f in fit_sets.items() if f}, _flux_group_settings(analysis), out, record) or {}
     for tracer in tracers:
         samples = [s for s in flux_df.index if tracer_of.get(s) == tracer]
-        details = out / "details" / "tracers" / tracer
+        details = out / "details" / "tracers" / tracer_directory_name(tracer)
         fits = fit_sets[tracer]
         matrix = sample_flux_matrix(flux_df.loc[samples], fits, labels, tissues, details, analysis)
         if matrix is None:
@@ -324,6 +329,9 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
             problems = validate_differential(part.drop(columns="tracer"))
             if problems:
                 raise RunError(f"示踪剂 {tracer} 的差异结果不符合规范：" + "；".join(problems))
+            directory = tables_dir / "by_tracer" / tracer_directory_name(tracer)
+            directory.mkdir(parents=True, exist_ok=True)
+            write_excel_tsv(part, directory / "differential.tsv")
         per_tracer.to_parquet(tables_dir / "differential_by_tracer.parquet", index=False)
 
     pooled_tables, contrasts_run = [], []
@@ -442,9 +450,16 @@ def run(ctx: RunContext) -> OmicsRun:
 
     if ctx.wants("figures"):
         cut = selection_thresholds(analysis)
-        record.notes += write_bundle_volcanoes(
-            out, experiment.config.design.contrasts, metric="pvalue", x_cap=_VOLCANO_X_CAP,
-            thresholds=Thresholds(p=cut["pvalue"], log2fc=cut["log2fc"], effect_size=cut["hedges_g"]))
+        options = dict(contrasts=experiment.config.design.contrasts, metric="pvalue", x_cap=_VOLCANO_X_CAP,
+                       thresholds=Thresholds(p=cut["pvalue"], log2fc=cut["log2fc"], effect_size=cut["hedges_g"]))
+        record.notes += write_bundle_volcanoes(out, scope_label="Pooled MFA" if tracer_of else "", **options)
+        tracer_table = out / "tables" / "differential_by_tracer.parquet"
+        if tracer_table.is_file():
+            for tracer, part in pd.read_parquet(tracer_table).groupby("tracer"):
+                paths, notes = write_volcanoes(part, out / "figures" / "by_tracer" / tracer_directory_name(tracer),
+                                               scope_label=format_tracer_display(tracer), **options)
+                record.notes.append(f"示踪剂 {tracer}：{len(paths)} 个火山图文件")
+                record.notes.extend(f"{tracer}：{note}" for note in notes)
 
     record.parameters = {
         "input_format": settings.input.format,

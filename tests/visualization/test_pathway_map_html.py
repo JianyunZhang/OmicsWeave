@@ -225,7 +225,7 @@ class PathwayMapHtmlTest(unittest.TestCase):
                 patch("omicsweave.visualization.graphical_abstract.render_graphical_abstract", side_effect=fake_ga),
             ):
                 pm.render_maps(
-                    dossier_dir, out_dir, {"formats": ["pdf", "png", "html"]},
+                    dossier_dir, out_dir, {"formats": ["pdf", "png", "html"], "by_tracer": False},
                     source="U-13C-glucose", runs={"Integration": "run_test"},
                     members=members, axes=axes, assessed=assessed, calibration=pd.DataFrame(),
                 )

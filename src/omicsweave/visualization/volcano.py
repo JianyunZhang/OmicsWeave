@@ -234,7 +234,7 @@ def plot_volcano(panel: pd.DataFrame, *, title: str = "", metric: str = "padj",
 def write_volcanoes(table: pd.DataFrame, directory: Path, *, contrasts: Iterable[Contrast] = (),
                     metric: str = "padj", thresholds: Thresholds = Thresholds(), x_cap: float | None = None,
                     n_labels: int = 10, formats: Sequence[str] = FIGURE_FORMATS,
-                    preset: str = DEFAULT_PRESET) -> tuple[list[Path], list[str]]:
+                    preset: str = DEFAULT_PRESET, scope_label: str = "") -> tuple[list[Path], list[str]]:
     """为统一差异结果表中的每个组织 × 比较画一张火山图，写到 ``directory``；返回 (写出的文件, 提示)。
 
     ``contrasts`` 给出图题中的比较说明（如 ``HFD vs LFD``）与图的顺序；表中其余比较按比较 ID 排在后面。
@@ -248,7 +248,8 @@ def write_volcanoes(table: pd.DataFrame, directory: Path, *, contrasts: Iterable
     pal = get_palette(preset)
     for contrast_id, tissue in keys:
         with themed(preset=preset, rc=_RC):
-            fig = plot_volcano(panels[(contrast_id, tissue)], title=f"{tissue} · {labels.get(contrast_id, contrast_id)}",
+            title = f"{tissue} · {labels.get(contrast_id, contrast_id)}"
+            fig = plot_volcano(panels[(contrast_id, tissue)], title=f"{title} · {scope_label}" if scope_label else title,
                                metric=metric, thresholds=thresholds, x_cap=x_cap, n_labels=n_labels, preset=preset)
             if fig is None:
                 skipped.append(f"{contrast_id} / {tissue}")

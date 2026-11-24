@@ -713,7 +713,7 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         map_notes = render_maps(base, base, params["pathway_map"], label,
                                 {"整合": ctx.run_dir.name, **{f"来源 {c.label}": c.source.run_id for c in contexts}},
                                 members=dossier, axes=axes, assessed=reactions_assessed, calibration=calibration,
-                                root=ctx.experiment.root)
+                                root=ctx.experiment.root, rules=rules)
     except LayoutError as exc:
         raise RunError(str(exc)) from exc
     # 课题自己的布局文件登记为输入（包内默认布局随代码版本走）

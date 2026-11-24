@@ -12,7 +12,7 @@
 
     diff = read_table("all_tissues", "differential", omics="mfa", project_dir="local/projects/dio_project")
     diff.attrs["run_id"]                                     # 实际读取的运行
-    bundle = open_run("all_tissues", "run_20261112_163447_930f", project_dir="local/projects/dio_project")
+    bundle = open_run("all_tissues", "run_20261123_124459", project_dir="local/projects/dio_project")
     profile = bundle.integration("flux_anchored", "flux_evidence_profile")
 """
 from __future__ import annotations

@@ -62,7 +62,7 @@ class ReplicationTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def write_bundle(self, experiment: str, tables: dict[str, pd.DataFrame]) -> None:
-        run_dir = self.root / "analysis_results" / experiment / "run_20261101_000000_src"
+        run_dir = self.root / "results" / experiment / "run_20261101_000000_src"
         for omics, table in tables.items():
             write_differential(table, run_dir / "omics" / omics / "tables" / "differential.parquet")
         write_manifest(RunManifest(run_id=run_dir.name, project_id="toy", experiment_id=experiment,

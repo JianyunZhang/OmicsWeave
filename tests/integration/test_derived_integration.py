@@ -118,7 +118,7 @@ class BundleTest(unittest.TestCase):
             root = Path(tmp).resolve()
             build_two_factor_project(root)
             tables = contract_tables()
-            run_dir = root / "analysis_results" / EXP / "run_20261101_000000_src"
+            run_dir = root / "results" / EXP / "run_20261101_000000_src"
             for name in ("mfa", "transcriptomics", "proteomics", "metabolomics"):
                 write_differential(tables[name], run_dir / "omics" / name / "tables" / "differential.parquet")
             write_differential(derived_table(), run_dir / "omics" / "metabolomics" / "tables"
@@ -132,7 +132,7 @@ class BundleTest(unittest.TestCase):
 
         self.assertTrue(manifest.parameters["flux_anchored"]["derived_metabolomics_features"])
         inputs = {f.path for f in manifest.files if f.role == "input"}
-        self.assertIn(f"analysis_results/{EXP}/{run_dir.name}/omics/metabolomics/tables/derived_differential.parquet",
+        self.assertIn(f"results/{EXP}/{run_dir.name}/omics/metabolomics/tables/derived_differential.parquet",
                       inputs)
 
 
