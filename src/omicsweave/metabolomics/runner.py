@@ -349,6 +349,7 @@ def run(ctx: RunContext) -> OmicsRun:
 
     for block in blocks:
         tissue = block.tissue
+        ctx.progress(Omics.METABOLOMICS, "preprocess", tissue=tissue)
         if not block.biological:
             record.notes.append(f"代谢组 {tissue} 没有生物学样本，已跳过")
             continue
@@ -390,6 +391,7 @@ def run(ctx: RunContext) -> OmicsRun:
                     source={"from": f"data/{tissue}", "module": "omicsweave.metabolomics.derived_features"})))
 
         if ctx.wants("qc"):
+            ctx.progress(Omics.METABOLOMICS, "qc", tissue=tissue)
             qc_dir = out / "qc" / tissue
             qc_dir.mkdir(parents=True, exist_ok=True)
             # QC 指标覆盖检出过滤后、QC 过滤前的全部代谢物，按原表行号取特征 ID
@@ -412,6 +414,7 @@ def run(ctx: RunContext) -> OmicsRun:
         details = out / "details" / tissue
         details.mkdir(parents=True, exist_ok=True)
         for contrast in experiment.config.design.contrasts:
+            ctx.progress(Omics.METABOLOMICS, "differential", tissue=tissue, contrast_id=contrast.id)
             assigned = contrast_groups(experiment, contrast, Omics.METABOLOMICS)
             groups = {s: assigned[s] for s in block.biological if s in assigned}
             levels = (contrast.numerator, contrast.denominator)
@@ -438,6 +441,7 @@ def run(ctx: RunContext) -> OmicsRun:
                 derived_rows += _derived_differential(derived, tissue, groups, contrast, options,
                                                       fdr_method=fdr_method, settings=settings)
             if ctx.wants("enrichment") and "kegg_map" in result.combined.columns:
+                ctx.progress(Omics.METABOLOMICS, "enrichment", tissue=tissue, contrast_id=contrast.id)
                 attempted_enrichment = True
                 ora = calculate_pathway_enrichment(
                     result.combined, significance_col=f"Significant_{contrast.id}", feature_col=feature_id,
@@ -471,6 +475,7 @@ def run(ctx: RunContext) -> OmicsRun:
         else:
             record.notes.append("代谢组数据表没有 kegg_map 列或没有可检验的 KEGG 通路，未做 ORA 与 GSEA")
     if ctx.wants("figures"):
+        ctx.progress(Omics.METABOLOMICS, "figures")
         # 要求 VIP 时，阈值线外的点也可能未入选；入选规则写在图下方
         record.notes += write_bundle_volcanoes(
             out, experiment.config.design.contrasts, metric="padj",

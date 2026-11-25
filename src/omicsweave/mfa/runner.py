@@ -190,16 +190,18 @@ def _write_flux_datasets(matrix: pd.DataFrame, results: MFAResults, out: Path) -
     _write_sample_fits(matrix, out)
 
 
-def _differential_tables(experiment: Experiment, flux_df: pd.DataFrame, all_fits: dict, tissues: list[str],
+def _differential_tables(ctx: RunContext, flux_df: pd.DataFrame, all_fits: dict, tissues: list[str],
                          details: Path, analysis: dict, flux_units: str, record: OmicsRun,
                          scope: str = "", groups: dict | None = None) -> dict[str, pd.DataFrame]:
     """按 ``design.contrasts`` 对 ``flux_df`` 中的样本做差异通量分析，返回 比较 → 统一差异结果表。
 
     ``details`` 下须已有 ``sample_flux_matrix`` 写出的可辨识性表；``scope`` 用于提示中标明示踪剂。
     """
+    experiment = ctx.experiment
     tables: dict[str, pd.DataFrame] = {}
     where = f"（示踪剂 {scope}）" if scope else ""
     for contrast in experiment.config.design.contrasts:
+        ctx.progress(Omics.MFA, "differential", contrast_id=contrast.id, tracer=scope or None)
         members = {s: g for s, g in contrast_groups(experiment, contrast, Omics.MFA).items() if s in flux_df.index}
         if not members:
             record.notes.append(f"比较 {contrast.id} 在 MFA{where}中没有样本，已跳过")
@@ -266,16 +268,16 @@ def _write_mfa_quality(
     return qc_res
 
 
-def _run_single(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
+def _run_single(ctx: RunContext, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
                 tissues: list[str], labels: dict[str, str], analysis: dict, out: Path, record: OmicsRun,
                 loss_df: pd.DataFrame | None = None) -> list[str]:
     details = out / "details"
     matrix = sample_flux_matrix(flux_df, all_fits, labels, tissues, details, analysis)
     if matrix is not None:
         _write_flux_datasets(matrix, results, out)
-    qc_res = _write_mfa_quality(experiment, matrix, loss_df, analysis, out, record)
+    qc_res = _write_mfa_quality(ctx.experiment, matrix, loss_df, analysis, out, record)
     groups = _flux_groups({"all": all_fits}, _flux_group_settings(analysis), out, record)
-    tables = _differential_tables(experiment, flux_df, all_fits, tissues, details, analysis,
+    tables = _differential_tables(ctx, flux_df, all_fits, tissues, details, analysis,
                                   results.info.flux_units, record, groups=(groups or {}).get("all"))
     if tables:
         combined = pd.concat(tables.values(), ignore_index=True)
@@ -285,10 +287,11 @@ def _run_single(experiment: Experiment, results: MFAResults, flux_df: pd.DataFra
     return list(tables)
 
 
-def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
+def _run_multi_tracer(ctx: RunContext, results: MFAResults, flux_df: pd.DataFrame, all_fits: dict,
                       tissues: list[str], labels: dict[str, str], tracer_of: dict[str, str], analysis: dict,
                       out: Path, record: OmicsRun, loss_df: pd.DataFrame | None = None) -> list[str]:
     """先在每个示踪剂内单独分析（可辨识性、差异通量），再分层合并。"""
+    experiment = ctx.experiment
     try:
         settings = multi_tracer.PoolingSettings.from_analysis(analysis)
     except (TypeError, ValueError) as exc:
@@ -299,6 +302,7 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
     fit_sets = {t: {s: all_fits[s] for s in flux_df.index if tracer_of.get(s) == t and s in all_fits} for t in tracers}
     group_maps = _flux_groups({t: f for t, f in fit_sets.items() if f}, _flux_group_settings(analysis), out, record) or {}
     for tracer in tracers:
+        ctx.progress(Omics.MFA, "differential", tracer=tracer)
         samples = [s for s in flux_df.index if tracer_of.get(s) == tracer]
         details = out / "details" / "tracers" / tracer_directory_name(tracer)
         fits = fit_sets[tracer]
@@ -308,7 +312,7 @@ def _run_multi_tracer(experiment: Experiment, results: MFAResults, flux_df: pd.D
             continue
         animals.append(matrix.assign(tracer=tracer))
         identifiability.append(pd.read_csv(details / _IDENTIFIABILITY).assign(tracer=tracer))
-        tables = _differential_tables(experiment, flux_df.loc[samples], fits, tissues, details, analysis,
+        tables = _differential_tables(ctx, flux_df.loc[samples], fits, tissues, details, analysis,
                                       units, record, scope=tracer, groups=group_maps.get(tracer))
         by_tracer += [t.assign(tracer=tracer) for t in tables.values()]
     if not animals:
@@ -427,6 +431,7 @@ def run(ctx: RunContext) -> OmicsRun:
 
     loss = None
     if ctx.wants("qc"):
+        ctx.progress(Omics.MFA, "qc")
         (out / "qc").mkdir(parents=True, exist_ok=True)
         loss = quality_control(all_fits, labels, details)
         if loss is not None:
@@ -440,15 +445,17 @@ def run(ctx: RunContext) -> OmicsRun:
 
     contrasts_run = []
     if ctx.wants("differential"):
+        ctx.progress(Omics.MFA, "differential")
         if tracer_of is None:
-            contrasts_run = _run_single(experiment, results, flux_df, all_fits, tissues, labels, analysis, out, record,
+            contrasts_run = _run_single(ctx, results, flux_df, all_fits, tissues, labels, analysis, out, record,
                                         loss_df=loss)
         else:
             record.notes += _multi_tracer_notes(experiment, tracer_of)
-            contrasts_run = _run_multi_tracer(experiment, results, flux_df, all_fits, tissues, labels, tracer_of,
+            contrasts_run = _run_multi_tracer(ctx, results, flux_df, all_fits, tissues, labels, tracer_of,
                                               analysis, out, record, loss_df=loss)
 
     if ctx.wants("figures"):
+        ctx.progress(Omics.MFA, "figures")
         cut = selection_thresholds(analysis)
         options = dict(contrasts=experiment.config.design.contrasts, metric="pvalue", x_cap=_VOLCANO_X_CAP,
                        thresholds=Thresholds(p=cut["pvalue"], log2fc=cut["log2fc"], effect_size=cut["hedges_g"]))

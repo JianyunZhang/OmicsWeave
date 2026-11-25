@@ -26,8 +26,8 @@ import os
 import shlex
 import subprocess
 import sys
-from contextlib import nullcontext
-from dataclasses import dataclass, field
+from contextlib import contextmanager, nullcontext
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -38,11 +38,13 @@ from omicsweave.contract.manifest import MANIFEST_FILE, read_manifest
 from .config import EXPERIMENT_FILE, ConfigError, Experiment, Project, load_experiment, load_project
 from .delivery import Delivery, validate_delivery_tag
 from .model import PIPELINE_PLACEHOLDER, ExperimentConfig, IntegrationMode, Omics
+from .overrides import PreparedTrial
+from .progress import JobCancelledError, NULL_REPORTER, ProgressReporter, progress_stage
 from .provenance import sha256_file
 from .project import PROJECT_DIR_ENV
 from .retention import CleanupReport, RetentionPolicy, apply_cleanup, format_bytes
 from .run import ALL, METADATA_DIR, RunError, run_experiment, select_omics
-from .validate import validate_project
+from .validate import ValidationReport, validate_experiment, validate_project
 
 # 可以从哪一步开始；validate 总是运行
 STAGES = ("run", "integrate", "scripts")
@@ -140,6 +142,15 @@ def _analysis_config_changes(experiment: Experiment, bundle: Path) -> list[str]:
     return [key for key in current if key != "integration" and current[key] != stored.get(key)]
 
 
+def source_changes(experiment: Experiment, bundle: Path) -> list[str]:
+    stale = _changed_inputs(
+        experiment.project, bundle,
+        frozenset({(experiment.root / EXPERIMENT_FILE).resolve()}),
+        ignore_kinds=frozenset({"integration"}),
+    )
+    return [*stale, *(f"experiment.yaml 的 {key} 一节" for key in _analysis_config_changes(experiment, bundle))]
+
+
 def _targets(project: Project, requested: list[str] | None) -> list[str]:
     known = [d.name for d in project.experiment_dirs()]
     chosen = list(dict.fromkeys(requested or project.config.pipeline.experiments or known))
@@ -157,18 +168,19 @@ def _targets(project: Project, requested: list[str] | None) -> list[str]:
 
 
 def _plan(project: Project, targets: list[str], omics: list[str], start: str, source: str | None,
-          integration_run: str | None) -> list[ExperimentPlan]:
+          integration_run: str | None, *, allow_custom_scripts: bool = True,
+          trial: PreparedTrial | None = None) -> list[ExperimentPlan]:
     """读取实验并展开脚本；脚本文件不存在、需要整合结果包但实验未启用整合时一并报出。"""
     from omicsweave.integration.integrate import select_modes, source_run
 
-    plans, problems = [], []
+    plans, problems, stale_bundles = [], [], []
     for exp_id in targets:
-        experiment = load_experiment(project, exp_id)
+        experiment = trial.experiment if trial else load_experiment(project, exp_id)
         settings = experiment.config.integration
         integrate = settings.enabled and bool(settings.modes)
         modes = select_modes([], settings.modes) if integrate else []
         results_root = project.path("results")
-        bundle = source_run(results_root, exp_id, source) if start != "run" else None
+        bundle = trial.source if trial else source_run(results_root, exp_id, source) if start != "run" else None
         previous = None
         if bundle is None:
             selected, _ = select_omics(experiment, omics)
@@ -193,13 +205,10 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
             if bundle_steps == ALL or (isinstance(bundle_steps, list) and "enrichment" in bundle_steps):
                 enrichment |= {o for o in bundle_manifest.omics if o != Omics.MFA}
             # 沿用的单组学结果包须与当前数据、样本表和分析设置一致；只改 integration 一节或整合输入（如 panels）不影响它
-            stale = _changed_inputs(
-                project, bundle,
-                frozenset({(experiment.root / EXPERIMENT_FILE).resolve()}),
-                ignore_kinds=frozenset({"integration"}),
-            )
-            stale += [f"experiment.yaml 的 {key} 一节" for key in _analysis_config_changes(experiment, bundle)]
+            stale = source_changes(experiment, bundle)
             if stale:
+                stale_bundles.append({"experiment": exp_id, "stale_bundle": bundle.name,
+                                      "changed_files": stale, "recommended_start": "run"})
                 problems.append(f"{exp_id} 的单组学结果包 {bundle.name} 已过期：{'、'.join(stale)} 在该次运行之后改过；"
                                 f"请从 run 开始（不加 --from / --source）")
         if start != "scripts":
@@ -228,13 +237,16 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
             # 沿用的整合结果包须与当前 experiment.yaml、样本表与 panels.yaml 一致，否则交付的面板矩阵是旧的
             stale = _changed_inputs(project, previous) if previous and (previous / MANIFEST_FILE).is_file() else []
             if stale:
+                stale_bundles.append({"experiment": exp_id, "stale_bundle": previous.name,
+                                      "changed_files": stale, "recommended_start": "integrate",
+                                      "source_run_id": bundle.name})
                 problems.append(f"{exp_id} 的整合结果包 {previous.name} 已过期：{'、'.join(stale)} 在整合之后改过；"
                                 f"请从 integrate 开始：--from integrate --source {bundle.name}")
         elif integration_run:
             problems.append(f"{exp_id} 未启用整合，无法沿用整合包 {integration_run}")
         known = {"project_dir": str(project.root), "experiment": exp_id}
         scripts = []
-        for spec in project.config.pipeline.scripts:
+        for spec in project.config.pipeline.scripts if allow_custom_scripts else ():
             if spec.experiments and exp_id not in spec.experiments:
                 continue
             tokens = [_fill(t, known) for t in shlex.split(spec.command)]
@@ -251,17 +263,23 @@ def _plan(project: Project, targets: list[str], omics: list[str], start: str, so
             problems.append(f"{exp_id} 没有由 {bundle.name} 生成的整合结果包，请从 integrate 开始")
         plans.append(ExperimentPlan(experiment, integrate, scripts, bundle, previous))
     if problems:
-        raise RunError("pipeline 配置有误，没有开始运行：\n" + "\n".join(f"  - {p}" for p in dict.fromkeys(problems)))
+        raise RunError("pipeline 配置有误，没有开始运行：\n" + "\n".join(f"  - {p}" for p in dict.fromkeys(problems)),
+                       code="STALE_SOURCE_BUNDLE" if stale_bundles else "VALIDATION_FAILED",
+                       details={"stale_bundles": stale_bundles, "problems": problems})
     return plans
 
 
-def _run_script(project: Project, exp_id: str, script: Script, tokens: list[str]) -> None:
+def _run_script(project: Project, exp_id: str, script: Script, tokens: list[str], *, managed: bool = False) -> None:
     argv = [sys.executable, str(project.resolve(tokens[0])), *tokens[1:]] if _is_python(tokens) else tokens
     env = {**os.environ, PROJECT_DIR_ENV: str(project.root)}
     # 从工作树直接启动时，子解释器也应加载同一份 omicsweave。
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parents[2]), env.get("PYTHONPATH")]))
+    # Windows detached Worker 的后代需要显式继承日志句柄。
+    stdio = {"stdin": subprocess.DEVNULL, "stdout": 1, "stderr": 2} if managed else {}
+    if sys.stdout is sys.stderr:
+        stdio.update(stdout=2, stderr=2)
     try:
-        code = subprocess.run(argv, cwd=project.root, env=env, check=False).returncode
+        code = subprocess.run(argv, cwd=project.root, env=env, check=False, **stdio).returncode
     except OSError as exc:
         raise RunError(f"[{exp_id}] 脚本 {script.name} 无法启动：{exc}") from exc
     if code:
@@ -271,7 +289,8 @@ def _run_script(project: Project, exp_id: str, script: Script, tokens: list[str]
 def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], start: str,
                     dry_run: bool, command: list[str] | None, log: Callable[[str], None],
                     warnings: list[str], *, tag: str | None = None, pin: bool = False,
-                    retention: RetentionPolicy | None = None, run_gsea: bool | None = None) -> PipelineResult:
+                    retention: RetentionPolicy | None = None, run_gsea: bool | None = None,
+                    reporter: ProgressReporter = NULL_REPORTER, trial: PreparedTrial | None = None) -> PipelineResult:
     from omicsweave.integration.integrate import integrate_experiment
 
     exp_id = plan.experiment.id
@@ -280,17 +299,25 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
     delivery = None
     if not dry_run:
         try:
-            delivery = Delivery(plan.experiment, script_keys, command or [], tag=tag, pinned=pin)
+            delivery = Delivery(plan.experiment, script_keys, command or [], tag=tag, pinned=pin,
+                                job_id=reporter.job_id, run_tag=trial.lineage.trial_id if trial else None)
         except (OSError, ValueError) as exc:
             raise RunError(f"无法在 {project.path('results')} 初始化 {exp_id} 的交付目录：{exc}") from exc
         result.delivery_dir = delivery.directory
+        if trial:
+            delivery.data["trial_id"] = trial.lineage.trial_id
+        reporter.emit("artifact", stage="validate", detail={"experiment": exp_id,
+                      "delivery_id": delivery.directory.name, "index_path": str(delivery.directory / "index.json")})
         delivery.data["validation_warnings"] = warnings
         for key, script in zip(script_keys, plan.scripts):
             delivery.stages[key]["expected_outputs"] = script.outputs
         log(f"[{exp_id}] 本次交付：{delivery.directory}")
 
+    @contextmanager
     def stage(key: str, success: str = "completed", **details):
-        return delivery.stage(key, success, **details) if delivery else nullcontext()
+        with delivery.stage(key, success, **details) if delivery else nullcontext():
+            with progress_stage(reporter, key, experiment=exp_id):
+                yield
 
     def step(name: str, message: str) -> None:
         log(f"[{exp_id}] {name}：{message}")
@@ -314,12 +341,15 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                     result.run_dir, notes = run_experiment(
                         exp_id, omics, root=project, command=command,
                         run_id=delivery.directory.name, into_existing=True, run_gsea=run_gsea,
+                        reporter=reporter, prepared=plan.experiment if trial else None,
+                        lineage=trial.lineage if trial else None,
                     )
                     for note in notes:
                         log(f"[提示] {note}")
                     delivery.stages[current]["notes"] = notes
             if delivery:
                 delivery.bundle(current, result.run_dir)
+                reporter.emit("artifact", stage=current, detail={"experiment": exp_id, "run_id": result.run_dir.name})
 
         run_name = result.run_dir.name if result.run_dir else "<run>"
         current = "integrate"
@@ -336,18 +366,23 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                 if delivery:
                     if plan.source is None:
                         result.integration_dir, notes = integrate_experiment(
-                            exp_id, source=run_name, root=project, command=command, into_source=True,
+                            exp_id, source=run_name, root=project, command=command, into_source=True, reporter=reporter,
+                            prepared=plan.experiment if trial else None,
                         )
                     else:
                         result.integration_dir, notes = integrate_experiment(
                             exp_id, source=run_name, root=project, command=command,
-                            run_id=delivery.directory.name, into_existing=True,
+                            run_id=delivery.directory.name, into_existing=True, reporter=reporter,
+                            prepared=plan.experiment if trial else None, lineage=trial.lineage if trial else None,
+                            source_bundle=trial.source if trial else None,
                         )
                     for note in notes:
                         log(f"[提示] {note}")
                     delivery.stages[current]["notes"] = notes
             if delivery and result.integration_dir:
                 delivery.bundle(current, result.integration_dir)
+                reporter.emit("artifact", stage=current, detail={"experiment": exp_id,
+                              "integration_run_id": result.integration_dir.name})
 
         integration = result.integration_dir
         values = {"experiment": exp_id, "project_dir": str(project.root), "run": run_name,
@@ -363,7 +398,8 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                     executable = project.resolve(tokens[0])
                     if executable.is_file():
                         delivery.stages[current]["script_sha256"] = sha256_file(executable)
-                    _run_script(project, exp_id, script, tokens)
+                    _run_script(project, exp_id, script, tokens, managed=reporter.job_id is not None)
+                    reporter.check_cancelled()
                     missing = [name for name in script.outputs if not (delivery.directory / name).is_file()]
                     if missing:
                         raise RunError(f"脚本 {script.name} 缺少预期交付文件：{'、'.join(missing)}")
@@ -375,6 +411,7 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
             with stage(current):
                 delivery.write_summary()
                 delivery.collect_exports()
+                reporter.check_cancelled()
             result.latest_pointer = delivery.complete()
         if retention is not None and retention.enabled:
             if dry_run:
@@ -383,6 +420,7 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                 cleanup = apply_cleanup(
                     project.path("results"), retention, [exp_id], dry_run=False,
                     protected_deliveries={exp_id: {delivery.directory.name}},
+                    ignore_job_id=reporter.job_id,
                 )
                 result.cleanup_report = cleanup
                 if cleanup.removed:
@@ -394,11 +432,15 @@ def _run_experiment(project: Project, plan: ExperimentPlan, omics: list[str], st
                     log(f"[提示] {note}")
                 for item, error in cleanup.failed:
                     log(f"[警告] 保留策略未能删除 {item.path}：{error}")
+    except JobCancelledError:
+        raise
     except Exception as exc:
         message = f"[{exp_id}] {current} 失败：{exc}"
         if result.delivery_dir:
             message += f"；交付记录 {result.delivery_dir / 'index.json'}"
-        if result.run_dir:
+        if trial:
+            message += "\n修正后重试原试验调用，生成新的试验目录"
+        elif result.run_dir:
             message += "\n修正后续跑：" + resume("integrate" if current == "integrate" else "scripts")
         raise RunError(message) from exc
     return result
@@ -410,7 +452,9 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
                  tag: str | None = None, pin: bool = False,
                  retention: RetentionPolicy | None = None, run_gsea: bool | None = None,
                  dry_run: bool = False, command: list[str] | None = None,
-                 log: Callable[[str], None] = _log) -> list[PipelineResult]:
+                 log: Callable[[str], None] = _log,
+                 reporter: ProgressReporter = NULL_REPORTER, allow_custom_scripts: bool = True,
+                 trial: PreparedTrial | None = None) -> list[PipelineResult]:
     """运行标准流程，返回每个实验的产出。
 
     ``start`` 为 ``integrate`` 或 ``scripts`` 时沿用已有的单组学结果包（``source``，默认最近一次）；从 ``scripts``
@@ -427,39 +471,52 @@ def run_pipeline(root: str | Path | None = None, experiments: list[str] | None =
             tag = validate_delivery_tag(tag)
         except ValueError as exc:
             raise RunError(str(exc)) from exc
-    try:
-        project = load_project(root)
-    except ConfigError as exc:
-        raise RunError("\n".join(exc.messages)) from exc
-    if results_dir is not None:
-        project.config.project.paths.results = str(project.resolve(results_dir).resolve())
+    if trial:
+        if start == "scripts" or (start == "integrate" and trial.source is None):
+            raise RunError("试验支持从 run 开始或复用指定来源后从 integrate 开始", code="CLI_USAGE_ERROR")
+        project = trial.experiment.project
+        allow_custom_scripts = False
+    else:
+        try:
+            project = load_project(root)
+        except ConfigError as exc:
+            raise RunError("\n".join(exc.messages)) from exc
+        if results_dir is not None:
+            project.config.project.paths.results = str(project.resolve(results_dir).resolve())
     if integration_run:
         if Path(integration_run).name != integration_run or integration_run in (".", ".."):
             raise RunError("--integration-run 应为本实验的运行 ID")
         if start != "scripts" or not source:
             raise RunError("--integration-run 需要 --from scripts 和 --source")
-    targets = _targets(project, experiments)
+    targets = [trial.experiment.id] if trial else _targets(project, experiments)
     if source and len(targets) > 1:
         raise RunError(f"--source 是某一个实验的运行 ID，请用 --experiment 只选一个实验（当前：{'、'.join(targets)}）")
 
-    effective_retention = retention if retention is not None else RetentionPolicy.from_settings(project.config.pipeline.retention)
+    effective_retention = None if trial else (retention if retention is not None else
+                                              RetentionPolicy.from_settings(project.config.pipeline.retention))
     log(f"项目 {project.root}；结果根目录 {project.path('results')}；实验 {'、'.join(targets)}；"
         f"从 {start} 开始{'（只列出步骤，不运行）' if dry_run else ''}")
-    report = validate_project(project, targets)
+    with progress_stage(reporter, "validate"):
+        report = ValidationReport(validate_experiment(trial.experiment)) if trial else validate_project(project, targets)
     for line in report.format().splitlines():
         log(f"[validate] {line}")
     if not report.ok:
-        raise RunError("校验未通过（见上），没有开始运行")
-    plans = _plan(project, targets, omics or [ALL], start, source, integration_run)
+        code = "CONFIG_SCHEMA_ERROR" if any(i.code == "CONFIG_SCHEMA_ERROR" for i in report.errors) else "VALIDATION_FAILED"
+        raise RunError("校验未通过（见上），没有开始运行", code=code,
+                       details={"issues": [asdict(issue) for issue in report.issues]})
+    plans = _plan(project, targets, omics or [ALL], start, source, integration_run,
+                  allow_custom_scripts=allow_custom_scripts, trial=trial)
+    if trial and not dry_run:
+        trial.reserve()
 
     results: list[PipelineResult] = []
     for plan in plans:
         try:
             warnings = [f"{issue.where}: {issue.message}" for issue in report.warnings
-                        if issue.where in ("项目", f"实验 {plan.experiment.id}")]
+                        if trial or issue.where in ("项目", f"实验 {plan.experiment.id}")]
             results.append(_run_experiment(
                 project, plan, omics or [ALL], start, dry_run, command, log, warnings,
-                tag=tag, pin=pin, retention=effective_retention, run_gsea=run_gsea,
+                tag=tag, pin=pin, retention=effective_retention, run_gsea=run_gsea, reporter=reporter, trial=trial,
             ))
         except RunError as exc:
             done = "、".join(r.experiment for r in results)

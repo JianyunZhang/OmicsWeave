@@ -18,81 +18,67 @@ omicsweave.core — 跨组学共享的基础模块。
     idmap.reaction_pathway_mapping   — MFA 反应 ID → KEGG Reaction / Pathway / Reactome / EC
 """
 
-from .idmap.metabolite_id_mapping import (
-    METABOLITE_DATABASE_IDS,
-    lookup_metabolite_ids,
-    annotate_metabolites,
-    get_hmdb_id,
-    get_kegg_compound,
-    get_chebi_id,
-)
-from .idmap.mouse_protein_id_mapping import (
-    MOUSE_PROTEIN_UNIPROT_MAPPING,
-    get_uniprot_id,
-    get_ec_for_protein,
-)
-from .idmap.mouse_gene_id_mapping import (
-    GENE_ANNOTATIONS,
-    GENE_ALIAS_LOOKUP,
-    resolve_gene_symbol,
-    get_ncbi_gene_id,
-    get_ensembl_gene_id,
-    get_gene_name,
-    get_gene_info,
-)
-from .idmap.reaction_pathway_mapping import (
-    REACTION_REGISTRY,
-    ReactionInfo,
-    get_reaction_info,
-    get_kegg_reaction,
-    get_kegg_pathway,
-    get_reactome_id,
-    get_ec_number,
-    get_description,
-    list_reactions_by_pathway,
-    list_reactions_with_ec,
-    get_all_pathways,
-    annotate_flux_dataframe,
-)
-from .statistics.meta_analysis import MetaAnalysisResult, random_effects_meta
-from .statistics.stability import StabilityResult, calibrate_biological_stability
+from importlib import import_module
 
-__all__ = [
-    # 代谢物
-    "METABOLITE_DATABASE_IDS",
-    "lookup_metabolite_ids",
-    "annotate_metabolites",
-    "get_hmdb_id",
-    "get_kegg_compound",
-    "get_chebi_id",
-    # 蛋白质
-    "MOUSE_PROTEIN_UNIPROT_MAPPING",
-    "get_uniprot_id",
-    "get_ec_for_protein",
-    # 基因
-    "GENE_ANNOTATIONS",
-    "GENE_ALIAS_LOOKUP",
-    "resolve_gene_symbol",
-    "get_ncbi_gene_id",
-    "get_ensembl_gene_id",
-    "get_gene_name",
-    "get_gene_info",
-    # 代谢反应通路
-    "REACTION_REGISTRY",
-    "ReactionInfo",
-    "get_reaction_info",
-    "get_kegg_reaction",
-    "get_kegg_pathway",
-    "get_reactome_id",
-    "get_ec_number",
-    "get_description",
-    "list_reactions_by_pathway",
-    "list_reactions_with_ec",
-    "get_all_pathways",
-    "annotate_flux_dataframe",
-    # 统计整合
-    "MetaAnalysisResult",
-    "random_effects_meta",
-    "StabilityResult",
-    "calibrate_biological_stability",
-]
+
+# 轻量 CLI 与后台运行时按需导入统计和 ID 注释模块。
+_MODULE_EXPORTS = {
+    'idmap.metabolite_id_mapping': (
+        'METABOLITE_DATABASE_IDS',
+        'lookup_metabolite_ids',
+        'annotate_metabolites',
+        'get_hmdb_id',
+        'get_kegg_compound',
+        'get_chebi_id',
+    ),
+    'idmap.mouse_protein_id_mapping': (
+        'MOUSE_PROTEIN_UNIPROT_MAPPING',
+        'get_uniprot_id',
+        'get_ec_for_protein',
+    ),
+    'idmap.mouse_gene_id_mapping': (
+        'GENE_ANNOTATIONS',
+        'GENE_ALIAS_LOOKUP',
+        'resolve_gene_symbol',
+        'get_ncbi_gene_id',
+        'get_ensembl_gene_id',
+        'get_gene_name',
+        'get_gene_info',
+    ),
+    'idmap.reaction_pathway_mapping': (
+        'REACTION_REGISTRY',
+        'ReactionInfo',
+        'get_reaction_info',
+        'get_kegg_reaction',
+        'get_kegg_pathway',
+        'get_reactome_id',
+        'get_ec_number',
+        'get_description',
+        'list_reactions_by_pathway',
+        'list_reactions_with_ec',
+        'get_all_pathways',
+        'annotate_flux_dataframe',
+    ),
+    'statistics.meta_analysis': (
+        'MetaAnalysisResult',
+        'random_effects_meta',
+    ),
+    'statistics.stability': (
+        'StabilityResult',
+        'calibrate_biological_stability',
+    ),
+}
+_EXPORTS = {name: module for module, names in _MODULE_EXPORTS.items() for name in names}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f".{_EXPORTS[name]}", __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()).union(__all__))

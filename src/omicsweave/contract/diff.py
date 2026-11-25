@@ -39,8 +39,10 @@ TABLE_KEYS: dict[str, tuple[str, ...]] = {
     "contrast_reliability": ("omics", "tissue", "contrast_id"),
     "reversal": ("pair_id", "omics", "tissue", "feature_id"),
     "reversal_summary": ("pair_id", "omics", "tissue", "feature_type"),
+    "reaction_assessment": ("flux_id", "tissue", "contrast_id"),
+    "axis_assessment": ("flux_id", "tissue", "contrast_id", "axis"),
 }
-CATEGORY_COLUMNS = ("evidence_grade", "anchor_state", "class", "status")
+CATEGORY_COLUMNS = ("evidence_grade", "anchor_state", "class", "status", "flux_claim", "state")
 DEFAULT_ATOL, DEFAULT_RTOL = 1e-12, 1e-9
 
 

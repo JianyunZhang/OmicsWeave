@@ -42,12 +42,15 @@ import importlib
 import json
 import os
 import sys
+from contextlib import contextmanager, redirect_stdout
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from omicsweave import __version__
 from omicsweave.core.model import Species
 from omicsweave.core.project import project_context, project_dir
+from omicsweave.service.schemas import ErrorCode, ServiceError
 
 if TYPE_CHECKING:
     from omicsweave.core.retention import RetentionPolicy
@@ -92,13 +95,33 @@ COMMANDS: dict[str, dict[str, tuple[str, str]]] = {
 }
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        if _JSON_PARSE.get():
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, message)
+        super().error(message)
+
+
+_JSON_PARSE = contextvars.ContextVar("omicsweave_json_parse", default=False)
+
+
+def _json_options(parser, *, use_format=True, alias=True):
+    if use_format:
+        parser.add_argument("--format", dest="response_format", choices=["text", "json"],
+                            default=argparse.SUPPRESS, help="CLI 响应格式")
+    if alias:
+        parser.add_argument("--json", dest="response_format", action="store_const", const="json",
+                            default=argparse.SUPPRESS, help="输出结构化 JSON 响应")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="omicsweave",
         description="OmicsWeave 多组学分析工具包",
         epilog="在动作后加 --help 查看该动作自身的参数，例如：omicsweave mfa run --help",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    _json_options(parser)
     parser.add_argument(
         "--project-dir", type=Path, default=None,
         help="实验项目目录（包含 project.yaml、experiments/ 与 results/）",
@@ -293,6 +316,99 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--output", default=None, help="把对照明细写到该目录（tables / columns / transitions.tsv）")
     diff.add_argument("--atol", type=float, default=1e-12, help="数值相同的绝对容差，默认 1e-12")
     diff.add_argument("--rtol", type=float, default=1e-9, help="数值相同的相对容差，默认 1e-9")
+    diff.add_argument("--results-dir", type=Path, help="正式结果根目录覆盖项")
+    diff.add_argument("--trial-a", help="A 侧试验 ID")
+    diff.add_argument("--trial-b", help="B 侧试验 ID")
+
+    for subparser in (run, integrate, pipeline):
+        subparser.add_argument("--background", action="store_true", help="派发独立后台作业")
+        subparser.add_argument("--override", action="append", help="隔离试验覆盖 key.path=yaml_value，可重复")
+        subparser.add_argument("--override-file", type=Path, help="隔离试验的 YAML/JSON 参数表")
+        subparser.add_argument("--intent", choices=["sensitivity_check", "post_hoc_exploration", "qc_refinement",
+                                                    "visualization_tune", "baseline", "manual"])
+        subparser.add_argument("--rationale", help="隔离试验的依据")
+        subparser.add_argument("--parent-run", "--parent-run-id", dest="parent_run", help="对照的正式运行 ID")
+    for subparser in (run, integrate):
+        subparser.add_argument("--dry-run", action="store_true", help="预览运行选择及试验参数")
+    for subparser in (validate, run, integrate, pipeline, clean, diff):
+        _json_options(subparser)
+    _json_options(latest, alias=False)
+    for subparser in (maps, abstract):
+        _json_options(subparser, use_format=False)
+
+    status = modules.add_parser("status", help="读取后台作业状态")
+    selector = status.add_mutually_exclusive_group()
+    selector.add_argument("--job")
+    selector.add_argument("--experiment")
+    selector.add_argument("--active", action="store_true")
+    status.add_argument("--limit", type=int, default=20)
+
+    logs = modules.add_parser("logs", help="读取后台作业日志与结构化事件")
+    logs.add_argument("job")
+    logs.add_argument("--tail", type=int, default=50)
+    logs.add_argument("--since-event", type=int, default=0)
+    logs.add_argument("--events-only", action="store_true")
+
+    cancel = modules.add_parser("cancel", help="在下一安全检查点停止后台作业")
+    cancel.add_argument("job")
+
+    inspect = modules.add_parser("inspect", help="读取结果包或交付摘要")
+    query = modules.add_parser("query", help="读取结果表的有界 Parquet 切片")
+    trace = modules.add_parser("trace", help="按确切标识符读取关联结果")
+    diagnose = modules.add_parser("diagnose", help="按固定结果包汇总科研护栏、质控和校准")
+    for subparser in (inspect, query, trace, diagnose):
+        subparser.add_argument("--experiment", required=True)
+        subparser.add_argument("--trial", help="显式选择隔离试验")
+        selection = subparser.add_mutually_exclusive_group()
+        selection.add_argument("--run", default="latest")
+        selection.add_argument("--delivery")
+    query.add_argument("--table", required=True)
+    layer = query.add_mutually_exclusive_group()
+    layer.add_argument("--omics")
+    layer.add_argument("--mode")
+    query.add_argument("--columns", action="append", help="列名，逗号分隔或重复指定")
+    query.add_argument("--filters", help="JSON 条件数组，每项包含 column、op、value")
+    query.add_argument("--sort", "--sort-by", dest="sort_by")
+    query.add_argument("--descending", action="store_true")
+    query.add_argument("--limit", type=int, default=50)
+    query.add_argument("--offset", type=int, default=0)
+    trace.add_argument("--entity", required=True)
+    trace.add_argument("--tissue")
+    trace.add_argument("--contrast", dest="contrast_id")
+    trace.add_argument("--limit", type=int, default=30)
+    diagnose.add_argument("--limit", type=int, default=100, help="返回诊断条数，最多 200")
+    for subparser in (status, logs, cancel, inspect, query, trace, diagnose):
+        subparser.add_argument("--results-dir", type=Path, help="结果根目录覆盖项，相对路径以项目为基准")
+        _json_options(subparser)
+
+    schema = modules.add_parser("schema", help="查看已注册的参数和结果 JSON Schema")
+    schema.add_argument("target", nargs="?", default="targets", help="如 omics/mfa 或 integration/reversal")
+    inputs = modules.add_parser("inspect-input", help="查看实验输入文件元信息")
+    inputs.add_argument("paths", nargs="*")
+    inputs.add_argument("--experiment")
+    config = modules.add_parser("config", help="预览或提交实验配置补丁")
+    config.add_argument("action", choices=["patch"])
+    config.add_argument("--target", choices=["experiment_yaml", "panels_yaml"], default="experiment_yaml")
+    patch = config.add_mutually_exclusive_group(required=True)
+    patch.add_argument("--patch", help="JSON 合并补丁")
+    patch.add_argument("--patch-file", type=Path, help="包含 JSON 合并补丁的 UTF-8 文件")
+    qc = modules.add_parser("qc", help="预览或提交样本 QC 标记")
+    qc.add_argument("action", choices=["flag"])
+    qc.add_argument("--updates", required=True, help="JSON 更新数组，每项包含 sample_id、qc_flag 和 qc_reason")
+    for edit in (config, qc):
+        edit.add_argument("--experiment", required=True)
+        mode = edit.add_mutually_exclusive_group()
+        mode.add_argument("--dry-run", action="store_true", help="预览变更（默认）")
+        mode.add_argument("--apply", action="store_true", help="提交预览变更")
+        edit.add_argument("--reason", default="")
+        edit.add_argument("--expected-sha256", help="预览响应中的 sha256")
+    for subparser in (schema, inputs, config, qc):
+        _json_options(subparser)
+    mcp = modules.add_parser("mcp", help="以 stdio 提供本地 MCP 服务")
+    mcp.add_argument("action", choices=["serve"])
+    mcp.add_argument("--allowed-data-root", type=Path, action="append", default=[])
+    mcp.add_argument("--allow-writes", action="store_true", help="授权配置、样本表和项目模板工具写入")
+    mcp.add_argument("--allow-custom-scripts", action="store_true", help="信任并运行项目的课题脚本")
 
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
@@ -321,9 +437,18 @@ def _run_init(args: argparse.Namespace) -> int:
 
 
 def _run_validate(args: argparse.Namespace) -> int:
-    from omicsweave.core.validate import validate_project
+    from omicsweave.service.project import validation, validation_summary
 
-    report = validate_project(project_dir(), args.experiment)
+    report = validation(project_dir(), args.experiment)
+    if args.machine:
+        issues = [asdict(issue) for issue in report.issues]
+        args.warnings.extend({k: row[k] for k in ("code", "where", "message")}
+                             for row in issues if row["level"] == "warning")
+        if not report.ok:
+            code = (ErrorCode.CONFIG_SCHEMA_ERROR if any(i.code == "CONFIG_SCHEMA_ERROR" for i in report.errors)
+                    else ErrorCode.VALIDATION_FAILED)
+            raise ServiceError(code, "项目校验未通过", details={"issues": issues})
+        return {key: value for key, value in validation_summary(report).items() if key != "ok"}
     print(report.format())
     return 0 if report.ok else 1
 
@@ -386,21 +511,31 @@ def _run_export(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_bundle(value: str, experiment: str | None) -> Path:
+def _resolve_bundle(value: str, experiment: str | None, results_dir: Path | None = None,
+                    trial_id: str | None = None) -> Path:
     """结果包目录，或在 ``<paths.results>/<实验>/`` 下按运行 ID 查找。"""
     from omicsweave.contract.dataset import ContractError
     from omicsweave.contract.manifest import MANIFEST_FILE
-    from omicsweave.core.config import load_project
-
     path = Path(value)
     # 已有的目录直接对照（不要求运行清单，便于对照临时输出）
-    if path.is_dir():
+    if path.is_dir() and not trial_id:
         return path
-    results = load_project(project_dir()).path("results")
+    if trial_id:
+        from omicsweave.core.overrides import trial_root
+        from omicsweave.core.path_scope import identifier
+
+        identifier(value)
+    _, results = _resolve_results_root(results_dir)
+    if trial_id:
+        results = trial_root(results, trial_id)
+        if experiment:
+            identifier(experiment)
     pattern = f"{experiment}/{value}" if experiment else f"*/{value}"
     found = [p for p in results.glob(pattern) if (p / MANIFEST_FILE).is_file()]
     if len(found) != 1:
         problem = "找不到" if not found else f"在多个实验中都有（{'、'.join(p.parent.name for p in found)}），请用 --experiment 指定"
+        if not found:
+            raise FileNotFoundError(f"结果包 {value} {problem}")
         raise ContractError(f"结果包 {value} {problem}")
     return found[0]
 
@@ -410,14 +545,29 @@ def _run_diff(args: argparse.Namespace) -> int:
     from omicsweave.contract.dataset import ContractError
     from omicsweave.contract.diff import diff_bundles, format_report, write_report
     from omicsweave.core.config import ConfigError
+    from omicsweave.core.overrides import OverrideError
+    from omicsweave.core.path_scope import ScopeError
 
     try:
-        a, b = (_resolve_bundle(v, args.experiment) for v in (args.run_a, args.run_b))
+        a, b = (_resolve_bundle(v, args.experiment, args.results_dir, trial)
+                for v, trial in ((args.run_a, args.trial_a), (args.run_b, args.trial_b)))
         result = diff_bundles(a, b, atol=args.atol, rtol=args.rtol)
-    except (ConfigError, ContractError) as exc:
+    except (ConfigError, ContractError, FileNotFoundError, OverrideError, ScopeError) as exc:
+        if args.machine:
+            raise
         print(f"错误：{exc}", file=sys.stderr)
         return 2
+    if args.machine:
+        from omicsweave.service.query import diff_payload
+
+        return diff_payload(result, args.output)
     print(format_report(result))
+    from omicsweave.service.query import configuration_diff
+
+    if report := configuration_diff(a, b)["config_diff"]:
+        print(f"生效配置差异：{len(report)} 项")
+        for item in report[:20]:
+            print(f"  {item['op']} {item['path']}")
     if args.output:
         print(f"明细：{write_report(result, args.output)}")
     return 0 if result.identical else 1
@@ -488,119 +638,62 @@ def _run_stats(args: argparse.Namespace) -> int:
 
 def _run_map(args: argparse.Namespace) -> int:
     from omicsweave.contract.dataset import ContractError
-    from omicsweave.contract.export import find_run
-    from omicsweave.core.config import ConfigError, load_experiment, load_project
+    from omicsweave.core.config import ConfigError
     from omicsweave.integration.mappings.network_layout import LayoutError
-    from omicsweave.integration.pathway_map import redraw
+    from omicsweave.service.visualization import render_map
 
+    overrides = {
+        "layout": args.layout, "tissues": args.tissue, "contrasts": args.contrast, "formats": args.format,
+        "mode": args.mode, "style": args.style, "journal": args.journal, "color_mode": args.color_mode,
+        "strip_mode": args.strip_mode, "omics_edge_color": args.omics_edge_color, "regions": args.region,
+    }
+    settings = {key: value for key, value in overrides.items() if value}
+    if args.no_submaps:
+        settings["submaps"] = {"enabled": False}
+    elif args.submap:
+        settings["submaps"] = {"enabled": True, "panels": _split(args.submap), "min_signal": "all"}
+    if args.no_abstract:
+        settings["abstract"] = {"enabled": False}
+    elif args.ga_layout:
+        settings["abstract"] = {"enabled": True, "layout": args.ga_layout}
     try:
-        project = load_project(project_dir())
-        experiment = load_experiment(project, args.experiment)
-        base = project.path("results") / args.experiment
-        if args.source:
-            bundle = find_run(project.path("results"), args.experiment, args.source)
-        else:
-            found = sorted(p.parents[3] for p in base.glob(
-                "run_*/integration/reaction_dossier/tables/reaction_assessment.parquet"))
-            if not found:
-                raise ContractError(f"{base} 下没有含反应档案评估表的整合结果包")
-            bundle = found[-1]
-        configured = dict((experiment.config.integration.parameters.get("reaction_dossier") or {})
-                          .get("pathway_map") or {})
-        overrides = {
-            "layout": args.layout,
-            "tissues": args.tissue,
-            "contrasts": args.contrast,
-            "formats": args.format,
-            "mode": args.mode,
-            "style": args.style,
-            "journal": args.journal,
-            "color_mode": args.color_mode,
-            "strip_mode": args.strip_mode,
-            "omics_edge_color": args.omics_edge_color,
-            "regions": args.region,
-        }
-        configured.update({k: v for k, v in overrides.items() if v})
-        if args.no_submaps:
-            configured["submaps"] = {"enabled": False}
-        elif args.submap:
-            cur_sub = dict(configured.get("submaps") or {}) if isinstance(configured.get("submaps"), dict) else {}
-            cur_sub.update({"enabled": True, "panels": _split(args.submap), "min_signal": "all"})
-            configured["submaps"] = cur_sub
-        if args.no_abstract:
-            configured["abstract"] = {"enabled": False}
-        elif args.ga_layout:
-            cur_abs = dict(configured.get("abstract") or {}) if isinstance(configured.get("abstract"), dict) else {}
-            cur_abs.update({"enabled": True, "layout": args.ga_layout})
-            configured["abstract"] = cur_abs
-        configured["enabled"] = True
-        out_dir, notes = redraw(bundle, args.output, configured, experiment.root)
+        data = render_map(project_dir(), args.experiment, args.source, args.output, settings)
     except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
+        if args.machine:
+            raise
         print(f"错误：{exc}", file=sys.stderr)
         return 1
-    for note in notes:
+    if args.machine:
+        return data
+    for note in data["notes"]:
         print(f"[提示] {note}")
-    print(f"输出目录：{out_dir}")
+    print(f"输出目录：{data['output_dir']}")
     return 0
 
 
 def _run_abstract(args: argparse.Namespace) -> int:
-    from omicsweave.visualization.graphical_abstract import load_abstract_spec, render_graphical_abstract
-
-    fmts = list(args.format) if args.format else ["pdf", "png"]
-    if args.spec is not None:
-        try:
-            spec = load_abstract_spec(args.spec)
-            if args.output is None:
-                stem = args.spec.with_name(f"{args.spec.stem}_{args.style}")
-            elif args.output.is_dir() or not args.output.suffix:
-                stem = args.output / f"{args.spec.stem}_{args.style}"
-            else:
-                stem = args.output.with_suffix("")
-            written = render_graphical_abstract(
-                spec, stem, style=args.style, color_mode=args.color_mode,
-                journal=args.journal, layout=args.ga_layout, formats=fmts,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            print(f"错误：{exc}", file=sys.stderr)
-            return 1
-        for path in written:
-            print(f"已写出：{path}")
-        return 0
-
-    if not args.experiment:
-        print("错误：请提供 --spec <YAML> 或 --experiment <实验ID>", file=sys.stderr)
-        return 1
-
     from omicsweave.contract.dataset import ContractError
-    from omicsweave.contract.export import find_run
-    from omicsweave.core.config import ConfigError, load_experiment, load_project
+    from omicsweave.core.config import ConfigError
     from omicsweave.integration.mappings.network_layout import LayoutError
-    from omicsweave.integration.pathway_map import render_abstracts
+    from omicsweave.service.visualization import render_abstract
 
     try:
-        project = load_project(project_dir())
-        experiment = load_experiment(project, args.experiment)
-        base = project.path("results") / args.experiment
-        if args.source:
-            bundle = find_run(project.path("results"), args.experiment, args.source)
-        else:
-            found = sorted(p.parents[3] for p in base.glob(
-                "run_*/integration/reaction_dossier/tables/reaction_assessment.parquet"))
-            if not found:
-                raise ContractError(f"{base} 下没有含反应档案评估表的整合结果包")
-            bundle = found[-1]
-        out_dir, written = render_abstracts(
-            bundle, args.output,
-            tissues=args.tissue, contrasts=args.contrast,
-            style=args.style, color_mode=args.color_mode,
-            journal=args.journal, ga_layout=args.ga_layout, formats=fmts,
-            layout_path=args.layout, root=experiment.root,
-        )
-    except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError) as exc:
+        data = render_abstract(project_dir(), experiment=args.experiment, source=args.source, spec_path=args.spec,
+                               output=args.output, style=args.style, color_mode=args.color_mode, journal=args.journal,
+                               layout=args.ga_layout, formats=args.format, tissues=args.tissue,
+                               contrasts=args.contrast, layout_path=args.layout)
+    except (ConfigError, ContractError, FileNotFoundError, LayoutError, ValueError, ServiceError) as exc:
+        if args.machine:
+            raise
         print(f"错误：{exc}", file=sys.stderr)
         return 1
-    print(f"Graphical Abstract（{args.style}）共写出 {len(written)} 个文件，目录：{out_dir}")
+    if args.machine:
+        return data
+    if args.spec is not None:
+        for path in data["files"]:
+            print(f"已写出：{path}")
+    else:
+        print(f"Graphical Abstract（{args.style}）共写出 {len(data['files'])} 个文件，目录：{data['output_dir']}")
     return 0
 
 
@@ -658,6 +751,8 @@ def _run_latest(args: argparse.Namespace) -> int:
     try:
         project, results_root = _resolve_results_root(args.results_dir)
     except ConfigError as exc:
+        if args.machine:
+            raise
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 
@@ -667,6 +762,8 @@ def _run_latest(args: argparse.Namespace) -> int:
         else (delivery_experiments(results_root) or list(project.config.pipeline.experiments))
     )
     if not experiments:
+        if args.machine:
+            raise ServiceError(ErrorCode.INPUT_NOT_FOUND, f"{results_root} 下没有找到任何交付目录")
         print(f"错误：{results_root} 下没有找到任何交付目录", file=sys.stderr)
         return 1
 
@@ -676,7 +773,7 @@ def _run_latest(args: argparse.Namespace) -> int:
             records = list(reversed(list_deliveries(results_root, exp_id)))
             latest_rec, _ = resolve_latest_delivery(results_root, exp_id)
             latest_id = latest_rec.delivery_id if latest_rec else None
-            if args.as_json:
+            if args.as_json or args.machine:
                 for rec in records:
                     rows.append({
                         **build_latest_payload(rec),
@@ -702,6 +799,8 @@ def _run_latest(args: argparse.Namespace) -> int:
                 ts = rec.completed_at or rec.created_at or "-"
                 size = format_bytes(directory_size(rec.directory))
                 print(f"  - {rec.delivery_id} | {rec.status} | {ts} | {size}{badge}")
+        if args.machine:
+            return {"deliveries": rows}
         if args.as_json:
             print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
@@ -717,17 +816,28 @@ def _run_latest(args: argparse.Namespace) -> int:
 
     if not found:
         names = "、".join(missing)
+        if args.machine:
+            raise ServiceError(ErrorCode.INPUT_NOT_FOUND, f"实验 {names} 没有已完成的交付")
         print(f"错误：实验 {names} 在 {results_root} 下没有已完成的交付", file=sys.stderr)
         return 1
 
     if (args.path or args.open_target) and len(found) > 1:
         names = "、".join(rec.experiment for rec, _ in found)
+        if args.machine:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, f"请从 {names} 中指定单个实验")
         print(f"错误：存在多个实验的交付（{names}），使用 --path 或 --open 时请用 --experiment 指定单个实验",
               file=sys.stderr)
         return 1
 
     pointer_file = latest_pointer_path(results_root)
-    if args.as_json:
+    if args.machine and (args.path or args.open_target):
+        record, _ = found[0]
+        target = args.target or ("summary" if args.open_target and record.summary_path else "dir")
+        resolved = record.target_path(target)
+        if args.open_target:
+            open_path(resolved)
+        return {"path": str(resolved), "opened": args.open_target}
+    if args.as_json or args.machine:
         items = []
         for rec, source in found:
             entry_exists = read_latest_pointer(results_root, rec.experiment) is not None
@@ -740,6 +850,8 @@ def _run_latest(args: argparse.Namespace) -> int:
                 "summary_path": str(rec.summary_path) if rec.summary_path else None,
                 "index_path": str(rec.index_path),
             })
+        if args.machine:
+            return {"deliveries": items, "missing_experiments": missing}
         payload = items[0] if len(items) == 1 else items
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -794,6 +906,8 @@ def _run_clean(args: argparse.Namespace) -> int:
     try:
         project, results_root = _resolve_results_root(args.results_dir)
     except ConfigError as exc:
+        if args.machine:
+            raise
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 
@@ -812,12 +926,21 @@ def _run_clean(args: argparse.Namespace) -> int:
             stale_running_hours=stale_hours,
         )
     except ValueError as exc:
+        if args.machine:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, str(exc)) from exc
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 
     dry_run = not args.apply
     experiments = list(dict.fromkeys(args.experiment)) if args.experiment else None
     report = apply_cleanup(results_root, policy, experiments, dry_run=dry_run)
+    if args.machine:
+        from pydantic import TypeAdapter
+
+        data = TypeAdapter(dict).dump_python(asdict(report), mode="json")
+        if report.failed:
+            raise ServiceError(ErrorCode.EXECUTION_FAILED, "部分目录清理失败", details={"report": data})
+        return data
     print(format_cleanup_report(report))
     if dry_run and report.to_remove:
         print("（预览模式，未删除任何文件；确认执行清理请加 --apply）")
@@ -828,6 +951,192 @@ _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migra
              "integrate": _run_integrate, "export": _run_export, "diff": _run_diff, "stats": _run_stats,
              "refs": _run_refs, "replicate": _run_replicate, "pipeline": _run_pipeline, "map": _run_map,
              "abstract": _run_abstract, "latest": _run_latest, "clean": _run_clean}
+
+_EXECUTION = {"run", "integrate", "pipeline"}
+_PROJECT_OPERATIONS = {"schema", "inspect-input", "config", "qc"}
+_OPERATIONS = {"status", "logs", "cancel", "inspect", "query", "trace", "diagnose"} | _PROJECT_OPERATIONS
+_MACHINE = _EXECUTION | _OPERATIONS | {"validate", "diff", "latest", "clean", "map", "abstract"}
+
+
+def _wants_trial(args) -> bool:
+    return any(getattr(args, name, None) is not None for name in ("override", "override_file", "intent", "rationale", "parent_run"))
+
+
+def _execution(args):
+    from omicsweave.service.execution import ExecutionRequest, execute, submit_execution
+
+    values = vars(args)
+    experiment = args.experiment
+    trial = None
+    if _wants_trial(args):
+        from omicsweave.core.overrides import TrialOptions, parse_overrides
+
+        trial = TrialOptions(overrides=parse_overrides(args.override, args.override_file),
+                             intent=args.intent or "sensitivity_check", rationale=args.rationale or "",
+                             parent_run_id=args.parent_run)
+    request = ExecutionRequest(
+        kind=args.module,
+        experiments=[experiment] if isinstance(experiment, str) else experiment or [],
+        omics=_split(values.get("omics")) or None, steps=_split(values.get("steps")) or None,
+        modes=_split(values.get("mode")) or None, source=values.get("source"),
+        start=values.get("start") or ("integrate" if values.get("source") else "run"),
+        results_dir=values.get("results_dir"), integration_run=values.get("integration_run"),
+        tag=values.get("tag"), pin=values.get("pin", False), dry_run=values.get("dry_run", False),
+        run_gsea=values.get("run_gsea"), command=["omicsweave", *args.argv],
+        retention=asdict(_ENTRY_RETENTION.get()) if _ENTRY_RETENTION.get() is not None else None,
+        trial=trial,
+    )
+    if args.background:
+        return submit_execution(project_dir(), request)
+    return execute(project_dir(), request)
+
+
+def _operation(args):
+    from pydantic import ValidationError
+
+    if args.module in _PROJECT_OPERATIONS:
+        return _project_operation(args)
+
+    project, root = _resolve_results_root(args.results_dir)
+    if args.module in {"status", "logs", "cancel"}:
+        from omicsweave.service.execution import job_operation
+
+        values = vars(args)
+        return job_operation(project.root, root, args.module, job=values.get("job"),
+                             experiment=values.get("experiment"), active=values.get("active", False),
+                             limit=values.get("limit", 20), tail=values.get("tail", 50),
+                             since_event=values.get("since_event", 0), events_only=values.get("events_only", False))
+
+    import pyarrow as pa
+
+    from omicsweave.service.query import ResultView, TableQuery, query_table, run_digest, trace_entity
+
+    try:
+        view = ResultView(root, args.experiment, args.run, args.delivery, trial_id=args.trial)
+        if args.module == "diagnose":
+            from omicsweave.service.query import diagnose_view
+
+            return diagnose_view(view, limit=args.limit, project_alpha=project.config.defaults.alpha)
+        if args.module == "inspect":
+            return run_digest(view)
+        if args.module == "trace":
+            return trace_entity(view, args.entity, tissue=args.tissue, contrast=args.contrast_id, limit=args.limit)
+        try:
+            request = TableQuery(
+                table=args.table, omics=args.omics, mode=args.mode, columns=_split(args.columns) or None,
+                filters=json.loads(args.filters) if args.filters is not None else [],
+                limit=args.limit, offset=args.offset, sort_by=args.sort_by, ascending=not args.descending,
+            )
+        except (ValidationError, json.JSONDecodeError) as exc:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, str(exc)) from exc
+        return query_table(view, request)
+    except pa.ArrowException as exc:
+        raise ServiceError(ErrorCode.CONTRACT_ERROR, f"无法读取结果表 {exc}") from exc
+
+
+def _project_operation(args):
+    from pydantic import TypeAdapter, ValidationError
+
+    from omicsweave.core.param_schemas import schema
+    from omicsweave.core.path_scope import PathScope
+    from omicsweave.service.project import EditOptions, QCUpdate, inspect_inputs, patch_config, update_sample_qc
+
+    if args.module == "schema":
+        try:
+            return schema(args.target)
+        except KeyError as exc:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, f"未知 Schema {args.target!r}，可用 schema targets 查看") from exc
+    scope = PathScope.create(project_dir())
+    if args.module == "inspect-input":
+        return inspect_inputs(scope, args.experiment, args.paths)
+    try:
+        options = EditOptions(dry_run=not args.apply, reason=args.reason, expected_sha256=args.expected_sha256)
+        if args.module == "config":
+            raw = args.patch if args.patch is not None else args.patch_file.read_text(encoding="utf-8-sig")
+            patch = TypeAdapter(dict[str, object]).validate_json(raw)
+        else:
+            updates = TypeAdapter(list[QCUpdate]).validate_json(args.updates)
+    except ValidationError as exc:
+        raise ServiceError(ErrorCode.CLI_USAGE_ERROR, str(exc)) from exc
+    if args.module == "config":
+        return patch_config(scope, args.experiment, patch, options, args.target)
+    return update_sample_qc(scope, args.experiment, updates, options)
+
+
+def _guess_json(raw: list[str]) -> tuple[str | None, bool]:
+    """解析失败之前识别外层协议，保留旧模块及 latest 的专属参数。"""
+    options = iter(enumerate(raw))
+    command, command_index = None, len(raw)
+    for index, token in options:
+        if token in {"--project-dir", "--format"}:
+            next(options, None)
+        elif not token.startswith("-"):
+            command, command_index = token, index
+            break
+    prefix, suffix = raw[:command_index], raw[command_index + 1:]
+
+    def requested(tokens, alias):
+        return any(token == "--format=json" or (token == "--format" and tokens[i + 1:i + 2] == ["json"])
+                   or (alias and token == "--json") for i, token in enumerate(tokens))
+
+    return command, requested(prefix, True) or (
+        command not in COMMANDS and requested(suffix, command != "latest")
+    )
+
+
+@contextmanager
+def _diagnostic_output():
+    """保留 stdout 给信封，隔离 Python 与原生扩展写入的诊断信息。"""
+    sys.stdout.flush()
+    saved = None
+    try:
+        if sys.stdout.fileno() == 1 and sys.stderr.fileno() == 2:
+            saved = os.dup(1)
+            os.dup2(2, 1)
+    except (AttributeError, OSError, ValueError):
+        if saved is not None:
+            os.close(saved)
+            saved = None
+    try:
+        with redirect_stdout(sys.stderr):
+            yield
+    finally:
+        if saved is not None:
+            try:
+                sys.stderr.flush()
+            finally:
+                os.dup2(saved, 1)
+                os.close(saved)
+
+
+def _response(command, root, data=None, error=None, warnings=()):
+    from omicsweave.service.schemas import ServiceResponse, json_safe
+
+    response = ServiceResponse(
+        ok=error is None, command=command, project_dir=str(root) if root is not None else None,
+        data=json_safe(data), error=error.detail if error else None, warnings=list(warnings),
+    )
+    print(json.dumps(response.model_dump(mode="json"), ensure_ascii=True, allow_nan=False, separators=(",", ":")))
+
+
+def _dispatch_machine(args):
+    from omicsweave.service.schemas import classify_error
+
+    root = project_dir()
+    try:
+        with _diagnostic_output():
+            if args.module in _EXECUTION:
+                data = _execution(args)
+            elif args.module in _OPERATIONS:
+                data = _operation(args)
+            else:
+                data = _HANDLERS[args.module](args)
+        _response(args.module, root, data=data, warnings=args.warnings)
+        return 1 if args.module == "diff" and not data["identical"] else 0
+    except Exception as exc:
+        error = classify_error(exc)
+        _response(args.module, root, error=error, warnings=args.warnings)
+        return error.exit_code
 
 
 def project_pipeline_main(
@@ -881,18 +1190,59 @@ def project_pipeline_main(
 
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
-    args, forwarded = parser.parse_known_args(argv)
-    args.argv = list(sys.argv[1:] if argv is None else argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    command, json_parse = _guess_json(raw)
+    token = _JSON_PARSE.set(json_parse)
+    try:
+        args, forwarded = parser.parse_known_args(raw)
+        args.argv = raw
+        if args.module in {"map", "abstract"} and "json" in (args.format or []):
+            args.format = [fmt for fmt in args.format if fmt != "json"]
+            args.response_format = "json"
+        args.machine = getattr(args, "response_format", None) == "json"
+        if args.machine and args.module not in _MACHINE:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, f"{args.module} 暂未支持结构化 JSON")
+        args.warnings = []
+        if args.module in _HANDLERS or args.module in _OPERATIONS or args.module == "mcp":
+            if args.module == "refs" and args.action == "build":
+                args.forwarded = forwarded
+            elif forwarded:
+                parser.error(f"无法识别的参数：{' '.join(forwarded)}")
+    except ServiceError as exc:
+        _response(command, None, error=exc)
+        sys.exit(exc.exit_code)
+    finally:
+        _JSON_PARSE.reset(token)
 
-    if args.module in _HANDLERS:
-        # refs build 的其余参数交给生成器
-        if args.module == "refs" and getattr(args, "action", None) == "build":
-            args.forwarded = forwarded
-        elif forwarded:
-            parser.error(f"无法识别的参数：{' '.join(forwarded)}")
-        handler = _HANDLERS[args.module]
+    if args.module == "mcp":
+        from omicsweave.mcp.server import serve
+
         with project_context(args.project_dir):
-            code = handler(args)
+            sys.exit(serve(project_dir(), args.allowed_data_root, allow_writes=args.allow_writes,
+                           allow_custom_scripts=args.allow_custom_scripts))
+
+    if args.module in _HANDLERS or args.module in _OPERATIONS:
+        with project_context(args.project_dir):
+            if args.machine:
+                code = _dispatch_machine(args)
+            elif (args.module in _OPERATIONS or getattr(args, "background", False)
+                  or (args.module in _EXECUTION and (_wants_trial(args)
+                      or (args.module != "pipeline" and args.dry_run)))):
+                from omicsweave.service.schemas import classify_error, json_safe
+
+                try:
+                    result = _operation(args) if args.module in _OPERATIONS else _execution(args)
+                    if getattr(args, "background", False):
+                        print(f"后台作业：{result['job_id']}\n状态文件：{result['state_path']}")
+                    else:
+                        print(json.dumps(json_safe(result), ensure_ascii=False, indent=2))
+                    code = 0
+                except Exception as exc:
+                    error = classify_error(exc)
+                    print(f"错误：{error}", file=sys.stderr)
+                    code = error.exit_code
+            else:
+                code = _HANDLERS[args.module](args)
         sys.exit(code)
 
     target, _ = COMMANDS[args.module][args.action]

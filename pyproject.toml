@@ -64,6 +64,9 @@ integration = [
 upstream = [
     "cutadapt>=4.0",
 ]
+mcp = [
+    "mcp==1.26.0",
+]
 all = [
     "omicsweave[mfa,transcriptomics,metabolomics,proteomics,integration]",
 ]
@@ -73,6 +76,7 @@ dev = [
 
 [project.scripts]
 omicsweave = "omicsweave.cli:main"
+omicsweave-mcp = "omicsweave.mcp.server:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "omicsweave.__version__" }

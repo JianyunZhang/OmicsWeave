@@ -283,6 +283,7 @@ def _differential(ctx: RunContext, counts: pd.DataFrame, rows: pd.DataFrame,
         details = ctx.omics_dir(Omics.TRANSCRIPTOMICS) / "details" / tissue
         details.mkdir(parents=True, exist_ok=True)
         for contrast in design.contrasts:
+            ctx.progress(Omics.TRANSCRIPTOMICS, "differential", tissue=str(tissue), contrast_id=contrast.id)
             groups = contrast_groups(experiment, contrast, Omics.TRANSCRIPTOMICS)
             samples = [s for s in tissue_samples if s in groups]
             n_num = sum(groups[s] == contrast.numerator for s in samples)
@@ -362,6 +363,7 @@ def run(ctx: RunContext) -> OmicsRun:
     if ctx.wants("qc") or (qc_cfg.get("enabled", True) and (qc_result.excluded or qc_result.flagged)):
         (out / "qc").mkdir(parents=True, exist_ok=True)
     if ctx.wants("qc"):
+        ctx.progress(Omics.TRANSCRIPTOMICS, "qc")
         pd.DataFrame({"sample_id": raw_counts.columns, "tissue": tissues[raw_counts.columns].to_numpy(),
                       "total_counts": raw_counts.sum().to_numpy(),
                       "detected_genes": (raw_counts > 0).sum().to_numpy()}).to_parquet(
@@ -395,6 +397,7 @@ def run(ctx: RunContext) -> OmicsRun:
 
     id_type = getattr(ctx.experiment.config.omics.transcriptomics.input, "feature_id_type", None) or "gene_symbol"
     for tissue in dict.fromkeys(tissues[counts.columns]):
+        ctx.progress(Omics.TRANSCRIPTOMICS, "dataset", tissue=str(tissue))
         samples = [s for s in counts.columns if tissues[s] == tissue]
         if not samples:
             continue
@@ -415,6 +418,7 @@ def run(ctx: RunContext) -> OmicsRun:
         if ctx.wants("enrichment") and results:
             _enrichment(ctx, results, record)
     if ctx.wants("figures"):
+        ctx.progress(Omics.TRANSCRIPTOMICS, "figures")
         record.notes += write_bundle_volcanoes(out, ctx.experiment.config.design.contrasts, metric="padj",
                                                thresholds=Thresholds(p=PADJ_CUTOFF, log2fc=LOG2FC_CUTOFF))
     return record
@@ -446,6 +450,7 @@ def _enrichment(ctx: RunContext, results: list, record: OmicsRun) -> None:
     record.inputs += files
     parts = []
     for contrast, tissue, raw, contract in results:
+        ctx.progress(Omics.TRANSCRIPTOMICS, "enrichment", tissue=str(tissue), contrast_id=contrast.id)
         keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
                     omics=Omics.TRANSCRIPTOMICS.value)
         parts.append(ora_rows(contract, libraries, settings, **keys))

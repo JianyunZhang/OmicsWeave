@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from .config import Project
@@ -18,6 +20,16 @@ from .model import Species
 GENE_SET_DIR = "gene_sets"
 # Enrichr 的物种名
 ENRICHR_ORGANISMS = {Species.MOUSE: "Mouse", Species.HUMAN: "Human"}
+_OFFLINE = ContextVar("omicsweave_offline_genesets", default=False)
+
+
+@contextmanager
+def offline_libraries():
+    token = _OFFLINE.set(True)
+    try:
+        yield
+    finally:
+        _OFFLINE.reset(token)
 
 
 class GeneSetError(Exception):
@@ -71,6 +83,8 @@ def load_libraries(project: Project, sources: list[str]) -> tuple[dict[str, dict
         else:
             path = cache_path(project, source)
             if not path.is_file():
+                if _OFFLINE.get():
+                    raise GeneSetError(f"离线执行需要已缓存的基因集 {source}")
                 _download(source, ENRICHR_ORGANISMS[project.config.project.species], path)
         libraries[library_name(source)] = read_gmt(path)
         files.append(path)

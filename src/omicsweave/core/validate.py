@@ -42,6 +42,7 @@ class Issue:
     level: Literal["error", "warning"]
     where: str
     message: str
+    code: str = "VALIDATION_ISSUE"
 
 
 @dataclass
@@ -74,8 +75,8 @@ class _Collector:
     def error(self, message: str) -> None:
         self.issues.append(Issue("error", self.where, message))
 
-    def warning(self, message: str) -> None:
-        self.issues.append(Issue("warning", self.where, message))
+    def warning(self, message: str, code: str = "VALIDATION_WARNING") -> None:
+        self.issues.append(Issue("warning", self.where, message, code))
 
 
 def _preview(values, limit: int = 5) -> str:
@@ -361,7 +362,11 @@ def _check_integration(exp: Experiment, out: _Collector) -> None:
 
 
 def validate_experiment(exp: Experiment) -> list[Issue]:
+    from .param_schemas import parameter_errors
+
     out = _Collector(f"实验 {exp.id}")
+    out.issues.extend(Issue("error", where, message, "CONFIG_SCHEMA_ERROR")
+                      for where, message in parameter_errors(exp.config))
     if exp.root.name != exp.id:
         out.warning(f"experiment.id（{exp.id}）与目录名（{exp.root.name}）不一致")
     if _check_tables(exp, out):
@@ -396,7 +401,7 @@ def validate_project(root: str | Path | Project | None = None, experiments: list
     try:
         project = load_project(root)
     except ConfigError as exc:
-        report.issues += [Issue("error", "project.yaml", m) for m in exc.messages]
+        report.issues += [Issue("error", "project.yaml", m, exc.code) for m in exc.messages]
         return report
 
     if experiments:
@@ -410,7 +415,7 @@ def validate_project(root: str | Path | Project | None = None, experiments: list
             exp = load_experiment(project, target)
         except ConfigError as exc:
             name = Path(target).name
-            report.issues += [Issue("error", f"实验 {name}", m) for m in exc.messages]
+            report.issues += [Issue("error", f"实验 {name}", m, exc.code) for m in exc.messages]
             continue
         report.issues += validate_experiment(exp)
     return report

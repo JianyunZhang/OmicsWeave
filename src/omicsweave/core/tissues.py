@@ -17,9 +17,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 _BAD_PATH_CHARS = ("/", "\\")
 
@@ -129,6 +130,8 @@ def remap_tissue_series(series: pd.Series, aliases: Mapping[str, str] | None) ->
     """批量归一组织列，返回 ``(归一后的 Series, 实际发生改名的 {原名: 规范名})``。"""
     if series.empty or not aliases:
         return series, {}
+    import pandas as pd
+
     exact, lowered = _lookup_tables(aliases)
     applied: dict[str, str] = {}
 

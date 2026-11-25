@@ -59,6 +59,7 @@ from scipy.stats import t as student_t
 from omicsweave.contract.dataset import META_FILE, read_dataset
 from omicsweave.contract.export import write_excel_tsv
 from omicsweave.core.model import IntegrationMode, Omics
+from omicsweave.core.progress import NULL_REPORTER, ProgressReporter
 from omicsweave.core.reliability import BLOCKED, QC_DIR, RELIABILITY_FILE, build_reliability
 from omicsweave.core.run import RunContext, RunError
 from omicsweave.core.tissues import merge_tissue_aliases, resolve_tissue, validate_tissue_aliases
@@ -710,7 +711,7 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
 
     # 判定规则的校准（S4，E8）
     calibration = calibrate(builder, contexts, params, reactions, tissues, dossier, (axes, reactions_assessed),
-                            samples, sides, expected, rules, panels)
+                            samples, sides, expected, rules, panels, reporter=ctx.reporter)
     (base / "evaluation").mkdir(parents=True)
     calibration.to_parquet(base / "evaluation" / CALIBRATION_TABLE, index=False)
 
@@ -723,10 +724,11 @@ def run(ctx: RunContext, source: Path, parameters: dict[str, Any]) -> Integratio
         pathway["split_samples"].to_parquet(out / NODE_SPLIT_SAMPLES, index=False)
         pathway["tests"].to_parquet(out / PATHWAY_TESTS_TABLE, index=False)
     panel_notes = render_panels(base, panels, dossier, samples, sides, contexts, params,
-                                (axes, reactions_assessed), calibration, pathway) if panels else []
+                                (axes, reactions_assessed), calibration, pathway, reporter=ctx.reporter) if panels else []
 
     # 分组织代谢通路总图（图 E，G18）：不依赖面板
     map_layout = params["pathway_map"]["layout"]
+    ctx.reporter.check_cancelled()
     try:
         map_notes = render_maps(base, base, params["pathway_map"], label,
                                 {"整合": ctx.run_dir.name, **{f"来源 {c.label}": c.source.run_id for c in contexts}},
@@ -861,7 +863,7 @@ def pathway_notes(pathway: dict[str, pd.DataFrame] | None) -> list[str]:
 def calibrate(builder: FluxEvidenceBuilder, contexts: list[_Context], params: dict[str, Any], reactions: list[str],
               tissues: set[str] | None, dossier: pd.DataFrame, assessed: tuple[pd.DataFrame, pd.DataFrame],
               samples: pd.DataFrame, sides: pd.DataFrame, expected: dict[str, list[str]], rules: dict[str, Any],
-              panels: dict[str, Panel]) -> pd.DataFrame:
+              panels: dict[str, Panel], *, reporter: ProgressReporter = NULL_REPORTER) -> pd.DataFrame:
     """E8：诱饵（参数 calibration.decoys 次）、面板声明的对照集、实际数据上的不变性检查；组别置换记为未运行。"""
     settings = params["calibration"]
     label = contexts[0].label
@@ -869,6 +871,11 @@ def calibrate(builder: FluxEvidenceBuilder, contexts: list[_Context], params: di
     if int(settings["decoys"]) > 0:
         runs = []
         for replicate in range(int(settings["decoys"])):
+            reporter.check_cancelled()
+            reporter.emit("step_progress", stage="integrate", detail={
+                "mode": "reaction_dossier", "step": "decoy_calibration", "completed_units": replicate,
+                "total_units": int(settings["decoys"]),
+            })
             members = build_decoy_dossier(builder, contexts, params, reactions, tissues,
                                           int(settings["seed"]) + replicate)
             runs.append(assess(members, label, rules, expected, samples, sides))
@@ -908,7 +915,8 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
                   sides: pd.DataFrame, contexts: list[_Context], params: dict[str, Any],
                   assessment: tuple[pd.DataFrame, pd.DataFrame] | None = None,
                   calibration: pd.DataFrame | None = None,
-                  pathway: dict[str, pd.DataFrame] | None = None) -> list[str]:
+                  pathway: dict[str, pd.DataFrame] | None = None, *,
+                  reporter: ProgressReporter = NULL_REPORTER) -> list[str]:
     """面板的行表、矩阵视图与导出表、图 A / B / C / D。"""
     from ..plotting import dossier_plots
 
@@ -919,6 +927,10 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
     elements_all, notes = [], []
     primary = dossier[dossier["source"] == contexts[0].label]
     for panel in panels.values():
+        reporter.check_cancelled()
+        reporter.emit("step_progress", stage="integrate", detail={
+            "mode": "reaction_dossier", "step": "render_panel", "panel": panel.id,
+        })
         elements = panel_elements(panel)
         elements_all.append(elements)
         tissues = panel.tissues or sorted(set(dossier["tissue"]))
@@ -928,6 +940,7 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
             for tissue in tissues:
                 folder = base / "figures" / panel.id / tissue
                 for contrast in contrasts:
+                    reporter.check_cancelled()
                     view = matrix_view(panel, chunk, dossier, tissue, contrast, labels, params["tracers"], assessment)
                     if view.empty:
                         continue
@@ -938,6 +951,7 @@ def render_panels(base: Path, panels: dict[str, Panel], dossier: pd.DataFrame, s
         for tissue in panel.tissues or sorted(set(dossier["tissue"])):
             folder = base / "figures" / panel.id / tissue
             for contrast in panel.contrasts or sorted(set(dossier["contrast_id"])):
+                reporter.check_cancelled()
                 dossier_plots.plot_tracer_coverage(primary, panel, tissue, contrast,
                                                    folder / f"tracer_coverage_{contrast}", formats, params["tracers"])
                 for reaction in panel.reactions:

@@ -287,6 +287,7 @@ def run(ctx: RunContext) -> OmicsRun:
 
     tables, contrasts_run, enrichment_inputs = [], [], []
     for tissue, raw, to_uniprot in blocks:
+        ctx.progress(Omics.PROTEOMICS, "preprocess", tissue=tissue)
         normalized = preprocess_data(raw, min_total_observations=int(settings["min_total_observations"]))
         if normalized.empty:
             record.notes.append(f"蛋白组 {tissue} 的蛋白都没有达到最少观测数，已跳过")
@@ -301,6 +302,7 @@ def run(ctx: RunContext) -> OmicsRun:
         write_dataset(out / "data" / tissue, Dataset(normalized, features, meta))
 
         if ctx.wants("qc"):
+            ctx.progress(Omics.PROTEOMICS, "qc", tissue=tissue)
             labels = sample_labels(experiment, list(normalized.columns))
             qc_meta = covariate_table.loc[normalized.columns].assign(
                 condition=[labels[s] for s in normalized.columns])
@@ -309,6 +311,7 @@ def run(ctx: RunContext) -> OmicsRun:
         if not (ctx.wants("differential") or ctx.wants("enrichment")):
             continue
         for contrast in experiment.config.design.contrasts:
+            ctx.progress(Omics.PROTEOMICS, "differential", tissue=tissue, contrast_id=contrast.id)
             assigned = contrast_groups(experiment, contrast, Omics.PROTEOMICS)
             groups = {s: assigned[s] for s in normalized.columns if s in assigned}
             levels = (contrast.numerator, contrast.denominator)
@@ -339,6 +342,7 @@ def run(ctx: RunContext) -> OmicsRun:
     if ctx.wants("enrichment") and enrichment_inputs:
         _enrichment(ctx, settings, enrichment_inputs, record)
     if ctx.wants("figures"):
+        ctx.progress(Omics.PROTEOMICS, "figures")
         record.notes += write_bundle_volcanoes(out, experiment.config.design.contrasts, metric="padj",
                                                thresholds=Thresholds(p=pval_cutoff, log2fc=log2fc_cutoff))
     record.parameters = {**record.parameters, "tissues": [t for t, _, _ in blocks], "covariates": covariates,
@@ -367,6 +371,7 @@ def _enrichment(ctx: RunContext, settings: dict[str, Any], inputs: list, record:
         record.notes.append("ssGSEA（样本层面的通路得分）暂未接入统一运行，可用 omicsweave proteomics run")
     parts = []
     for contrast, tissue, combined, contract in inputs:
+        ctx.progress(Omics.PROTEOMICS, "enrichment", tissue=tissue, contrast_id=contrast.id)
         keys = dict(contrast_id=contrast.id, contrast_role=contrast.role.value, tissue=tissue,
                     omics=Omics.PROTEOMICS.value)
         parts.append(ora_rows(contract, libraries, enrichment, **keys))

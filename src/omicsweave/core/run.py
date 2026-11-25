@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -28,6 +28,8 @@ from omicsweave.contract.manifest import MANIFEST_FILE, RunManifest, allocate_ru
 
 from .config import EXPERIMENT_FILE, ConfigError, Experiment, Project, load_experiment, load_project
 from .model import Contrast, Omics
+from .overrides import LINEAGE_PATH, RunLineage
+from .progress import NULL_REPORTER, ProgressReporter, progress_stage
 from .provenance import sha256_file
 from .validate import biological_samples, matches_level, validate_experiment
 
@@ -60,6 +62,11 @@ def is_bundle_output(path: Path, run_dir: Path) -> bool:
 class RunError(Exception):
     """运行无法开始，或某个组学运行失败。"""
 
+    def __init__(self, message: str, *, code: str | None = None, details: dict | None = None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+
 
 @dataclass
 class RunContext:
@@ -71,12 +78,19 @@ class RunContext:
     steps: tuple[str, ...] | None = None
     # None 表示按各组学配置（默认 False）决定是否运行预排序 GSEA
     run_gsea: bool | None = None
+    reporter: ProgressReporter = NULL_REPORTER
 
     def omics_dir(self, omics: Omics) -> Path:
         return self.run_dir / "omics" / omics.value
 
     def wants(self, step: str) -> bool:
         return self.steps is None or step in self.steps
+
+    def progress(self, omics: Omics, step: str, **detail: Any) -> None:
+        self.reporter.check_cancelled()
+        self.reporter.emit("step_progress", stage="run", detail={
+            "experiment": self.experiment.id, "omics": omics.value, "step": step, **detail,
+        })
 
 
 @dataclass
@@ -179,16 +193,18 @@ def load_validated(experiment_id: str, root: str | Path | Project | None = None)
         experiment = load_experiment(project, experiment_id)
     except ConfigError as exc:
         raise RunError("\n".join(exc.messages)) from exc
-    errors = [i.message for i in validate_experiment(experiment) if i.level == "error"]
+    errors = [i for i in validate_experiment(experiment) if i.level == "error"]
     if errors:
         raise RunError(f"实验 {experiment.id} 未通过校验（omicsweave validate），请先修正：\n"
-                       + "\n".join(f"  - {e}" for e in errors))
+                       + "\n".join(f"  - {e.message}" for e in errors), code="VALIDATION_FAILED",
+                       details={"issues": [asdict(issue) for issue in errors]})
     return project, experiment
 
 
 def start_run(project: Project, experiment: Experiment, run_id: str | None = None,
               steps: list[str] | None = None, *, into_existing: bool = False,
-              run_gsea: bool | None = None) -> RunContext:
+              run_gsea: bool | None = None, reporter: ProgressReporter = NULL_REPORTER,
+              lineage: RunLineage | None = None) -> RunContext:
     """新建结果包目录并写出 metadata/。"""
     base = project.path("results") / experiment.id
     if run_id is None:
@@ -203,8 +219,13 @@ def start_run(project: Project, experiment: Experiment, run_id: str | None = Non
                 raise RunError(f"{run_dir} 已存在")
         elif run_dir.exists():
             raise RunError(f"{run_dir} 已存在")
-    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None, run_gsea=run_gsea)
+    ctx = RunContext(project, experiment, run_id, run_dir, tuple(steps) if steps else None,
+                     run_gsea=run_gsea, reporter=reporter)
     _write_metadata(ctx)
+    if lineage is not None:
+        from .file_state import write_json
+
+        write_json(ctx.run_dir / LINEAGE_PATH, lineage.model_dump(mode="json"))
     return ctx
 
 
@@ -233,9 +254,12 @@ def finish_run(ctx: RunContext, inputs: list[Path], *, omics: list[Omics], param
 def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL,),
                    steps: list[str] | None = None, root: str | Path | Project | None = None,
                    command: list[str] | None = None, run_id: str | None = None,
-                   *, into_existing: bool = False, run_gsea: bool | None = None) -> tuple[Path, list[str]]:
+                   *, into_existing: bool = False, run_gsea: bool | None = None,
+                   reporter: ProgressReporter = NULL_REPORTER, prepared: Experiment | None = None,
+                   lineage: RunLineage | None = None) -> tuple[Path, list[str]]:
     """运行一个实验，返回 (结果包目录, 提示)。配置未通过校验时不开始运行。"""
-    project, experiment = load_validated(experiment_id, root)
+    reporter.check_cancelled()
+    project, experiment = (prepared.project, prepared) if prepared is not None else load_validated(experiment_id, root)
     chosen, notes = select_omics(experiment, list(omics))
     runners = {o: _load_runner(o) for o in chosen}
     if steps:
@@ -247,12 +271,14 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
             raise RunError(f"{FIGURES} 步骤根据本次运行写出的差异结果表绘图，请与 differential 一起指定，"
                            f"如 --steps differential,{FIGURES}")
 
-    ctx = start_run(project, experiment, run_id, steps, into_existing=into_existing, run_gsea=run_gsea)
+    ctx = start_run(project, experiment, run_id, steps, into_existing=into_existing, run_gsea=run_gsea,
+                    reporter=reporter, lineage=lineage)
     runs: list[OmicsRun] = []
     for o in chosen:
         func, _ = runners[o]
         try:
-            runs.append(func(ctx))
+            with progress_stage(reporter, "run", experiment=experiment.id, omics=o.value):
+                runs.append(func(ctx))
         except ModuleNotFoundError as exc:
             if exc.name and exc.name.split(".")[0] == "omicsweave":
                 raise
@@ -267,10 +293,12 @@ def run_experiment(experiment_id: str, omics: list[str] | tuple[str, ...] = (ALL
     # 后处理：派生特征、公式模型、可检出效应、稳健性与样本 QC 可靠性（omicsweave.stats.post）
     if not steps or _TABLE_STEPS & set(steps):
         from omicsweave.stats.post import postprocess
-        notes += postprocess(experiment, ctx.run_dir)
+        with progress_stage(reporter, "run", experiment=experiment.id, step="postprocess"):
+            notes += postprocess(experiment, ctx.run_dir)
 
     parameters: dict[str, Any] = {"steps": list(steps) if steps else ALL, **{r.omics.value: r.parameters for r in runs}}
     if run_gsea is not None:
         parameters["run_gsea"] = run_gsea
+    reporter.check_cancelled()
     finish_run(ctx, [p for r in runs for p in r.inputs], omics=chosen, command=command, parameters=parameters)
     return ctx.run_dir, notes + [n for r in runs for n in r.notes]

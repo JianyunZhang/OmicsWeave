@@ -107,14 +107,14 @@ def _read(path: Path) -> dict[str, Any]:
     return doc
 
 
-def load_panel_selection(path: str | Path) -> dict[str, str]:
+def load_panel_selection(path: str | Path, *, document: dict | None = None) -> dict[str, str]:
     """顶层 ``selection: {mode, basis}``：面板是看结果之前预设的（``pre_specified``），还是看过结果后选定的
     （``post_hoc``），``basis`` 写依据（如参考的运行 ID）。未写时 mode 为 ``unspecified``。
 
     只作交付记录，不影响整合结果；候选表与交付索引照录，便于读者判断面板结论的证据强度。
     """
     path = Path(path)
-    spec = _read(path).get("selection")
+    spec = (_read(path) if document is None else document).get("selection")
     if spec is None:
         return {"mode": "unspecified", "basis": ""}
     if not isinstance(spec, dict) or set(spec) - {"mode", "basis"} or spec.get("mode") not in SELECTION_MODES:
@@ -122,10 +122,13 @@ def load_panel_selection(path: str | Path) -> dict[str, str]:
     return {"mode": str(spec["mode"]), "basis": str(spec.get("basis") or "")}
 
 
-def load_panels(path: str | Path) -> dict[str, Panel]:
+def load_panels(path: str | Path, *, document: dict | None = None) -> dict[str, Panel]:
     path = Path(path)
-    doc = _read(path)
-    load_panel_selection(path)
+    doc = _read(path) if document is None else document
+    unknown = sorted(set(doc) - TOP_KEYS)
+    if unknown:
+        raise PanelError(f"{path.name}：无法识别的顶层键 {unknown}")
+    load_panel_selection(path, document=doc)
     raw = doc.get("panels")
     if not isinstance(raw, dict) or not raw:
         raise PanelError(f"{path.name}：顶层应为 panels: {{面板 ID: 声明}}")

@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
 import shutil
 import subprocess
 import sys
@@ -26,6 +25,7 @@ from omicsweave.contract.manifest import (
     validate_run_tag,
 )
 from .config import EXPERIMENT_FILE, PROJECT_FILE, Experiment
+from .file_state import file_lock, write_json
 from .provenance import sha256_file
 
 INDEX_FILE = "index.json"
@@ -66,7 +66,8 @@ def _link_or_copy(src: Path, dst: Path) -> None:
 
 class Delivery:
     def __init__(self, experiment: Experiment, scripts: list[str], command: list[str], *,
-                 tag: str | None = None, pinned: bool = False, now: datetime | None = None):
+                 tag: str | None = None, pinned: bool = False, now: datetime | None = None,
+                 job_id: str | None = None, run_tag: str | None = None):
         project = experiment.project
         self.project_root = project.root
         self.results_root = project.path("results")
@@ -77,7 +78,7 @@ class Delivery:
         )
         validated_tag = validate_delivery_tag(tag) if tag is not None else None
         parent = self.results_root / experiment.id
-        self.directory = allocate_run_dir(parent, now=now, tag=validated_tag)
+        self.directory = allocate_run_dir(parent, now=now, tag=run_tag or validated_tag)
         if pinned:
             (self.directory / PIN_FILE).write_text("pinned\n", encoding="utf-8")
         self.stages = {"validate": {"status": "completed"}}
@@ -94,6 +95,8 @@ class Delivery:
                               (project.root / PROJECT_FILE, experiment.root / EXPERIMENT_FILE)},
             "artifacts": self.artifacts,
         }
+        if job_id is not None:
+            self.data["job_id"] = job_id
         self.save()
 
     def save(self) -> None:
@@ -464,10 +467,24 @@ def write_latest_pointer(
     """原子更新 ``<results_root>/latest.json`` 中的实验指针，仅使用相对路径以保证跨平台和可搬迁。"""
     results_root = Path(results_root)
     results_root.mkdir(parents=True, exist_ok=True)
+    with file_lock(results_root / ".omicsweave-latest.lock"):
+        return _write_latest_pointer(results_root, entry, project_id, default_experiment)
+
+
+def _write_latest_pointer(results_root: Path, entry: dict, project_id: str | None,
+                          default_experiment: str | None) -> Path:
     pointer = latest_pointer_path(results_root)
     existing = read_latest_pointer(results_root) or {}
     experiments = dict(existing.get("experiments")) if isinstance(existing.get("experiments"), dict) else {}
     exp_id = entry["experiment"]
+    current = experiments.get(exp_id)
+    if isinstance(current, dict):
+        current_time = _parse_iso_timestamp(current.get("completed_at"))
+        entry_time = _parse_iso_timestamp(entry.get("completed_at"))
+        current_path = current.get("path")
+        if (current_time is not None and entry_time is not None and current_time > entry_time
+                and isinstance(current_path, str) and (results_root / current_path / INDEX_FILE).is_file()):
+            return pointer
     experiments[exp_id] = entry
     payload = {
         "schema_version": LATEST_SCHEMA_VERSION,
@@ -476,9 +493,7 @@ def write_latest_pointer(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "experiments": dict(sorted(experiments.items())),
     }
-    pending = results_root / f".{LATEST_POINTER_FILE}.tmp.{os.getpid()}.{secrets.token_hex(2)}"
-    pending.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    pending.replace(pointer)
+    write_json(pointer, payload)
     return pointer
 
 
@@ -645,10 +660,17 @@ def resolve_latest_delivery(results_root: str | Path, experiment_id: str) -> tup
 def sync_latest_pointer(results_root: str | Path, experiment_id: str) -> Path | None:
     """根据当前磁盘上的成功交付重建或清理 ``<results_root>/latest.json`` 中的实验条目。"""
     root = Path(results_root)
+    if not root.is_dir():
+        return None
+    with file_lock(root / ".omicsweave-latest.lock"):
+        return _sync_latest_pointer(root, experiment_id)
+
+
+def _sync_latest_pointer(root: Path, experiment_id: str) -> Path | None:
     completed = [item for item in list_deliveries(root, experiment_id) if item.status == "completed"]
     if completed:
         latest_rec = completed[-1]
-        return write_latest_pointer(root, build_latest_payload(latest_rec), project_id=latest_rec.project)
+        return _write_latest_pointer(root, build_latest_payload(latest_rec), latest_rec.project, None)
     pointer = latest_pointer_path(root)
     existing = read_latest_pointer(root)
     if not existing or not isinstance(existing.get("experiments"), dict):
@@ -677,9 +699,7 @@ def sync_latest_pointer(results_root: str | Path, experiment_id: str) -> Path | 
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "experiments": dict(sorted(experiments.items())),
         }
-        pending = root / f".{LATEST_POINTER_FILE}.tmp.{os.getpid()}.{secrets.token_hex(2)}"
-        pending.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        pending.replace(pointer)
+        write_json(pointer, payload)
         return pointer
     return pointer if pointer.is_file() else None
 

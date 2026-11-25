@@ -14,15 +14,17 @@ import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 import yaml
 from pydantic import BaseModel, ValidationError
 
 from .model import ExperimentConfig, Omics, ProjectConfig
 from .project import project_dir
 from .tissues import resolve_tissue
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 PROJECT_FILE = "project.yaml"
 EXPERIMENT_FILE = "experiment.yaml"
@@ -35,9 +37,10 @@ _DELIMITER_NAMES = {"\t": "制表符", ",": "逗号"}
 class ConfigError(Exception):
     """配置无法加载。``messages`` 中每一条对应一个具体问题。"""
 
-    def __init__(self, messages: list[str]):
+    def __init__(self, messages: list[str], *, code: str = "CONFIG_SCHEMA_ERROR"):
         super().__init__("\n".join(messages))
         self.messages = messages
+        self.code = code
 
 
 @dataclass
@@ -105,7 +108,7 @@ def _format_validation_error(source: Path, error: ValidationError) -> list[str]:
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
-        raise ConfigError([f"找不到 {path}"])
+        raise ConfigError([f"找不到 {path}"], code="INPUT_NOT_FOUND")
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
@@ -158,8 +161,10 @@ def read_table(path: Path) -> pd.DataFrame:
     ``.csv`` 按逗号分隔，其余（``.tsv``、``.txt`` 等）按制表符分隔。以 ``#`` 开头的行是注释；
     单元格中的 ``#`` 是普通字符。
     """
+    import pandas as pd
+
     if not path.is_file():
-        raise ConfigError([f"找不到样本表 {path}"])
+        raise ConfigError([f"找不到样本表 {path}"], code="INPUT_NOT_FOUND")
     sep = _DELIMITERS.get(path.suffix.lower(), "\t")
     lines = [line for line in _decode_table(path).splitlines() if not line.lstrip(" ").startswith("#")]
     if not any(line.strip() for line in lines):
@@ -211,14 +216,14 @@ def apply_sample_tissue_aliases(samples: pd.DataFrame,
     return updated, raw_tissues
 
 
-def load_experiment(project: Project, experiment: str | Path) -> Experiment:
+def load_experiment(project: Project, experiment: str | Path, *, document: dict | None = None) -> Experiment:
     """按实验 ID（``paths.experiments`` 下的目录名）或实验目录路径读取实验。"""
     candidate = Path(experiment)
     # 只有像路径的参数才当作目录，避免实验 ID 恰好与当前目录下的文件夹同名
     is_path = candidate.is_absolute() or len(candidate.parts) > 1
     exp_dir = candidate if is_path else project.path("experiments") / str(experiment)
     path = exp_dir / EXPERIMENT_FILE
-    data = _substitute(_read_yaml(path), project.config.project.references)
+    data = _substitute(_read_yaml(path) if document is None else document, project.config.project.references)
     config: ExperimentConfig = _parse(ExperimentConfig, path, data)
     subjects = read_table(exp_dir / config.design.subjects)
     samples, raw_tissues = apply_sample_tissue_aliases(read_table(exp_dir / config.design.samples), config)

@@ -27,6 +27,7 @@ REASON_LABELS = {
     "latest": "最新成功交付",
     "pinned": "已锁定（.keep / pinned）",
     "protected": "本次运行保护",
+    "trial_reference": "试验谱系引用",
     "within_keep_last": "在保留数量内",
     "keep_all": "不限数量保留",
     "drop_failed_disabled": "保留失败交付",
@@ -145,7 +146,8 @@ def format_bytes(num_bytes: int) -> str:
 
 
 def _collect_protected_bundles(results_root: Path, experiment_id: str,
-                               kept_deliveries: list[DeliveryRecord]) -> tuple[dict[str, Path], set[str], dict[str, str]]:
+                               kept_deliveries: list[DeliveryRecord],
+                               trial_runs: set[str] | None = None) -> tuple[dict[str, Path], set[str], dict[str, str]]:
     """找出实验下全部有效结果包及受保护结果包集合（含交付直接引用、source_run 传递引用与 .keep 锁定）。"""
     exp_dir = results_root / experiment_id
     bundles: dict[str, Path] = {}
@@ -168,6 +170,8 @@ def _collect_protected_bundles(results_root: Path, experiment_id: str,
     for name, path in bundles.items():
         if (path / PIN_FILE).is_file():
             mark(name, "pinned")
+    for name in sorted(trial_runs or ()):
+        mark(name, "trial_reference")
 
     for delivery in kept_deliveries:
         for run_id in delivery.bundles.values():
@@ -216,6 +220,7 @@ def plan_cleanup(
     experiments: list[str] | None = None,
     *,
     protected_deliveries: dict[str, set[str]] | None = None,
+    ignore_job_id: str | None = None,
     now: datetime | None = None,
 ) -> CleanupReport:
     """只读计算清理计划，不修改任何文件。"""
@@ -224,9 +229,19 @@ def plan_cleanup(
     now_ts = (now or datetime.now(timezone.utc)).timestamp()
     report = CleanupReport(results_root=root, policy=policy, dry_run=True, experiments=target_experiments)
     protected_map = protected_deliveries or {}
+    from .jobs import ACTIVE, list_status
+    from .overrides import trial_references
+
+    active = [job for job in list_status(root) if job["status"] in ACTIVE and job["job_id"] != ignore_job_id]
 
     for exp_id in target_experiments:
+        trial_runs = trial_references(root, exp_id)
         records = list_deliveries(root, exp_id)
+        if any(not job["experiments"] or exp_id in job["experiments"] for job in active):
+            report.notes.append(f"[{exp_id}] 有后台作业正在使用此实验的结果，暂缓清理")
+            report.kept.extend(KeptItem(exp_id, "delivery", record.delivery_id, record.directory, "active_job")
+                               for record in records)
+            continue
         exp_protected = protected_map.get(exp_id, set())
         completed = [item for item in records if item.status == "completed"]
         latest_id = completed[-1].delivery_id if completed else None
@@ -239,9 +254,10 @@ def plan_cleanup(
         kept_deliveries: list[DeliveryRecord] = []
         candidate_removals: list[tuple[DeliveryRecord, str]] = []
         for record in records:
-            if record.delivery_id in exp_protected:
+            if record.delivery_id in exp_protected or record.delivery_id in trial_runs:
                 kept_deliveries.append(record)
-                report.kept.append(KeptItem(exp_id, "delivery", record.delivery_id, record.directory, "protected"))
+                reason = "protected" if record.delivery_id in exp_protected else "trial_reference"
+                report.kept.append(KeptItem(exp_id, "delivery", record.delivery_id, record.directory, reason))
                 continue
             if record.status == "completed":
                 if record.delivery_id == latest_id:
@@ -283,7 +299,9 @@ def plan_cleanup(
         protected_bundles: set[str] = set()
         bundle_reasons: dict[str, str] = {}
         if kept_deliveries and (candidate_removals or policy.prune_orphan_bundles):
-            bundles, protected_bundles, bundle_reasons = _collect_protected_bundles(root, exp_id, kept_deliveries)
+            bundles, protected_bundles, bundle_reasons = _collect_protected_bundles(
+                root, exp_id, kept_deliveries, trial_runs,
+            )
 
         for record, reason in candidate_removals:
             if record.delivery_id in protected_bundles:
@@ -322,12 +340,24 @@ def apply_cleanup(
     *,
     dry_run: bool = True,
     protected_deliveries: dict[str, set[str]] | None = None,
+    ignore_job_id: str | None = None,
     now: datetime | None = None,
 ) -> CleanupReport:
     """执行（或预览）清理计划。``dry_run=True`` 时不删除任何文件。"""
-    report = plan_cleanup(results_root, policy, experiments, protected_deliveries=protected_deliveries, now=now)
+    from .jobs import root_lock
+
+    root = Path(results_root).resolve()
+    options = {"protected_deliveries": protected_deliveries, "ignore_job_id": ignore_job_id, "now": now}
     if dry_run:
-        return report
+        return plan_cleanup(root, policy, experiments, **options)
+    if not root.is_dir():
+        return _apply_report(plan_cleanup(root, policy, experiments, **options))
+    with root_lock(root):
+        report = plan_cleanup(root, policy, experiments, **options)
+        return _apply_report(report)
+
+
+def _apply_report(report: CleanupReport) -> CleanupReport:
 
     report.dry_run = False
     root_resolved = report.results_root

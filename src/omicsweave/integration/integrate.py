@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from omicsweave.contract.manifest import MANIFEST_FILE, RunManifest, file_record, read_manifest, write_manifest
-from omicsweave.core.config import EXPERIMENT_FILE, Project
+from omicsweave.core.config import EXPERIMENT_FILE, Experiment, Project
 from omicsweave.core.model import IntegrationMode
+from omicsweave.core.overrides import RunLineage
+from omicsweave.core.progress import NULL_REPORTER, ProgressReporter, progress_stage
 from omicsweave.core.run import (
     RunContext,
     RunError,
@@ -60,7 +62,8 @@ def source_run(results_root: str | Path, experiment_id: str, run_id: str | None 
     runs = [p for p in candidates if (p / MANIFEST_FILE).is_file() and any(p.glob("omics/*/tables/*.parquet"))]
     if not runs:
         where = f"{base / run_id}" if run_id else f"{base} 下"
-        raise RunError(f"{where}没有含统一结果表的结果包，请先运行 omicsweave run --experiment {experiment_id}")
+        raise RunError(f"{where}没有含统一结果表的结果包，请先运行 omicsweave run --experiment {experiment_id}",
+                       code="INPUT_NOT_FOUND")
     return runs[-1]
 
 
@@ -91,22 +94,29 @@ def select_modes(requested: list[str], configured: list[IntegrationMode]) -> lis
 def integrate_experiment(experiment_id: str, modes: list[str] | None = None, *, source: str | None = None,
                          root: str | Path | Project | None = None, command: list[str] | None = None,
                          run_id: str | None = None, into_source: bool = False,
-                         into_existing: bool = False) -> tuple[Path, list[str]]:
+                         into_existing: bool = False,
+                         reporter: ProgressReporter = NULL_REPORTER, prepared: Experiment | None = None,
+                         lineage: RunLineage | None = None, source_bundle: Path | None = None) -> tuple[Path, list[str]]:
     """运行整合模式，返回 (结果包目录, 提示)。``into_source=True`` 时直接写入源结果包并合并清单。"""
-    project, experiment = load_validated(experiment_id, root)
+    reporter.check_cancelled()
+    project, experiment = (prepared.project, prepared) if prepared is not None else load_validated(experiment_id, root)
     settings = experiment.config.integration
     chosen = select_modes(list(modes or []), settings.modes)
-    src = source_run(project.path("results"), experiment.id, source)
+    src = source_bundle if source_bundle is not None else source_run(project.path("results"), experiment.id, source)
     if into_source:
-        ctx = RunContext(project, experiment, src.name, src)
+        if source_bundle is not None:
+            raise RunError("试验复用包仅可作为只读输入")
+        ctx = RunContext(project, experiment, src.name, src, reporter=reporter)
     else:
-        ctx = start_run(project, experiment, run_id, into_existing=into_existing)
+        ctx = start_run(project, experiment, run_id, into_existing=into_existing, reporter=reporter, lineage=lineage)
     runs = []
     for mode in chosen:
         try:
-            runs.append(_load_mode(mode)(ctx, src, dict(settings.parameters.get(mode, {}))))
+            with progress_stage(reporter, "integrate", experiment=experiment_id, mode=mode.value):
+                runs.append(_load_mode(mode)(ctx, src, dict(settings.parameters.get(mode, {}))))
         except RunError as exc:
             raise RunError(f"{mode.value} 失败：{exc}（结果包 {ctx.run_dir} 不完整，没有 manifest.json）") from exc
+    reporter.check_cancelled()
     if into_source:
         existing = read_manifest(src)
         design = experiment.config.design
