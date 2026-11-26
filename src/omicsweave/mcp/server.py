@@ -1,4 +1,4 @@
-"""本地 MCP v1 启动入口，仅在启动服务时加载可选 SDK。"""
+"""本地 MCP 启动入口，仅在启动服务时加载可选 SDK。"""
 from __future__ import annotations
 
 import argparse
@@ -8,7 +8,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from omicsweave.core.path_scope import PathScope
-from omicsweave.service.schemas import classify_error
+from omicsweave.service.schemas import ErrorCode, ServiceError, classify_error
+
+
+def add_transport_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio")
+    parser.add_argument("--exchange-dir", type=Path, help="回环 HTTP 服务所读取的唯一交换包")
+    parser.add_argument("--port", type=int, default=None, help="回环 HTTP 端口，默认 8765")
 
 
 def build_server(project: Path, data_roots=(), *, allow_writes=False, allow_custom_scripts=False):
@@ -28,7 +34,39 @@ def build_server(project: Path, data_roots=(), *, allow_writes=False, allow_cust
     return server
 
 
-def serve(project: Path, data_roots=(), *, allow_writes=False, allow_custom_scripts=False) -> int:
+def serve(project: Path | None, data_roots=(), *, allow_writes=False, allow_custom_scripts=False,
+          transport="stdio", exchange_dir: Path | None = None, port: int | None = None) -> int:
+    try:
+        if transport == "streamable-http":
+            if exchange_dir is None:
+                raise ServiceError(ErrorCode.CLI_USAGE_ERROR, "回环 HTTP 服务需要 --exchange-dir")
+            if data_roots or allow_writes or allow_custom_scripts:
+                raise ServiceError(ErrorCode.CLI_USAGE_ERROR, "回环 HTTP 服务仅开放指定交换包的只读接口")
+            from .exchange_http import DEFAULT_PORT, serve_http
+
+            serve_http(exchange_dir, DEFAULT_PORT if port is None else port)
+            return 0
+        if transport != "stdio" or exchange_dir is not None or port is not None:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, "--exchange-dir 和 --port 用于 streamable-http")
+        if project is None:
+            raise ServiceError(ErrorCode.CLI_USAGE_ERROR, "stdio 服务需要 --project-dir")
+        return _serve_stdio(project, data_roots, allow_writes, allow_custom_scripts)
+    except ModuleNotFoundError as exc:
+        if exc.name in {"mcp", "anyio", "uvicorn"}:
+            print('MCP 依赖缺失，请安装 "omicsweave[mcp]"', file=sys.stderr)
+            return 14
+        return _startup_error(exc)
+    except Exception as exc:
+        return _startup_error(exc)
+
+
+def _startup_error(exc: Exception) -> int:
+    error = classify_error(exc)
+    print(error, file=sys.stderr)
+    return error.exit_code
+
+
+def _serve_stdio(project: Path, data_roots, allow_writes: bool, allow_custom_scripts: bool) -> int:
     # 保留独立的 stdout 句柄给 JSON-RPC，诊断进入 stderr。
     sys.stdout.flush()
     protocol_fd = os.dup(1)
@@ -48,30 +86,21 @@ def serve(project: Path, data_roots=(), *, allow_writes=False, allow_custom_scri
 
             anyio.run(run)
             return 0
-        except ModuleNotFoundError as exc:
-            if exc.name in {"mcp", "anyio"}:
-                print('MCP 依赖缺失，请安装 "omicsweave[mcp]"', file=sys.stderr)
-                return 14
-            error = classify_error(exc)
-            print(error, file=sys.stderr)
-            return error.exit_code
-        except Exception as exc:
-            error = classify_error(exc)
-            print(error, file=sys.stderr)
-            return error.exit_code
         finally:
             os.dup2(protocol.fileno(), 1)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="omicsweave-mcp")
-    parser.add_argument("--project-dir", type=Path, required=True)
+    parser.add_argument("--project-dir", type=Path)
     parser.add_argument("--allowed-data-root", type=Path, action="append", default=[])
     parser.add_argument("--allow-writes", action="store_true")
     parser.add_argument("--allow-custom-scripts", action="store_true")
+    add_transport_arguments(parser)
     args = parser.parse_args()
     sys.exit(serve(args.project_dir, args.allowed_data_root, allow_writes=args.allow_writes,
-                   allow_custom_scripts=args.allow_custom_scripts))
+                   allow_custom_scripts=args.allow_custom_scripts, transport=args.transport,
+                   exchange_dir=args.exchange_dir, port=args.port))
 
 
 if __name__ == "__main__":

@@ -404,11 +404,27 @@ def build_parser() -> argparse.ArgumentParser:
         edit.add_argument("--expected-sha256", help="预览响应中的 sha256")
     for subparser in (schema, inputs, config, qc):
         _json_options(subparser)
-    mcp = modules.add_parser("mcp", help="以 stdio 提供本地 MCP 服务")
+    exchange = modules.add_parser("exchange", help="构建和核验只读结果交换包")
+    exchange_actions = exchange.add_subparsers(dest="action", required=True)
+    build_exchange = exchange_actions.add_parser("build", help="为一个固定运行构建交换包")
+    build_exchange.add_argument("--experiment", required=True)
+    build_exchange.add_argument("--run", required=True)
+    build_exchange.add_argument("--trial")
+    build_exchange.add_argument("--output", type=Path, required=True)
+    verify_exchange = exchange_actions.add_parser("verify", help="核验交换包、文件哈希和数据集语义")
+    verify_exchange.add_argument("directory", type=Path)
+    exchange_schema = exchange_actions.add_parser("schema", help="输出交换 Schema")
+    for subparser in (build_exchange, verify_exchange, exchange_schema):
+        _json_options(subparser)
+
+    from omicsweave.mcp.server import add_transport_arguments
+
+    mcp = modules.add_parser("mcp", help="启动本地 stdio 或回环 HTTP MCP 服务")
     mcp.add_argument("action", choices=["serve"])
     mcp.add_argument("--allowed-data-root", type=Path, action="append", default=[])
     mcp.add_argument("--allow-writes", action="store_true", help="授权配置、样本表和项目模板工具写入")
     mcp.add_argument("--allow-custom-scripts", action="store_true", help="信任并运行项目的课题脚本")
+    add_transport_arguments(mcp)
 
     for module, actions in COMMANDS.items():
         module_parser = modules.add_parser(module, help=f"{module} 相关动作")
@@ -953,7 +969,7 @@ _HANDLERS = {"init": _run_init, "validate": _run_validate, "migrate": _run_migra
              "abstract": _run_abstract, "latest": _run_latest, "clean": _run_clean}
 
 _EXECUTION = {"run", "integrate", "pipeline"}
-_PROJECT_OPERATIONS = {"schema", "inspect-input", "config", "qc"}
+_PROJECT_OPERATIONS = {"schema", "inspect-input", "config", "qc", "exchange"}
 _OPERATIONS = {"status", "logs", "cancel", "inspect", "query", "trace", "diagnose"} | _PROJECT_OPERATIONS
 _MACHINE = _EXECUTION | _OPERATIONS | {"validate", "diff", "latest", "clean", "map", "abstract"}
 
@@ -1035,6 +1051,16 @@ def _operation(args):
 
 
 def _project_operation(args):
+    if args.module == "exchange":
+        from omicsweave.contract.exchange import AnalysisResultExchange
+        from omicsweave.service.exchange import build_exchange, verify_exchange
+
+        if args.action == "schema":
+            return AnalysisResultExchange.model_json_schema()
+        if args.action == "verify":
+            return verify_exchange(args.directory)
+        return build_exchange(project_dir(), args.experiment, args.run, args.output, args.trial)
+
     from pydantic import TypeAdapter, ValidationError
 
     from omicsweave.core.param_schemas import schema
@@ -1219,7 +1245,8 @@ def main(argv: list[str] | None = None) -> None:
 
         with project_context(args.project_dir):
             sys.exit(serve(project_dir(), args.allowed_data_root, allow_writes=args.allow_writes,
-                           allow_custom_scripts=args.allow_custom_scripts))
+                           allow_custom_scripts=args.allow_custom_scripts, transport=args.transport,
+                           exchange_dir=args.exchange_dir, port=args.port))
 
     if args.module in _HANDLERS or args.module in _OPERATIONS:
         with project_context(args.project_dir):

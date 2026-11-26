@@ -286,6 +286,11 @@ def _filter(schema: pa.Schema, condition: Filter):
 
 def query_table(view: ResultView, request: TableQuery) -> dict:
     key, path = view.table(request)
+    return read_table_page(view.run_id, key, path, request)
+
+
+def read_table_page(run_id: str, key: str, path: Path, request: TableQuery) -> dict:
+    """分页读取已由调用方授权的结果表。"""
     try:
         dataset = ds.dataset(str(path), format="parquet")
     except pa.ArrowException as exc:
@@ -311,7 +316,7 @@ def query_table(view: ResultView, request: TableQuery) -> dict:
     except (pa.ArrowException, TypeError, ValueError, OverflowError) as exc:
         raise ServiceError(ErrorCode.CLI_USAGE_ERROR, f"无法应用查询条件 {exc}") from exc
 
-    metadata = {"run_id": view.run_id, "table_path": key, "total_rows_before_filter": dataset.count_rows(),
+    metadata = {"run_id": run_id, "table_path": key, "total_rows_before_filter": dataset.count_rows(),
                 "total_rows_matched": matched, "offset": request.offset, "limit": request.limit, "columns": columns}
     windows = dataset.to_batches(columns=selected, filter=condition, batch_size=BATCH_SIZE)
     needed = request.offset + request.limit

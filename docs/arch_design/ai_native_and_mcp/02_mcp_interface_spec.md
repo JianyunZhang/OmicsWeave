@@ -7,7 +7,11 @@
 
 **本机接口**。使用 `omicsweave --project-dir <项目> mcp serve` 或 `omicsweave-mcp --project-dir <项目>` 启动固定版本 SDK 的 stdio 服务。服务器批准的 `--allowed-data-root` 用于读取。配置与样本表提交需要 `--allow-writes` 和预览 SHA-256。项目脚本默认跳过，显式放行后仅接受项目内 Python 脚本。清理工具提供预览，旧版迁移与实际删除走本机 CLI。
 
-**Phase 3.1／3.2**。提交工具接受 `overrides`、`intent`、`rationale` 和 `parent_run_id`。计算完成后，用返回的 `trial_id` 查询或诊断，以 `diff_runs(trial_b=...)` 与正式基线进行对照。正式发布走已审阅配置的正式运行。网络传输与系统间互操作属于 3.3。
+**Phase 3.1／3.2**。提交工具接受 `overrides`、`intent`、`rationale` 和 `parent_run_id`。计算完成后，用返回的 `trial_id` 查询或诊断，以 `diff_runs(trial_b=...)` 与正式基线进行对照。正式发布走已审阅配置的正式运行。
+
+**Phase 3.3 本机试点**。 `exchange` 将一个确切运行导出为版本化的只读交换包。可显式启动独立的回环 HTTP 服务读取该包。启动端作业、写入等本机项目权限仍由 stdio 接口管理。
+
+后续的消费端导入、预检与提交绑定、试验组汇总、面板建议审阅和作业恢复，统一按 [实施优先级与验收目标](03_implementation_roadmap.md#phase-3-后续实施优先级) 跟踪。
 
 ---
 
@@ -55,7 +59,7 @@ omicsweave-mcp --project-dir /path/to/project
 | 模式 | 默认状态 | 适用场景 | 安全基线 |
 |---|---|---|---|
 | `stdio` | **默认启用** | Claude Desktop、Claude Code、Cursor、Antigravity 等本机 Agent | 服务端通过父进程标准输入输出通信。需另行审查客户端模型调用、遥测和日志转发，以及课题配置中的远程基因集访问。 |
-| `streamable-http` | 显式开启 | O5 阶段实验室工作站/HPC 集群远程调用、多客户端协同 | 默认仅绑定 `127.0.0.1`；跨主机绑定时强制要求 Bearer Token（通过环境变量 `OMICSWEAVE_MCP_TOKEN` 注入），建议配合 SSH 隧道或内网 TLS 反代。 |
+| `streamable-http` | 显式开启 | 单个已选交换包的本机只读试点 | 固定绑定 `127.0.0.1`。以 `OMICSWEAVE_MCP_TOKEN` 提供本机 Bearer 凭据，核对连接对端、Host 和 Origin。 |
 
 ### 2.2 路径沙箱与越权拦截（`omicsweave.mcp.security`）
 
@@ -85,6 +89,26 @@ Tool 注解表达实际副作用，访问控制由服务端执行。允许调用
 ---
 
 ## 3. MCP Resources 规范（只读上下文寻址）
+
+### 3.1 固定结果交换包
+
+交换格式为 `omicsweave.analysis-result.exchange`，当前试点版本为 `1`。清单 `exchange.json` 声明运行身份、源清单指纹、可供交换的相对路径及 SHA-256。试验包同时记录基线运行和谱系指纹。标准数据集以原始 Parquet 与 `dataset.json` 文件交换，保留数值尺度、单位、特征类型、来源和 `derived` 语义。CLI 校验涉及清单结构、源产物哈希、交换文件完整性和数据集的元信息。
+
+使用示例中的 `<运行ID>` 时，换成合成项目中已完成的确切运行。
+
+```powershell
+omicsweave --project-dir examples/demo_project exchange build --experiment demo_glp1 --run "<运行ID>" --output results/exchange-demo --json
+omicsweave exchange verify examples/demo_project/results/exchange-demo --json
+$env:OMICSWEAVE_MCP_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(32))"
+omicsweave mcp serve --transport streamable-http --exchange-dir examples/demo_project/results/exchange-demo --port 8765
+```
+
+- 构建只创建新目录，最后写入 `exchange.json`；出现中断时可核验目录是否已有完整清单。采用 `--trial` 选择试验时，交换对象为该试验的确切结果包。
+- 以 `omicsweave exchange schema` 查看 JSON Schema，或使用仓库中的 [交换 Schema](../../../schemas/evidence-exchange/v1/exchange.schema.json)。HTTP 在 `omicsweave://exchange/schema` 与 `omicsweave://exchange/bundle` 提供 Schema 和交换清单。
+- HTTP 客户端连到 `http://127.0.0.1:8765/mcp` 并附加 Bearer 凭据。试点工具 `query_exchange_table` 以登记的相对表路径查询，经列白名单投影后分页返回汇总表。矩阵、特征明细和完整数据集来源保留在需经人工审阅的本地文件包内。
+- 静态 Bearer 凭据的使用范围是本机回环。跨机服务的目标客户端认证、项目授权、独立审计及 Linux 验收属于正式部署门槛。正式 TheraWeave 消费需要显式采用新交换配置文件并做读取方往返验证。[MCP 传输规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) · [MCP 授权规范](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+
+### 3.2 stdio 项目资源
 
 Resources 用于提供稳定、可缓存、只读的结构化上下文，避免 Agent 反复通过 Tool 拉取大段静态配置或 Schema。所有资源均返回 `application/json`。
 
